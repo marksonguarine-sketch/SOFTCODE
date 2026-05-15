@@ -1293,7 +1293,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── MAINTENANCE (backup/restore) ──────────────────────
   app.get("/api/maintenance/backup", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
-      const [items, customers, orders, payments, inventoryLogs, accounts, ledger, settings, systemLogs] =
+      const [items, customers, orders, payments, inventoryLogs, accounts, ledger, settings, systemLogs, users] =
         await Promise.all([
           Item.find().lean(),
           Customer.find().lean(),
@@ -1304,10 +1304,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           GeneralLedgerEntry.find().lean(),
           Settings.find().lean(),
           SystemLog.find().lean(),
+          User.find().lean(),
         ]);
 
       await logAction("BACKUP_CREATED", req.user!.username);
-      return ok(res, { items, customers, orders, payments, inventoryLogs, accounts, ledger, settings, systemLogs, exportDate: new Date() });
+      return ok(res, { items, customers, orders, payments, inventoryLogs, accounts, ledger, settings, systemLogs, users, exportDate: new Date() });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -1519,14 +1520,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!hasRequired) return fail(res, 400, "Backup file must contain valid data (items, orders, etc.)");
 
       await Promise.all([
-        backupData.items?.length > 0 ? Item.deleteMany({}).then(() => Item.insertMany(backupData.items)) : Promise.resolve(),
-        backupData.customers?.length > 0 ? Customer.deleteMany({}).then(() => Customer.insertMany(backupData.customers)) : Promise.resolve(),
-        backupData.orders?.length > 0 ? Order.deleteMany({}).then(() => Order.insertMany(backupData.orders)) : Promise.resolve(),
-        backupData.payments?.length > 0 ? BillingPayment.deleteMany({}).then(() => BillingPayment.insertMany(backupData.payments)) : Promise.resolve(),
-        backupData.inventoryLogs?.length > 0 ? InventoryLog.deleteMany({}).then(() => InventoryLog.insertMany(backupData.inventoryLogs)) : Promise.resolve(),
-        backupData.accounts?.length > 0 ? AccountingAccount.deleteMany({}).then(() => AccountingAccount.insertMany(backupData.accounts)) : Promise.resolve(),
-        backupData.ledger?.length > 0 ? GeneralLedgerEntry.deleteMany({}).then(() => GeneralLedgerEntry.insertMany(backupData.ledger)) : Promise.resolve(),
-        backupData.settings?.length > 0 ? Settings.deleteMany({}).then(() => Settings.insertMany(backupData.settings)) : Promise.resolve(),
+        backupData.items?.length > 0 ? Item.deleteMany({}).then(() => Item.insertMany(backupData.items, { ordered: false })) : Promise.resolve(),
+        backupData.customers?.length > 0 ? Customer.deleteMany({}).then(() => Customer.insertMany(backupData.customers, { ordered: false })) : Promise.resolve(),
+        backupData.orders?.length > 0 ? Order.deleteMany({}).then(() => Order.insertMany(backupData.orders, { ordered: false })) : Promise.resolve(),
+        backupData.payments?.length > 0 ? BillingPayment.deleteMany({}).then(() => BillingPayment.insertMany(backupData.payments, { ordered: false })) : Promise.resolve(),
+        backupData.inventoryLogs?.length > 0 ? InventoryLog.deleteMany({}).then(() => InventoryLog.insertMany(backupData.inventoryLogs, { ordered: false })) : Promise.resolve(),
+        backupData.accounts?.length > 0 ? AccountingAccount.deleteMany({}).then(() => AccountingAccount.insertMany(backupData.accounts, { ordered: false })) : Promise.resolve(),
+        backupData.ledger?.length > 0 ? GeneralLedgerEntry.deleteMany({}).then(() => GeneralLedgerEntry.insertMany(backupData.ledger, { ordered: false })) : Promise.resolve(),
+        backupData.settings?.length > 0 ? Settings.deleteMany({}).then(() => Settings.insertMany(backupData.settings, { ordered: false })) : Promise.resolve(),
+        backupData.users?.length > 0 ? User.deleteMany({}).then(() => User.insertMany(backupData.users, { ordered: false })) : Promise.resolve(),
       ]);
 
       await logAction("BACKUP_RESTORED", req.user!.username, "", { collections: Object.keys(backupData) });

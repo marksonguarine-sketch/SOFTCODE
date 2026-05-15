@@ -10,6 +10,8 @@ import {
   Settings,
   ChevronDown,
   AlertTriangle,
+  ArrowRightLeft,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -317,6 +319,53 @@ export default function MaintenancePage() {
                 )}
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-blue-200 dark:border-blue-800">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <ArrowRightLeft className="h-4 w-4 text-blue-600" /> Database Migration Guide
+            </CardTitle>
+            <CardDescription>
+              How to move all your data to a new MongoDB database (e.g. switching from one Atlas cluster to another).
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ol className="space-y-3 text-sm">
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold text-xs">1</span>
+                <div>
+                  <p className="font-medium">Download a backup from your current database</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">Click <strong>Download Backup</strong> above. Save the <code>.json</code> file — it contains all your items, orders, customers, users, and settings.</p>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold text-xs">2</span>
+                <div>
+                  <p className="font-medium">Update <code>MONGODB_URI</code> to the new database URL</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">Go to your environment secrets and change <code>MONGODB_URI</code> to your new MongoDB connection string, then restart the app.</p>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold text-xs">3</span>
+                <div>
+                  <p className="font-medium">Log in with the default admin credentials</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">The new empty database is automatically seeded with a default admin account: <strong>username: admin</strong> / <strong>password: admin123</strong>.</p>
+                </div>
+              </li>
+              <li className="flex gap-3">
+                <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold text-xs">4</span>
+                <div>
+                  <p className="font-medium">Upload the backup file to restore all data</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">Click <strong>Upload Backup</strong> above, select the <code>.json</code> file you saved in Step 1, confirm, and all your data — including your original users, items, orders, and settings — will be fully restored.</p>
+                </div>
+              </li>
+            </ol>
+            <div className="mt-4 flex items-start gap-2 p-2.5 rounded-md bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 text-xs text-green-800 dark:text-green-300">
+              <CheckCircle2 className="h-4 w-4 flex-shrink-0 mt-0.5" />
+              <span>Your original passwords and all user accounts are preserved in the backup and restored automatically.</span>
+            </div>
           </CardContent>
         </Card>
 

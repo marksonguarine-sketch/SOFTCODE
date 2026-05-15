@@ -23,3 +23,17 @@
 
 ### Removed
 - Manual "Reorder Level" number input from the Add Item form — users no longer set this directly; it is always derived from the formula
+
+---
+
+## [2026-05-15] — Backup & Database Migration
+
+### Added
+- **Database Migration Guide** panel in Maintenance page — step-by-step instructions for migrating all data to a new MongoDB database (change `MONGODB_URI`, log in with default admin, upload backup to restore)
+- **Users included in backup** — the manual Download Backup now includes all user accounts (with hashed passwords) so they are fully restored when uploading to a new database
+- **Users restored on upload** — the Upload Backup / Restore now also restores the `users` collection, so all accounts and passwords carry over to the new database
+
+### Changed
+- **Backup download** (`GET /api/maintenance/backup`) — now includes the `users` collection in the exported JSON alongside items, orders, customers, settings, etc.
+- **Backup restore** (`POST /api/maintenance/backup/upload`) — now restores the `users` collection in addition to all other collections; uses `ordered: false` for more resilient bulk inserts
+- **JSON body size limit** raised from 100 KB to **50 MB** on the server — allows large backup files to be uploaded without request rejection
