@@ -930,13 +930,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── ORDERS ─────────────────────────────────────────────
   app.get("/api/orders", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const { status, search, page = "1", pageSize = "20" } = req.query as Record<string, string>;
+      const { status, search, page = "1", pageSize = "20", assignedTo, assignedToMe } = req.query as Record<string, string>;
       const filter: any = {};
       if (status) filter.currentStatus = status;
       if (search) filter.$or = [
         { trackingNumber: { $regex: search, $options: "i" } },
         { customerName: { $regex: search, $options: "i" } },
       ];
+      if (assignedToMe === "true") filter.assignedTo = req.user!.username;
+      else if (assignedTo) filter.assignedTo = assignedTo;
 
       const skip = (parseInt(page) - 1) * parseInt(pageSize);
       const [orders, total] = await Promise.all([
@@ -944,6 +946,100 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         Order.countDocuments(filter),
       ]);
       return ok(res, { orders, total, page: parseInt(page), pageSize: parseInt(pageSize) });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── ORDER LOCKING ──────────────────────────────────────
+  app.post("/api/orders/:id/lock", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+
+      const now = new Date();
+      const LOCK_TIMEOUT_MS = 3 * 60 * 1000;
+
+      const lockIsStale = !order.lockLastSeen || (now.getTime() - new Date(order.lockLastSeen).getTime() > LOCK_TIMEOUT_MS);
+      const lockedByOther = order.lockedBy && order.lockedBy !== req.user!.username;
+
+      if (lockedByOther && !lockIsStale) {
+        return ok(res, {
+          locked: true,
+          lockedBy: order.lockedBy,
+          lockStartedAt: order.lockStartedAt,
+          lockLastSeen: order.lockLastSeen,
+        });
+      }
+
+      if (!order.lockedBy || order.lockedBy !== req.user!.username) {
+        order.lockStartedAt = now;
+      }
+      order.lockedBy = req.user!.username;
+      order.lockLastSeen = now;
+      await order.save();
+      return ok(res, { locked: false });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.delete("/api/orders/:id/lock", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      if (order.lockedBy === req.user!.username) {
+        order.lockedBy = "";
+        order.lockStartedAt = undefined;
+        order.lockLastSeen = undefined;
+        await order.save();
+      }
+      return ok(res, { message: "Lock released" });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.post("/api/orders/:id/takeover", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      const now = new Date();
+      order.lockedBy = req.user!.username;
+      order.lockStartedAt = now;
+      order.lockLastSeen = now;
+      await order.save();
+      await logAction("ORDER_TAKEOVER", req.user!.username, order.trackingNumber, { previousHolder: order.lockedBy });
+      return ok(res, { locked: false });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── ORDER ASSIGNMENT ───────────────────────────────────
+  app.post("/api/orders/:id/assign", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const { username, displayName } = req.body;
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      order.assignedTo = username || "";
+      order.assignedToName = displayName || username || "";
+      order.assignedAt = username ? new Date() : undefined;
+      order.assignedBy = username ? req.user!.username : "";
+      await order.save();
+      await logAction("ORDER_ASSIGNED", req.user!.username, order.trackingNumber, { assignedTo: username || "unassigned" });
+      emitEvent("ORDER_ASSIGNED", { orderId: order._id });
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── USERS SIMPLE LIST (for dropdowns) ─────────────────
+  app.get("/api/users/simple", authMiddleware, adminOnly, async (_req: AuthRequest, res: Response) => {
+    try {
+      const users = await User.find({ isActive: true }).select("username role").sort({ role: 1, username: 1 }).lean();
+      return ok(res, users);
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

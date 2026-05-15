@@ -186,6 +186,13 @@ export interface IOrder {
   currentStatus: OrderStatusType;
   statusHistory: IStatusEntry[];
   address?: IOrderAddress;
+  lockedBy?: string;
+  lockStartedAt?: string;
+  lockLastSeen?: string;
+  assignedTo?: string;
+  assignedToName?: string;
+  assignedAt?: string;
+  assignedBy?: string;
   createdAt: string;
   updatedAt: string;
 }

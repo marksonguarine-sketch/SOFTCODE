@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useRoute, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
@@ -12,10 +12,16 @@ import {
   CheckCircle,
   MapPin,
   Navigation,
+  Lock,
+  UserCheck,
+  AlertTriangle,
+  User,
+  RefreshCw,
 } from "lucide-react";
 import { logPaymentSchema, type LogPaymentInput, type IOrder } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -24,17 +30,15 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { GoogleMap, useJsApiLoader, MarkerF } from "@react-google-maps/api";
 
 function OrderAddressMap({ address, apiKey }: { address: { street: string; unitNumber: string; city: string; province: string; zipCode: string }; apiKey: string }) {
-  const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: apiKey,
-  });
-
+  const { isLoaded } = useJsApiLoader({ googleMapsApiKey: apiKey });
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [mapError, setMapError] = useState(false);
   const geocoded = useRef(false);
-
   const fullAddress = [address.unitNumber, address.street, address.city, address.province, address.zipCode].filter(Boolean).join(", ") + ", Philippines";
 
   const onMapLoad = useCallback((map: google.maps.Map) => {
@@ -69,12 +73,7 @@ function OrderAddressMap({ address, apiKey }: { address: { street: string; unitN
         center={coords || { lat: 14.5995, lng: 120.9842 }}
         zoom={coords ? 16 : 6}
         onLoad={onMapLoad}
-        options={{
-          mapTypeControl: true,
-          streetViewControl: true,
-          fullscreenControl: true,
-          zoomControl: true,
-        }}
+        options={{ mapTypeControl: true, streetViewControl: true, fullscreenControl: true, zoomControl: true }}
       >
         {coords && <MarkerF position={coords} title={fullAddress} />}
       </GoogleMap>
@@ -99,37 +98,84 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge className={colorMap[status] || ""}>{status}</Badge>;
 }
 
+function fmt12(d: string | Date | undefined) {
+  if (!d) return "—";
+  return new Date(d).toLocaleString("en-US", {
+    month: "2-digit", day: "2-digit", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+}
+
+interface LockInfo {
+  locked: boolean;
+  lockedBy?: string;
+  lockStartedAt?: string;
+  lockLastSeen?: string;
+}
+
 export default function OrderDetailPage() {
   const { toast } = useToast();
+  const { user, isAdmin } = useAuth();
   const [, navigate] = useLocation();
   const [match, params] = useRoute("/orders/:id");
   const orderId = params?.id;
 
+  const [lockInfo, setLockInfo] = useState<LockInfo | null>(null);
+  const [assignTarget, setAssignTarget] = useState("");
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const { data: orderData, isLoading } = useQuery<{ success: boolean; data: { order: IOrder; payments: any[] } }>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
+    refetchInterval: 15000,
   });
 
   const { data: mapsKeyData } = useQuery<{ success: boolean; data: { key: string } }>({
     queryKey: ["/api/config/maps-key"],
   });
-  const mapsApiKey = mapsKeyData?.data?.key || "";
+
+  const { data: usersData } = useQuery<{ success: boolean; data: { username: string; role: string }[] }>({
+    queryKey: ["/api/users/simple"],
+    enabled: isAdmin,
+  });
 
   const order = orderData?.data?.order;
+  const mapsApiKey = mapsKeyData?.data?.key || "";
+  const allUsers = usersData?.data || [];
+
+  const acquireLock = useCallback(async () => {
+    if (!orderId) return;
+    try {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/lock`);
+      const data = await res.json();
+      if (data.success) setLockInfo(data.data);
+    } catch {
+      /* ignore */
+    }
+  }, [orderId]);
+
+  const releaseLock = useCallback(() => {
+    if (!orderId) return;
+    navigator.sendBeacon(`/api/orders/${orderId}/lock-release`);
+    apiRequest("DELETE", `/api/orders/${orderId}/lock`).catch(() => {});
+  }, [orderId]);
+
+  useEffect(() => {
+    if (!orderId) return;
+    acquireLock();
+    heartbeatRef.current = setInterval(acquireLock, 90000);
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      releaseLock();
+    };
+  }, [orderId, acquireLock, releaseLock]);
 
   const formatCurrency = (v: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
   const formatDate = (d: string) => new Date(d).toLocaleString("en-PH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
   const paymentForm = useForm<LogPaymentInput>({
     resolver: zodResolver(logPaymentSchema),
-    defaultValues: {
-      orderId: orderId || "",
-      paymentMethod: "GCash",
-      gcashNumber: "",
-      gcashReferenceNumber: "",
-      amountPaid: 0,
-      proofNote: "",
-    },
+    defaultValues: { orderId: orderId || "", paymentMethod: "GCash", gcashNumber: "", gcashReferenceNumber: "", amountPaid: 0, proofNote: "" },
   });
 
   const payMutation = useMutation({
@@ -159,6 +205,31 @@ export default function OrderDetailPage() {
     onError: (err: Error) => toast({ title: "Release failed", description: err.message, variant: "destructive" }),
   });
 
+  const takeoverMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/takeover`);
+      return res.json();
+    },
+    onSuccess: () => {
+      setLockInfo(null);
+      toast({ title: "You have taken over this order" });
+    },
+    onError: (err: Error) => toast({ title: "Takeover failed", description: err.message, variant: "destructive" }),
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: async ({ username, displayName }: { username: string; displayName: string }) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/assign`, { username, displayName });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Order assigned successfully" });
+    },
+    onError: (err: Error) => toast({ title: "Assign failed", description: err.message, variant: "destructive" }),
+  });
+
   if (isLoading) {
     return (
       <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
@@ -179,8 +250,95 @@ export default function OrderDetailPage() {
     );
   }
 
+  const isLockedByOther = lockInfo?.locked && lockInfo.lockedBy !== user?.username;
+
   return (
     <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+
+      {/* Lock overlay dialog */}
+      <Dialog open={!!isLockedByOther} onOpenChange={() => {}}>
+        <DialogContent className="max-w-md" onPointerDownOutside={(e) => e.preventDefault()}>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <Lock className="h-5 w-5" /> Order In Progress
+            </DialogTitle>
+            <DialogDescription>
+              This order is currently being processed by another user.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 p-4 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900">
+                  <User className="h-5 w-5 text-amber-700 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="font-semibold text-sm">{lockInfo?.lockedBy}</p>
+                  <p className="text-xs text-muted-foreground">is processing this order</p>
+                </div>
+              </div>
+              <Separator />
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Time Started</p>
+                  <p className="font-medium mt-0.5">{fmt12(lockInfo?.lockStartedAt)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Last Active</p>
+                  <p className="font-medium mt-0.5">{fmt12(lockInfo?.lockLastSeen)}</p>
+                </div>
+              </div>
+            </div>
+
+            {isAdmin && (
+              <div className="space-y-3 pt-1">
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Admin Actions</p>
+                <Button
+                  variant="destructive"
+                  className="w-full"
+                  onClick={() => takeoverMutation.mutate()}
+                  disabled={takeoverMutation.isPending}
+                >
+                  {takeoverMutation.isPending ? <Loader2 className="animate-spin mr-2 h-4 w-4" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                  Take Over Order
+                </Button>
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">Or assign this order to another staff member:</p>
+                  <div className="flex gap-2">
+                    <Select value={assignTarget} onValueChange={setAssignTarget}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder="Select staff member" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {allUsers.map((u) => (
+                          <SelectItem key={u.username} value={u.username}>
+                            {u.username} <span className="text-muted-foreground text-xs ml-1">({u.role})</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      disabled={!assignTarget || assignMutation.isPending}
+                      onClick={() => {
+                        const found = allUsers.find((u) => u.username === assignTarget);
+                        assignMutation.mutate({ username: assignTarget, displayName: found?.username || assignTarget });
+                      }}
+                    >
+                      {assignMutation.isPending ? <Loader2 className="animate-spin h-4 w-4" /> : "Assign"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <Button variant="ghost" className="w-full" onClick={() => navigate("/orders")}>
+              <ArrowLeft className="mr-2 h-4 w-4" /> Go Back to Orders
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <div className="flex items-center gap-4 flex-wrap">
         <Button variant="ghost" onClick={() => navigate("/orders")} data-testid="button-back-orders">
           <ArrowLeft className="mr-1" /> Back
@@ -385,6 +543,81 @@ export default function OrderDetailPage() {
         </div>
 
         <div className="space-y-6">
+          {/* Assignment panel */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <UserCheck className="h-4 w-4" /> Assignment
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {order.assignedTo ? (
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">{order.assignedToName || order.assignedTo}</p>
+                  {order.assignedAt && (
+                    <p className="text-xs text-muted-foreground">Assigned {fmt12(order.assignedAt)}</p>
+                  )}
+                  {order.assignedBy && (
+                    <p className="text-xs text-muted-foreground">by {order.assignedBy}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Not assigned to anyone</p>
+              )}
+              {isAdmin && (
+                <div className="space-y-2 pt-1">
+                  <Select
+                    value={assignTarget || order.assignedTo || ""}
+                    onValueChange={setAssignTarget}
+                  >
+                    <SelectTrigger className="w-full" data-testid="select-assign-user">
+                      <SelectValue placeholder="Assign to..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__unassign__">— Unassign —</SelectItem>
+                      {allUsers.map((u) => (
+                        <SelectItem key={u.username} value={u.username}>
+                          {u.username} <span className="text-muted-foreground text-xs">({u.role})</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    className="w-full"
+                    disabled={!assignTarget || assignMutation.isPending}
+                    onClick={() => {
+                      const target = assignTarget === "__unassign__" ? "" : assignTarget;
+                      const found = allUsers.find((u) => u.username === target);
+                      assignMutation.mutate({ username: target, displayName: found?.username || target });
+                      setAssignTarget("");
+                    }}
+                    data-testid="button-save-assign"
+                  >
+                    {assignMutation.isPending ? <Loader2 className="animate-spin mr-1 h-3 w-3" /> : null}
+                    Save Assignment
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Lock status */}
+          {order.lockedBy && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Lock className="h-4 w-4" /> Active Processor
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-1.5 text-sm">
+                <p className="font-medium">{order.lockedBy}</p>
+                <p className="text-xs text-muted-foreground">Started: {fmt12(order.lockStartedAt)}</p>
+                <p className="text-xs text-muted-foreground">Last active: {fmt12(order.lockLastSeen)}</p>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Status Timeline</CardTitle>

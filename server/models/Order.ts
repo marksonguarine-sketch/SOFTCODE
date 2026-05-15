@@ -34,6 +34,13 @@ export interface IOrderDoc extends Document {
   currentStatus: string;
   statusHistory: IStatusEntrySub[];
   address?: IAddressSub;
+  lockedBy: string;
+  lockStartedAt?: Date;
+  lockLastSeen?: Date;
+  assignedTo: string;
+  assignedToName: string;
+  assignedAt?: Date;
+  assignedBy: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,11 +88,19 @@ const orderSchema = new Schema<IOrderDoc>(
       required: false,
       default: undefined,
     },
+    lockedBy: { type: String, default: "" },
+    lockStartedAt: { type: Date },
+    lockLastSeen: { type: Date },
+    assignedTo: { type: String, default: "" },
+    assignedToName: { type: String, default: "" },
+    assignedAt: { type: Date },
+    assignedBy: { type: String, default: "" },
   },
   { timestamps: true }
 );
 
 orderSchema.index({ currentStatus: 1 });
 orderSchema.index({ createdAt: -1 });
+orderSchema.index({ assignedTo: 1 });
 
 export default mongoose.model<IOrderDoc>("Order", orderSchema);
