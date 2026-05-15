@@ -165,8 +165,13 @@ export default function InventoryPage() {
 
   const addForm = useForm<CreateItemInput>({
     resolver: zodResolver(createItemSchema),
-    defaultValues: { itemName: "", category: "", supplierName: "", unitPrice: 0, currentQuantity: 0, reorderLevel: 5 },
+    defaultValues: { itemName: "", category: "", supplierName: "", unitPrice: 0, currentQuantity: 0, avgDailyUsage: 0, leadTimeDays: 0, safetyStock: 0 },
   });
+
+  const watchedAvgDailyUsage = addForm.watch("avgDailyUsage") || 0;
+  const watchedLeadTimeDays = addForm.watch("leadTimeDays") || 0;
+  const watchedSafetyStock = addForm.watch("safetyStock") || 0;
+  const computedReorderLevel = Math.ceil((watchedAvgDailyUsage * watchedLeadTimeDays) + watchedSafetyStock);
 
   const addMutation = useMutation({
     mutationFn: async (data: CreateItemInput) => {
@@ -593,7 +598,7 @@ export default function InventoryPage() {
                   </FormItem>
                 )} />
               </div>
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 gap-4">
                 <FormField control={addForm.control} name="unitPrice" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Unit Price</FormLabel>
@@ -608,13 +613,36 @@ export default function InventoryPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
-                <FormField control={addForm.control} name="reorderLevel" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Reorder Level</FormLabel>
-                    <FormControl><Input type="number" {...field} onChange={(e) => field.onChange(parseInt(e.target.value) || 0)} data-testid="input-item-reorder" /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+              </div>
+              <div className="rounded-md border border-dashed p-3 space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Reorder Point Formula</p>
+                <div className="grid grid-cols-3 gap-3">
+                  <FormField control={addForm.control} name="avgDailyUsage" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Avg Daily Usage</FormLabel>
+                      <FormControl><Input type="number" step="0.1" min={0} {...field} onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-item-avg-usage" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={addForm.control} name="leadTimeDays" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Lead Time (Days)</FormLabel>
+                      <FormControl><Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-item-lead-time" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={addForm.control} name="safetyStock" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs">Safety Stock</FormLabel>
+                      <FormControl><Input type="number" min={0} {...field} onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-item-safety-stock" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+                <div className="flex items-center justify-between rounded-sm bg-muted px-3 py-1.5">
+                  <span className="text-xs text-muted-foreground">(Avg Daily Usage × Lead Time) + Safety Stock</span>
+                  <span className="text-sm font-bold tabular-nums">Reorder Point: {computedReorderLevel}</span>
+                </div>
               </div>
               <Button type="submit" className="w-full" disabled={addMutation.isPending} data-testid="button-submit-item">
                 {addMutation.isPending && <Loader2 className="animate-spin mr-1" />}

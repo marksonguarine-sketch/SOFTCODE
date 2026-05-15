@@ -7,6 +7,9 @@ export interface IItemDoc extends Document {
   unitPrice: number;
   currentQuantity: number;
   reorderLevel: number;
+  avgDailyUsage: number;
+  leadTimeDays: number;
+  safetyStock: number;
   barcode: string;
   imageFilename: string;
   imagePending: boolean;
@@ -23,7 +26,10 @@ const itemSchema = new Schema<IItemDoc>(
     supplierName: { type: String, default: "" },
     unitPrice: { type: Number, required: true, min: 0 },
     currentQuantity: { type: Number, required: true, default: 0 },
-    reorderLevel: { type: Number, default: 10 },
+    avgDailyUsage: { type: Number, default: 0, min: 0 },
+    leadTimeDays: { type: Number, default: 0, min: 0 },
+    safetyStock: { type: Number, default: 0, min: 0 },
+    reorderLevel: { type: Number, default: 0 },
     barcode: { type: String, default: "" },
     imageFilename: { type: String, default: "" },
     imagePending: { type: Boolean, default: false },

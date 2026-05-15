@@ -38,7 +38,9 @@ export const createItemSchema = z.object({
   supplierName: z.string().optional().default(""),
   unitPrice: z.number().min(0, "Unit price must be positive"),
   currentQuantity: z.number().int().min(0, "Quantity must be non-negative"),
-  reorderLevel: z.number().int().min(0, "Reorder level must be non-negative"),
+  avgDailyUsage: z.number().min(0, "Average daily usage must be non-negative").default(0),
+  leadTimeDays: z.number().min(0, "Lead time must be non-negative").default(0),
+  safetyStock: z.number().min(0, "Safety stock must be non-negative").default(0),
 });
 export type CreateItemInput = z.infer<typeof createItemSchema>;
 

@@ -815,7 +815,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const parsed = createItemSchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
 
-      const item = await Item.create(parsed.data);
+      const { avgDailyUsage, leadTimeDays, safetyStock } = parsed.data;
+      const reorderLevel = Math.ceil((avgDailyUsage * leadTimeDays) + safetyStock);
+
+      const item = await Item.create({ ...parsed.data, reorderLevel });
 
       if (item.currentQuantity > 0) {
         await InventoryLog.create({
