@@ -14,6 +14,7 @@ import {
   HelpCircle,
   Info,
   Hammer,
+  Tag,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -39,6 +40,10 @@ const mainNavItems = [
   { title: "Billing", url: "/billing", icon: CreditCard },
   { title: "Accounting", url: "/accounting", icon: BookOpen },
   { title: "Reports", url: "/reports", icon: BarChart3 },
+];
+
+const adminOnlyNavItems = [
+  { title: "Offers", url: "/offers", icon: Tag },
 ];
 
 const adminNavItems = [
@@ -100,6 +105,16 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {mainNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
+                    <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
+                      <item.icon />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+              {isAdmin && adminOnlyNavItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
                     <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>

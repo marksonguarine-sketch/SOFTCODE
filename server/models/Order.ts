@@ -3,8 +3,11 @@ import mongoose, { Schema, Document } from "mongoose";
 export interface IOrderItemSub {
   itemId: mongoose.Types.ObjectId;
   itemName: string;
-  quantity: number;
-  unitPrice: number;
+  qty: number;
+  originalUnitPrice: number;
+  discountedUnitPrice: number;
+  discountApplied: boolean;
+  offerName: string;
   lineTotal: number;
 }
 
@@ -29,8 +32,16 @@ export interface IOrderDoc extends Document {
   customerName: string;
   items: IOrderItemSub[];
   totalAmount: number;
+  subtotal: number;
+  deliveryFee: number;
+  orderType: string;
+  orderChannel: string;
+  paymentStatus: string;
+  paymentMethod: string;
+  fulfillmentStatus: string;
   sourceChannel: string;
   notes: string;
+  scheduledDate?: Date;
   currentStatus: string;
   statusHistory: IStatusEntrySub[];
   address?: IAddressSub;
@@ -49,8 +60,11 @@ const orderItemSchema = new Schema<IOrderItemSub>(
   {
     itemId: { type: Schema.Types.ObjectId, ref: "Item", required: true },
     itemName: { type: String, required: true },
-    quantity: { type: Number, required: true, min: 1 },
-    unitPrice: { type: Number, required: true, min: 0 },
+    qty: { type: Number, required: true, min: 1 },
+    originalUnitPrice: { type: Number, required: true, min: 0 },
+    discountedUnitPrice: { type: Number, required: true, min: 0 },
+    discountApplied: { type: Boolean, default: false },
+    offerName: { type: String, default: "" },
     lineTotal: { type: Number, required: true },
   },
   { _id: false }
@@ -73,9 +87,37 @@ const orderSchema = new Schema<IOrderDoc>(
     customerName: { type: String, required: true },
     items: [orderItemSchema],
     totalAmount: { type: Number, required: true },
-    sourceChannel: { type: String, default: "walk-in" },
+    subtotal: { type: Number, default: 0 },
+    deliveryFee: { type: Number, default: 0 },
+    orderType: {
+      type: String,
+      enum: ["online_delivery", "online_pickup", "walkin_delivery", "walkin_pickup", "online_reservation", "walkin_reservation"],
+      default: "walkin_pickup",
+    },
+    orderChannel: {
+      type: String,
+      enum: ["walkin", "email", "sms", "messenger", "phone"],
+      default: "walkin",
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["pending_payment", "partial", "paid", "refunded"],
+      default: "pending_payment",
+    },
+    paymentMethod: {
+      type: String,
+      enum: ["cash", "gcash", "cod", "gcash_qr", "bank"],
+      default: "cash",
+    },
+    fulfillmentStatus: {
+      type: String,
+      enum: ["pending", "processing", "ready", "out_for_delivery", "completed", "cancelled"],
+      default: "pending",
+    },
+    sourceChannel: { type: String, default: "walkin" },
     notes: { type: String, default: "" },
-    currentStatus: { type: String, default: "Pending Payment" },
+    scheduledDate: { type: Date },
+    currentStatus: { type: String, default: "pending" },
     statusHistory: [statusEntrySchema],
     address: {
       type: {
@@ -99,7 +141,10 @@ const orderSchema = new Schema<IOrderDoc>(
   { timestamps: true }
 );
 
-orderSchema.index({ currentStatus: 1 });
+orderSchema.index({ fulfillmentStatus: 1 });
+orderSchema.index({ paymentStatus: 1 });
+orderSchema.index({ orderType: 1 });
+orderSchema.index({ orderChannel: 1 });
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ assignedTo: 1 });
 

@@ -34,7 +34,14 @@ import {
   inventoryLogSchema,
   settingsSchema,
   ledgerEntrySchema,
+  updateOrderStatusSchema,
+  bulkOrderStatusSchema,
+  quickPaySchema,
+  createOfferSchema,
+  updateOfferSchema,
+  ALLOWED_PAYMENT_METHODS,
 } from "@shared/schema";
+import Offer from "./models/Offer";
 
 let io: SocketIOServer;
 
@@ -105,7 +112,27 @@ async function performAutoBackup() {
   }
 }
 
-let autoBackupJob: cron.ScheduledTask | null = null;
+cron.schedule("0 0 * * *", async () => {
+  try {
+    const now = new Date();
+    const expiredOffers = await Offer.find({ isActive: true, endDate: { $lt: now } });
+    for (const offer of expiredOffers) {
+      offer.isActive = false;
+      await offer.save();
+      await SystemLog.create({
+        action: "OFFER_TOGGLED", actor: "system", target: offer.name,
+        metadata: { from: true, to: false, reason: "auto_expired" },
+      });
+    }
+    if (expiredOffers.length > 0) {
+      console.log(`[cron] Auto-deactivated ${expiredOffers.length} expired offer(s)`);
+    }
+  } catch (err) {
+    console.error("[cron] Offer expiry check failed:", err);
+  }
+});
+
+let autoBackupJob: ReturnType<typeof cron.schedule> | null = null;
 
 function setupAutoBackupScheduler(intervalValue: number, intervalUnit: string, enabled: boolean) {
   if (autoBackupJob) { autoBackupJob.stop(); autoBackupJob = null; }
@@ -213,6 +240,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
+      const now = new Date();
+      const sevenDaysLater = new Date(now.getTime() + 7 * 86400000);
 
       const [
         totalOrdersToday,
@@ -224,11 +253,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         activeUsers,
         totalItems,
         items,
+        paymentStatusAgg,
+        orderTypeAgg,
+        orderChannelAgg,
+        activeOffers,
+        recentOrdersDocs,
+        upcomingReservations,
       ] = await Promise.all([
         Order.countDocuments({ createdAt: { $gte: todayStart } }),
-        Order.countDocuments({ currentStatus: "Completed" }),
-        Order.countDocuments({ currentStatus: "Pending Payment" }),
-        Order.countDocuments({ currentStatus: { $in: ["Paid", "Pending Release"] } }),
+        Order.countDocuments({ fulfillmentStatus: "completed" }),
+        Order.countDocuments({ paymentStatus: "pending_payment" }),
+        Order.countDocuments({ fulfillmentStatus: { $in: ["ready", "processing"] } }),
         BillingPayment.aggregate([
           { $match: { paymentDate: { $gte: todayStart } } },
           { $group: { _id: null, total: { $sum: "$amountPaid" } } },
@@ -237,6 +272,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         UserSession.countDocuments({ isActive: true, lastActivity: { $gte: new Date(Date.now() - 3600000) } }),
         Item.countDocuments(),
         Item.find().lean(),
+        Order.aggregate([{ $group: { _id: "$paymentStatus", count: { $sum: 1 } } }]),
+        Order.aggregate([{ $group: { _id: "$orderType", count: { $sum: 1 } } }]),
+        Order.aggregate([{ $match: { createdAt: { $gte: todayStart } } }, { $group: { _id: "$orderChannel", count: { $sum: 1 } } }]),
+        Offer.find({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } }).select("name").lean(),
+        Order.find().sort({ createdAt: -1 }).limit(10).populate("customerId", "name phone").lean(),
+        Order.find({
+          orderType: { $in: ["online_reservation", "walkin_reservation"] },
+          fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+          scheduledDate: { $gte: now, $lte: sevenDaysLater },
+        }).sort({ scheduledDate: 1 }).limit(10).lean(),
       ]);
 
       const settings = await Settings.findOne();
@@ -246,6 +291,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const criticalStock = items.filter((i) => i.currentQuantity <= reorderThreshold).length;
       const lowStock = items.filter((i) => i.currentQuantity > reorderThreshold && i.currentQuantity <= lowStockThreshold).length;
       const totalInventoryValue = items.reduce((sum, i) => sum + i.unitPrice * i.currentQuantity, 0);
+
+      const paymentStatusCounts: Record<string, number> = {};
+      paymentStatusAgg.forEach((a: any) => { paymentStatusCounts[a._id || "unknown"] = a.count; });
+
+      const orderTypeCounts: Record<string, number> = {};
+      orderTypeAgg.forEach((a: any) => { orderTypeCounts[a._id || "unknown"] = a.count; });
+
+      const orderChannelCounts: Record<string, number> = {};
+      orderChannelAgg.forEach((a: any) => { orderChannelCounts[a._id || "unknown"] = a.count; });
 
       return ok(res, {
         totalOrdersToday,
@@ -259,6 +313,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         criticalStock,
         lowStock,
         totalInventoryValue,
+        paymentStatusCounts,
+        orderTypeCounts,
+        orderChannelCounts,
+        activeOffersCount: activeOffers.length,
+        activeOfferNames: activeOffers.map((o: any) => o.name),
+        recentOrders: recentOrdersDocs,
+        upcomingReservations,
       });
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -321,7 +382,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { period = "monthly" } = req.query as Record<string, string>;
       const now = new Date();
 
-      function getPeriodRange(p: string): { start: Date; prevStart: Date; groupFormat: string; labels: string[] } {
+      const getPeriodRange = (p: string): { start: Date; prevStart: Date; groupFormat: string; labels: string[] } => {
         const s = new Date(now);
         const ps = new Date(now);
         if (p === "daily") {
@@ -426,12 +487,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const ordMap: Record<string, { orders: number; orderValue: number }> = {};
       ordersByPeriod.forEach((o: any) => { ordMap[o._id] = { orders: o.orders, orderValue: o.orderValue }; });
 
-      function periodKey(i: number): string {
+      const periodKey = (i: number): string => {
         if (period === "daily") return String(i).padStart(2, "0");
         if (period === "weekly") return String(i);
         if (period === "monthly") return String(i + 1).padStart(2, "0");
         return String(i + 1).padStart(2, "0");
-      }
+      };
 
       const sparklineRevenue = range.labels.map((_, i) => revMap[periodKey(i)] || 0);
       const sparklineOrders = range.labels.map((_, i) => ordMap[periodKey(i)]?.orders || 0);
@@ -493,7 +554,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const totalSales = payments.reduce((sum, p) => sum + p.amountPaid, 0);
       const totalOrderValue = orders.reduce((sum, o) => sum + o.totalAmount, 0);
-      const uniqueCustomers = [...new Set(orders.map((o) => o.customerName?.toLowerCase()).filter(Boolean))];
+      const uniqueCustomers = Array.from(new Set(orders.map((o) => o.customerName?.toLowerCase()).filter(Boolean)));
 
       const channelBreakdown: Record<string, number> = {};
       orders.forEach((o) => {
@@ -725,7 +786,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { period = "monthly" } = req.query as Record<string, string>;
       const now = new Date();
 
-      function getPeriodRange(p: string): { start: Date } {
+      const getPeriodRange = (p: string): { start: Date } => {
         const s = new Date(now);
         if (p === "daily") {
           s.setHours(0, 0, 0, 0);
@@ -738,7 +799,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           s.setMonth(0, 1); s.setHours(0, 0, 0, 0);
         }
         return { start: s };
-      }
+      };
 
       const range = getPeriodRange(period);
 
@@ -930,15 +991,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── ORDERS ─────────────────────────────────────────────
   app.get("/api/orders", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const { status, search, page = "1", pageSize = "20", assignedTo, assignedToMe } = req.query as Record<string, string>;
+      const {
+        status, search, page = "1", pageSize = "20",
+        assignedTo, assignedToMe,
+        paymentStatus, orderType, orderChannel, fulfillmentStatus,
+        dateFrom, dateTo,
+      } = req.query as Record<string, string>;
       const filter: any = {};
       if (status) filter.currentStatus = status;
+      if (fulfillmentStatus) filter.fulfillmentStatus = fulfillmentStatus;
+      if (paymentStatus) filter.paymentStatus = paymentStatus;
+      if (orderType) filter.orderType = orderType;
+      if (orderChannel) filter.orderChannel = orderChannel;
       if (search) filter.$or = [
         { trackingNumber: { $regex: search, $options: "i" } },
         { customerName: { $regex: search, $options: "i" } },
       ];
       if (assignedToMe === "true") filter.assignedTo = req.user!.username;
       else if (assignedTo) filter.assignedTo = assignedTo;
+      if (dateFrom || dateTo) {
+        filter.createdAt = {};
+        if (dateFrom) filter.createdAt.$gte = new Date(dateFrom);
+        if (dateTo) filter.createdAt.$lte = new Date(dateTo + "T23:59:59.999Z");
+      }
 
       const skip = (parseInt(page) - 1) * parseInt(pageSize);
       const [orders, total] = await Promise.all([
@@ -1062,11 +1137,88 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
       if (!parsed.data.items || parsed.data.items.length === 0) return fail(res, 400, "At least one item is required");
 
-      const items = parsed.data.items.map((i) => ({
-        ...i,
-        lineTotal: i.quantity * i.unitPrice,
-      }));
-      const totalAmount = items.reduce((sum, i) => sum + i.lineTotal, 0);
+      const settings = await Settings.findOne();
+      const autoApply = settings?.autoApplyOffers !== false;
+
+      const now = new Date();
+      const activeOffers = autoApply
+        ? await Offer.find({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } }).lean()
+        : [];
+
+      const offerItemMap: Map<string, any> = new Map();
+      for (const offer of activeOffers) {
+        for (const oi of offer.items) {
+          const itemIdStr = oi.itemId.toString();
+          const existing = offerItemMap.get(itemIdStr);
+          if (!existing || oi.discountValue > existing.discountValue) {
+            offerItemMap.set(itemIdStr, { offer, offerItem: oi });
+          }
+        }
+      }
+
+      const offersUsed: Map<string, { offer: any; totalSavings: number }> = new Map();
+      let totalSavings = 0;
+
+      const processedItems = parsed.data.items.map((i) => {
+        const match = offerItemMap.get(i.itemId);
+        if (!match) {
+          return {
+            itemId: i.itemId,
+            itemName: i.itemName,
+            qty: i.qty,
+            originalUnitPrice: i.originalUnitPrice,
+            discountedUnitPrice: i.discountedUnitPrice,
+            discountApplied: i.discountApplied,
+            offerName: i.offerName,
+            lineTotal: i.lineTotal,
+          };
+        }
+
+        const { offer, offerItem } = match;
+        const orig = i.originalUnitPrice;
+        const qty = i.qty;
+        let discountedPrice = orig;
+        let lineTotal = orig * qty;
+
+        if (offer.offerType === "percentage_discount") {
+          discountedPrice = orig * (1 - offerItem.discountValue / 100);
+          lineTotal = discountedPrice * qty;
+        } else if (offer.offerType === "b1t1") {
+          discountedPrice = orig;
+          lineTotal = Math.ceil(qty / 2) * orig;
+        } else if (offer.offerType === "buy1_take_percentage") {
+          const pairs = Math.floor(qty / 2);
+          const remainder = qty % 2;
+          const secondPrice = orig * (1 - offerItem.discountValue / 100);
+          lineTotal = pairs * orig + pairs * secondPrice + remainder * orig;
+          discountedPrice = lineTotal / qty;
+        } else if (offer.offerType === "flat_discount") {
+          discountedPrice = Math.max(0, orig - offerItem.discountValue);
+          lineTotal = discountedPrice * qty;
+        }
+
+        const savings = orig * qty - lineTotal;
+        totalSavings += savings;
+
+        const offerId = offer._id.toString();
+        const existing = offersUsed.get(offerId);
+        if (existing) existing.totalSavings += savings;
+        else offersUsed.set(offerId, { offer, totalSavings: savings });
+
+        return {
+          itemId: i.itemId,
+          itemName: i.itemName,
+          qty,
+          originalUnitPrice: orig,
+          discountedUnitPrice: Math.round(discountedPrice * 100) / 100,
+          discountApplied: true,
+          offerName: offer.name,
+          lineTotal: Math.round(lineTotal * 100) / 100,
+        };
+      });
+
+      const subtotal = processedItems.reduce((sum, i) => sum + i.originalUnitPrice * i.qty, 0);
+      const totalAmount = processedItems.reduce((sum, i) => sum + i.lineTotal, 0) + (parsed.data.deliveryFee || 0);
       const trackingNumber = `JOAP-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
       const addressData = parsed.data.address;
@@ -1076,24 +1228,166 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         trackingNumber,
         ...(parsed.data.customerId ? { customerId: parsed.data.customerId } : {}),
         customerName: parsed.data.customerName,
-        items,
-        totalAmount,
-        sourceChannel: parsed.data.sourceChannel,
+        items: processedItems,
+        totalAmount: Math.round(totalAmount * 100) / 100,
+        subtotal: Math.round(subtotal * 100) / 100,
+        deliveryFee: parsed.data.deliveryFee || 0,
+        orderType: parsed.data.orderType,
+        orderChannel: parsed.data.orderChannel,
+        paymentStatus: parsed.data.paymentStatus,
+        paymentMethod: parsed.data.paymentMethod,
+        fulfillmentStatus: parsed.data.fulfillmentStatus,
+        sourceChannel: parsed.data.orderChannel,
         notes: parsed.data.notes,
-        currentStatus: "Pending Payment",
-        statusHistory: [{ status: "Pending Payment", timestamp: new Date(), actor: req.user!.username, note: "Order created" }],
+        scheduledDate: parsed.data.scheduledDate ? new Date(parsed.data.scheduledDate) : undefined,
+        currentStatus: parsed.data.fulfillmentStatus,
+        statusHistory: [{ status: parsed.data.fulfillmentStatus, timestamp: new Date(), actor: req.user!.username, note: "Order created" }],
         ...(hasAddress ? { address: addressData } : {}),
       });
 
-      await logAction("ORDER_CREATED", req.user!.username, order.trackingNumber, { totalAmount });
+      for (const oi of processedItems) {
+        const item = await Item.findById(oi.itemId);
+        if (item) {
+          item.currentQuantity = Math.max(0, item.currentQuantity - oi.qty);
+          await item.save();
+          await InventoryLog.create({
+            itemId: item._id, itemName: item.itemName, type: "deduction",
+            quantity: -oi.qty, reason: `Order ${trackingNumber}`, actor: req.user!.username,
+          });
+        }
+      }
+
+      for (const [offerId, { totalSavings: savings }] of Array.from(offersUsed)) {
+        await Offer.findByIdAndUpdate(offerId, {
+          $inc: { usageCount: 1, totalSavingsGenerated: savings },
+        });
+      }
+
+      await logAction("ORDER_CREATED", req.user!.username, order.trackingNumber, { totalAmount, totalSavings });
       emitEvent("ORDER_CREATED", { orderId: order._id });
-      return ok(res, order);
+      return ok(res, { order, totalSavings: Math.round(totalSavings * 100) / 100 });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.patch("/api/orders/:id/status", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const parsed = updateOrderStatusSchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
+
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+
+      const updates: Record<string, any> = {};
+      const statusEntries: any[] = [];
+
+      if (parsed.data.fulfillmentStatus && parsed.data.fulfillmentStatus !== order.fulfillmentStatus) {
+        const oldStatus = order.fulfillmentStatus;
+        updates.fulfillmentStatus = parsed.data.fulfillmentStatus;
+        updates.currentStatus = parsed.data.fulfillmentStatus;
+        statusEntries.push({ status: parsed.data.fulfillmentStatus, timestamp: new Date(), actor: req.user!.username, note: parsed.data.reason });
+        await logAction("ORDER_FULFILLMENT_STATUS_UPDATED", req.user!.username, order.trackingNumber, {
+          from: oldStatus, to: parsed.data.fulfillmentStatus, reason: parsed.data.reason,
+        });
+      }
+
+      if (parsed.data.paymentStatus && parsed.data.paymentStatus !== order.paymentStatus) {
+        const oldPayStatus = order.paymentStatus;
+        updates.paymentStatus = parsed.data.paymentStatus;
+        await logAction("ORDER_PAYMENT_STATUS_UPDATED", req.user!.username, order.trackingNumber, {
+          from: oldPayStatus, to: parsed.data.paymentStatus, reason: parsed.data.reason,
+        });
+      }
+
+      if (statusEntries.length > 0) updates.$push = { statusHistory: { $each: statusEntries } };
+
+      const { $push, ...setUpdates } = updates;
+      const updateOp: any = { $set: setUpdates };
+      if ($push) updateOp.$push = $push;
+
+      const updated = await Order.findByIdAndUpdate(req.params.id, updateOp, { new: true });
+      emitEvent("ORDER_STATUS_UPDATED", { orderId: order._id });
+      return ok(res, updated);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.post("/api/orders/bulk-status", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const parsed = bulkOrderStatusSchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 400, "Validation failed");
+
+      const orders = await Order.find({ _id: { $in: parsed.data.orderIds } });
+      if (orders.length === 0) return fail(res, 404, "No orders found");
+
+      const statusEntry = { status: parsed.data.fulfillmentStatus, timestamp: new Date(), actor: req.user!.username, note: parsed.data.reason };
+      await Order.updateMany(
+        { _id: { $in: parsed.data.orderIds } },
+        {
+          $set: { fulfillmentStatus: parsed.data.fulfillmentStatus, currentStatus: parsed.data.fulfillmentStatus },
+          $push: { statusHistory: statusEntry },
+        }
+      );
+
+      await logAction("BULK_ORDER_STATUS_UPDATED", req.user!.username, `${orders.length} orders`, {
+        to: parsed.data.fulfillmentStatus, count: orders.length,
+      });
+      emitEvent("ORDER_STATUS_UPDATED");
+      return ok(res, { updated: orders.length });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
   });
 
   // ─── BILLING & PAYMENT ─────────────────────────────────
+  app.post("/api/billing/quick-pay", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const parsed = quickPaySchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
+
+      const order = await Order.findById(parsed.data.orderId);
+      if (!order) return fail(res, 404, "Order not found");
+
+      const totalPaid = await BillingPayment.aggregate([
+        { $match: { orderId: order._id.toString() } },
+        { $group: { _id: null, total: { $sum: "$amountPaid" } } },
+      ]);
+      const alreadyPaid = totalPaid[0]?.total || 0;
+      const remaining = order.totalAmount - alreadyPaid;
+
+      const payment = await BillingPayment.create({
+        orderId: parsed.data.orderId,
+        paymentMethod: parsed.data.paymentMethod,
+        gcashNumber: "",
+        gcashReferenceNumber: parsed.data.gcashReferenceNumber || "",
+        amountPaid: parsed.data.amount,
+        paymentDate: new Date(),
+        proofNote: parsed.data.note || "",
+        loggedBy: req.user!.username,
+      });
+
+      const newTotalPaid = alreadyPaid + parsed.data.amount;
+      let newPaymentStatus = order.paymentStatus;
+      if (newTotalPaid >= order.totalAmount) {
+        newPaymentStatus = "paid";
+      } else if (newTotalPaid > 0) {
+        newPaymentStatus = "partial";
+      }
+
+      await Order.findByIdAndUpdate(parsed.data.orderId, { paymentStatus: newPaymentStatus });
+
+      await logAction("QUICK_PAYMENT_RECORDED", req.user!.username, order.trackingNumber, {
+        amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, newPaymentStatus,
+      });
+      emitEvent("PAYMENT_LOGGED", { orderId: order._id });
+      return ok(res, { payment, newPaymentStatus, remaining: Math.max(0, remaining - parsed.data.amount) });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   app.get("/api/billing", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const { page = "1", pageSize = "20" } = req.query as Record<string, string>;
@@ -1162,8 +1456,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const insufficientItems: string[] = [];
       for (const oi of order.items) {
         const item = await Item.findById(oi.itemId);
-        if (!item || item.currentQuantity < oi.quantity) {
-          insufficientItems.push(`${oi.itemName}: need ${oi.quantity}, have ${item?.currentQuantity ?? 0}`);
+        const qty = (oi as any).qty ?? (oi as any).quantity ?? 0;
+        if (!item || item.currentQuantity < qty) {
+          insufficientItems.push(`${oi.itemName}: need ${qty}, have ${item?.currentQuantity ?? 0}`);
         }
       }
       if (insufficientItems.length > 0) {
@@ -1172,14 +1467,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       for (const oi of order.items) {
         const item = await Item.findById(oi.itemId);
+        const qty = (oi as any).qty ?? (oi as any).quantity ?? 0;
         if (item) {
-          item.currentQuantity -= oi.quantity;
+          item.currentQuantity -= qty;
           await item.save();
           await InventoryLog.create({
             itemId: item._id,
             itemName: item.itemName,
             type: "deduction",
-            quantity: -oi.quantity,
+            quantity: -qty,
             reason: `Released for order ${order.trackingNumber}`,
             actor: req.user!.username,
           });
@@ -1260,6 +1556,112 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── OFFERS ─────────────────────────────────────────────
+  app.get("/api/offers/active", authMiddleware, async (_req: AuthRequest, res: Response) => {
+    try {
+      const now = new Date();
+      const offers = await Offer.find({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } }).lean();
+      return ok(res, offers);
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.get("/api/offers", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, page = "1", pageSize = "10" } = req.query as Record<string, string>;
+      const now = new Date();
+      const filter: any = {};
+      if (status === "active") { filter.isActive = true; filter.startDate = { $lte: now }; filter.endDate = { $gte: now }; }
+      else if (status === "inactive") { filter.isActive = false; }
+      else if (status === "expired") { filter.endDate = { $lt: now }; }
+      else if (status === "upcoming") { filter.startDate = { $gt: now }; filter.isActive = true; }
+      const skip = (parseInt(page) - 1) * parseInt(pageSize);
+      const [offers, total] = await Promise.all([
+        Offer.find(filter).sort({ createdAt: -1 }).skip(skip).limit(parseInt(pageSize)).lean(),
+        Offer.countDocuments(filter),
+      ]);
+      return ok(res, { offers, total, page: parseInt(page), pageSize: parseInt(pageSize) });
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.post("/api/offers", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const parsed = createOfferSchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
+      const offer = await Offer.create({ ...parsed.data, startDate: new Date(parsed.data.startDate), endDate: new Date(parsed.data.endDate), createdBy: req.user!._id });
+      await logAction("OFFER_CREATED", req.user!.username, offer.name, { offerType: offer.offerType });
+      emitEvent("OFFER_CREATED");
+      return ok(res, offer);
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.get("/api/offers/:id/stats", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const offer = await Offer.findById(req.params.id).lean();
+      if (!offer) return fail(res, 404, "Offer not found");
+      return ok(res, { usageCount: offer.usageCount, totalSavingsGenerated: offer.totalSavingsGenerated });
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.put("/api/offers/:id", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const parsed = updateOfferSchema.safeParse(req.body);
+      if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
+      const updateData: any = { ...parsed.data };
+      if (parsed.data.startDate) updateData.startDate = new Date(parsed.data.startDate);
+      if (parsed.data.endDate) updateData.endDate = new Date(parsed.data.endDate);
+      const offer = await Offer.findByIdAndUpdate(req.params.id, updateData, { new: true });
+      if (!offer) return fail(res, 404, "Offer not found");
+      await logAction("OFFER_UPDATED", req.user!.username, offer.name, {});
+      emitEvent("OFFER_UPDATED");
+      return ok(res, offer);
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.patch("/api/offers/:id/toggle", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const offer = await Offer.findById(req.params.id);
+      if (!offer) return fail(res, 404, "Offer not found");
+      const prev = offer.isActive;
+      offer.isActive = !offer.isActive;
+      await offer.save();
+      await logAction("OFFER_TOGGLED", req.user!.username, offer.name, { from: prev, to: offer.isActive });
+      emitEvent("OFFER_TOGGLED");
+      return ok(res, offer);
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.post("/api/offers/:id/duplicate", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const original = await Offer.findById(req.params.id).lean();
+      if (!original) return fail(res, 404, "Offer not found");
+      const now = new Date();
+      const endDate = new Date(now.getTime() + 7 * 86400000);
+      const { _id, createdAt, updatedAt, usageCount, totalSavingsGenerated, ...rest } = original as any;
+      const duplicate = await Offer.create({
+        ...rest, name: `Copy of ${original.name}`, isActive: false,
+        startDate: now, endDate, usageCount: 0, totalSavingsGenerated: 0, createdBy: req.user!._id,
+      });
+      await logAction("OFFER_DUPLICATED", req.user!.username, original.name, { newId: duplicate._id });
+      return ok(res, duplicate);
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.delete("/api/offers/:id", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const offer = await Offer.findById(req.params.id);
+      if (!offer) return fail(res, 404, "Offer not found");
+      if (offer.usageCount > 0) {
+        offer.isActive = false;
+        await offer.save();
+        await logAction("OFFER_TOGGLED", req.user!.username, offer.name, { reason: "archived_due_to_usage" });
+        return ok(res, { archived: true, message: "Offer has been archived because it has been used" });
+      }
+      await Offer.findByIdAndDelete(req.params.id);
+      await logAction("OFFER_DELETED", req.user!.username, offer.name, {});
+      return ok(res, { deleted: true });
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
   // ─── REPORTS ────────────────────────────────────────────
   app.get("/api/reports/sales", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
@@ -1286,6 +1688,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
+  });
+
+  app.get("/api/reports/offers-performance", authMiddleware, async (_req: AuthRequest, res: Response) => {
+    try {
+      const offers = await Offer.find().sort({ usageCount: -1 }).lean();
+      return ok(res, { offers, count: offers.length });
+    } catch (err: any) { return fail(res, 500, err.message); }
+  });
+
+  app.get("/api/reports/order-type-breakdown", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { startDate, endDate } = req.query as Record<string, string>;
+      const filter: any = {};
+      if (startDate || endDate) {
+        filter.createdAt = {};
+        if (startDate) filter.createdAt.$gte = new Date(startDate);
+        if (endDate) filter.createdAt.$lte = new Date(endDate + "T23:59:59.999Z");
+      }
+      const [byType, byChannel] = await Promise.all([
+        Order.aggregate([
+          { $match: filter },
+          { $group: { _id: "$orderType", count: { $sum: 1 }, revenue: { $sum: "$totalAmount" } } },
+          { $sort: { revenue: -1 } },
+        ]),
+        Order.aggregate([
+          { $match: filter },
+          { $group: { _id: "$orderChannel", count: { $sum: 1 }, revenue: { $sum: "$totalAmount" } } },
+          { $sort: { revenue: -1 } },
+        ]),
+      ]);
+      return ok(res, {
+        byType: byType.map((r: any) => ({ type: r._id, count: r.count, revenue: r.revenue })),
+        byChannel: byChannel.map((r: any) => ({ channel: r._id, count: r.count, revenue: r.revenue })),
+      });
+    } catch (err: any) { return fail(res, 500, err.message); }
   });
 
   app.get("/api/reports/forecast", authMiddleware, async (_req: AuthRequest, res: Response) => {
@@ -1473,7 +1910,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ─── SERVE UPLOADED IMAGES ────────────────────────────────
   app.get("/api/uploads/:filename", (req: Request, res: Response) => {
-    const filePath = path.join(UPLOADS_DIR, req.params.filename);
+    const filename = Array.isArray(req.params.filename) ? req.params.filename[0] : req.params.filename;
+    const filePath = path.join(UPLOADS_DIR, filename);
     if (!fs.existsSync(filePath)) return res.status(404).send("Not found");
     res.sendFile(filePath);
   });
@@ -1751,7 +2189,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   async function gatherSystemData(userId?: string) {
     const [items, orders, payments, users, inventoryLogs, systemLogs, accounts, ledger, customers] = await Promise.all([
-      Item.find({}).lean().then(docs => docs.map(d => ({ name: d.name, category: d.category, price: d.price, stock: d.stock }))),
+      Item.find({}).lean().then(docs => docs.map(d => ({ name: d.itemName, category: d.category, price: d.unitPrice, stock: d.currentQuantity }))),
       Order.find({}).sort({ createdAt: -1 }).limit(100).lean().then(docs => docs.map(d => ({
         trackingNumber: d.trackingNumber, customerName: d.customerName, totalAmount: d.totalAmount,
         currentStatus: d.currentStatus, sourceChannel: d.sourceChannel, items: d.items?.length || 0,
@@ -1763,7 +2201,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         loggedBy: d.loggedBy, paymentDate: d.paymentDate,
       }))),
       User.find({}).lean().then(docs => docs.map(d => ({
-        username: d.username, role: d.role, active: d.active, lastLogin: d.lastLogin,
+        username: d.username, role: d.role, active: d.isActive,
       }))),
       InventoryLog.find({}).sort({ createdAt: -1 }).limit(100).lean().then(docs => docs.map(d => ({
         itemName: d.itemName, type: d.type, quantity: d.quantity, reason: d.reason, actor: d.actor, createdAt: d.createdAt,
@@ -1775,8 +2213,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         accountName: d.accountName, accountType: d.accountType, balance: d.balance,
       }))),
       GeneralLedgerEntry.find({}).sort({ date: -1 }).limit(50).lean().then(docs => docs.map(d => ({
-        date: d.date, description: d.description, debitAccount: d.debitAccount,
-        creditAccount: d.creditAccount, amount: d.amount,
+        date: d.date, description: d.description,
+        debitAccount: (d as any).debitAccount, creditAccount: (d as any).creditAccount, amount: (d as any).amount,
       }))),
       Customer.find({}).lean().then(docs => docs.map(d => ({
         name: d.name, email: d.email, phone: d.phone,

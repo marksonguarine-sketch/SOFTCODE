@@ -365,8 +365,24 @@ export default function OrderDetailPage() {
                   <p className="font-medium" data-testid="text-order-customer">{order.customerName}</p>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">Source Channel</span>
-                  <p className="font-medium capitalize">{order.sourceChannel}</p>
+                  <span className="text-muted-foreground">Order Type</span>
+                  <p className="font-medium capitalize">{order.orderType?.replace(/_/g, " ") || order.sourceChannel}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Channel</span>
+                  <p className="font-medium capitalize">{order.orderChannel || order.sourceChannel}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Payment Status</span>
+                  <p className="font-medium capitalize">{order.paymentStatus?.replace(/_/g, " ") || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Fulfillment</span>
+                  <p className="font-medium capitalize">{order.fulfillmentStatus?.replace(/_/g, " ") || "—"}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Payment Method</span>
+                  <p className="font-medium capitalize">{order.paymentMethod?.replace(/_/g, " ") || "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Created</span>
@@ -376,6 +392,18 @@ export default function OrderDetailPage() {
                   <span className="text-muted-foreground">Total</span>
                   <p className="font-medium text-lg" data-testid="text-order-total">{formatCurrency(order.totalAmount)}</p>
                 </div>
+                {order.deliveryFee > 0 && (
+                  <div>
+                    <span className="text-muted-foreground">Delivery Fee</span>
+                    <p className="font-medium">{formatCurrency(order.deliveryFee)}</p>
+                  </div>
+                )}
+                {order.scheduledDate && (
+                  <div>
+                    <span className="text-muted-foreground">Scheduled Date</span>
+                    <p className="font-medium">{new Date(order.scheduledDate).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })}</p>
+                  </div>
+                )}
               </div>
               {order.notes && (
                 <div>
@@ -458,12 +486,38 @@ export default function OrderDetailPage() {
                 <TableBody>
                   {order.items.map((item, i) => (
                     <TableRow key={i} data-testid={`row-order-item-${i}`}>
-                      <TableCell className="font-medium">{item.itemName}</TableCell>
-                      <TableCell className="text-right">{item.quantity}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(item.unitPrice)}</TableCell>
+                      <TableCell>
+                        <p className="font-medium">{item.itemName}</p>
+                        {item.discountApplied && item.offerName && (
+                          <p className="text-xs text-green-600 mt-0.5">🏷 {item.offerName}</p>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">{item.qty ?? (item as any).quantity ?? 0}</TableCell>
+                      <TableCell className="text-right">
+                        {item.discountApplied ? (
+                          <div>
+                            <span className="line-through text-muted-foreground text-xs">{formatCurrency(item.originalUnitPrice)}</span>
+                            <span className="ml-1 text-green-600 font-medium">{formatCurrency(item.discountedUnitPrice)}</span>
+                          </div>
+                        ) : (
+                          formatCurrency(item.originalUnitPrice ?? (item as any).unitPrice ?? 0)
+                        )}
+                      </TableCell>
                       <TableCell className="text-right">{formatCurrency(item.lineTotal)}</TableCell>
                     </TableRow>
                   ))}
+                  {order.deliveryFee > 0 && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right text-muted-foreground">Subtotal</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{formatCurrency(order.subtotal || order.totalAmount - order.deliveryFee)}</TableCell>
+                    </TableRow>
+                  )}
+                  {order.deliveryFee > 0 && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right text-muted-foreground">Delivery Fee</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{formatCurrency(order.deliveryFee)}</TableCell>
+                    </TableRow>
+                  )}
                   <TableRow>
                     <TableCell colSpan={3} className="font-bold text-right">Total</TableCell>
                     <TableCell className="text-right font-bold">{formatCurrency(order.totalAmount)}</TableCell>

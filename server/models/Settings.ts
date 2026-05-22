@@ -11,6 +11,12 @@ export interface ISettingsDoc extends Document {
   autoBackupEnabled: boolean;
   autoBackupIntervalValue: number;
   autoBackupIntervalUnit: string;
+  gcashNumber: string;
+  gcashQrImageUrl: string;
+  storeAddress: string;
+  storeContactNumber: string;
+  autoApplyOffers: boolean;
+  showSavingsSummary: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -27,6 +33,12 @@ const settingsSchema = new Schema<ISettingsDoc>(
     autoBackupEnabled: { type: Boolean, default: false },
     autoBackupIntervalValue: { type: Number, default: 24 },
     autoBackupIntervalUnit: { type: String, enum: ["hours", "days", "weeks"], default: "hours" },
+    gcashNumber: { type: String, default: "" },
+    gcashQrImageUrl: { type: String, default: "" },
+    storeAddress: { type: String, default: "" },
+    storeContactNumber: { type: String, default: "" },
+    autoApplyOffers: { type: Boolean, default: true },
+    showSavingsSummary: { type: Boolean, default: true },
   },
   { timestamps: true }
 );

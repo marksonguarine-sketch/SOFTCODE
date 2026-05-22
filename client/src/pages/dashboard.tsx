@@ -1659,6 +1659,23 @@ export default function DashboardPage() {
     queryFn: () => fetchDashboard(topSalesPeriod),
   });
 
+  const { data: allOrdersData } = useQuery<{ success: boolean; data: { orders: any[] } }>({
+    queryKey: ["/api/orders", "dashboard-mini"],
+    queryFn: () => apiRequest("GET", "/api/orders?pageSize=500").then((r) => r.json()),
+  });
+
+  const { data: activeOffersCountData } = useQuery<{ success: boolean; data: { total: number } }>({
+    queryKey: ["/api/offers", "dashboard-count"],
+    queryFn: () => fetch("/api/offers?status=active&page=1&pageSize=1").then((r) => r.json()),
+  });
+
+  const allOrdersList = allOrdersData?.data?.orders || [];
+  const unpaidOrders = allOrdersList.filter((o: any) => o.paymentStatus === "unpaid" || o.paymentStatus === "partially_paid").length;
+  const pendingFulfillment = allOrdersList.filter((o: any) => o.fulfillmentStatus === "unfulfilled" || o.fulfillmentStatus === "partially_fulfilled").length;
+  const now = new Date();
+  const upcomingReservations = allOrdersList.filter((o: any) => o.orderType === "reservation" && o.scheduledDate && new Date(o.scheduledDate) >= now).length;
+  const activeOffersCount = (activeOffersCountData as any)?.data?.total ?? 0;
+
   const earnings = earningsData?.data;
   const orders = ordersData?.data;
   const customers = customersData?.data;
@@ -1741,6 +1758,65 @@ export default function DashboardPage() {
           onClick={() => navigate("/billing")}
           onDoubleClick={handleChartDoubleClick}
         />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="section-mini-stats">
+        <div
+          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate("/offers")}
+          data-testid="card-active-offers"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Active Offers</span>
+            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/30">
+              <Sparkles className="w-4 h-4 text-emerald-500" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-active-offers">{activeOffersCount}</div>
+          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">offers running</p>
+        </div>
+        <div
+          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate("/billing")}
+          data-testid="card-unpaid-orders"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Unpaid Orders</span>
+            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-amber-50 dark:bg-amber-900/30">
+              <CreditCard className="w-4 h-4 text-amber-500" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-unpaid-orders">{unpaidOrders}</div>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">awaiting payment</p>
+        </div>
+        <div
+          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate("/orders")}
+          data-testid="card-pending-fulfillment"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pending Fulfillment</span>
+            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-blue-50 dark:bg-blue-900/30">
+              <Store className="w-4 h-4 text-blue-500" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-pending-fulfillment">{pendingFulfillment}</div>
+          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">to fulfill</p>
+        </div>
+        <div
+          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
+          onClick={() => navigate("/orders")}
+          data-testid="card-upcoming-reservations"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Upcoming Reservations</span>
+            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-purple-50 dark:bg-purple-900/30">
+              <CalendarDays className="w-4 h-4 text-purple-500" />
+            </div>
+          </div>
+          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-upcoming-reservations">{upcomingReservations}</div>
+          <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">scheduled ahead</p>
+        </div>
       </div>
 
       <RevenueSection

@@ -13,11 +13,118 @@ export const OrderStatus = {
 } as const;
 export type OrderStatusType = (typeof OrderStatus)[keyof typeof OrderStatus];
 
+export const ORDER_TYPES = [
+  "online_delivery",
+  "online_pickup",
+  "walkin_delivery",
+  "walkin_pickup",
+  "online_reservation",
+  "walkin_reservation",
+] as const;
+export type OrderType = (typeof ORDER_TYPES)[number];
+
+export const ORDER_CHANNELS = ["walkin", "email", "sms", "messenger", "phone"] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
+export const PAYMENT_STATUSES = ["pending_payment", "partial", "paid", "refunded"] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export const PAYMENT_METHODS = ["cash", "gcash", "cod", "gcash_qr", "bank"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+export const FULFILLMENT_STATUSES = [
+  "pending",
+  "processing",
+  "ready",
+  "out_for_delivery",
+  "completed",
+  "cancelled",
+] as const;
+export type FulfillmentStatus = (typeof FULFILLMENT_STATUSES)[number];
+
+export const ALLOWED_PAYMENT_METHODS: Record<OrderType, PaymentMethod[]> = {
+  online_delivery: ["cod", "gcash_qr"],
+  online_pickup: ["gcash_qr", "cash"],
+  walkin_delivery: ["cash", "cod", "gcash_qr"],
+  walkin_pickup: ["gcash_qr", "cash"],
+  online_reservation: ["gcash_qr"],
+  walkin_reservation: ["cash", "gcash_qr"],
+};
+
+export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
+  online_delivery: "Online Delivery",
+  online_pickup: "Online Pickup",
+  walkin_delivery: "Walk-in Delivery",
+  walkin_pickup: "Walk-in Pickup",
+  online_reservation: "Online Reservation",
+  walkin_reservation: "Walk-in Reservation",
+};
+
+export const ORDER_CHANNEL_LABELS: Record<OrderChannel, string> = {
+  walkin: "Walk-in",
+  email: "Email",
+  sms: "SMS",
+  messenger: "Messenger",
+  phone: "Phone",
+};
+
+export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
+  pending_payment: "Pending Payment",
+  partial: "Partial",
+  paid: "Paid",
+  refunded: "Refunded",
+};
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  gcash: "GCash",
+  cod: "Cash on Delivery",
+  gcash_qr: "GCash QR",
+  bank: "Bank Transfer",
+};
+
+export const FULFILLMENT_STATUS_LABELS: Record<FulfillmentStatus, string> = {
+  pending: "Pending",
+  processing: "Processing",
+  ready: "Ready",
+  out_for_delivery: "Out for Delivery",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+export const OFFER_TYPES = [
+  "percentage_discount",
+  "b1t1",
+  "buy1_take_percentage",
+  "flat_discount",
+] as const;
+export type OfferType = (typeof OFFER_TYPES)[number];
+
+export const OFFER_TYPE_LABELS: Record<OfferType, string> = {
+  percentage_discount: "Percentage Discount",
+  b1t1: "Buy 1 Take 1",
+  buy1_take_percentage: "Buy 1, Take Another at % Off",
+  flat_discount: "Flat Discount",
+};
+
 export const InventoryLogType = {
   RESTOCK: "restock",
   DEDUCTION: "deduction",
   ADJUSTMENT: "adjustment",
 } as const;
+
+export const DEFAULT_CATEGORIES = [
+  "Fasteners",
+  "Pipes & Fittings",
+  "Cement & Masonry",
+  "Lumber & Wood",
+  "Paint & Coatings",
+  "Electrical",
+  "Plumbing",
+  "Tools",
+  "Hardware & Fixtures",
+  "Safety Equipment",
+] as const;
 
 export const loginSchema = z.object({
   username: z.string().min(1, "Username is required"),
@@ -52,6 +159,18 @@ export const createCustomerSchema = z.object({
 });
 export type CreateCustomerInput = z.infer<typeof createCustomerSchema>;
 
+export const orderItemSchema = z.object({
+  itemId: z.string().min(1),
+  itemName: z.string().min(1),
+  qty: z.number().int().min(1),
+  originalUnitPrice: z.number().min(0),
+  discountedUnitPrice: z.number().min(0),
+  discountApplied: z.boolean().default(false),
+  offerName: z.string().default(""),
+  lineTotal: z.number().min(0),
+});
+export type OrderItemInput = z.infer<typeof orderItemSchema>;
+
 export const createOrderItemSchema = z.object({
   itemId: z.string().min(1),
   itemName: z.string().min(1),
@@ -70,12 +189,50 @@ export const orderAddressSchema = z.object({
 export const createOrderSchema = z.object({
   customerId: z.string().optional().default(""),
   customerName: z.string().min(1, "Customer name is required"),
-  items: z.array(createOrderItemSchema).default([]),
-  sourceChannel: z.enum(["phone", "email", "message", "walk-in"]).default("walk-in"),
+  orderType: z.enum(ORDER_TYPES).default("walkin_pickup"),
+  orderChannel: z.enum(ORDER_CHANNELS).default("walkin"),
+  paymentStatus: z.enum(PAYMENT_STATUSES).default("pending_payment"),
+  paymentMethod: z.enum(PAYMENT_METHODS).default("cash"),
+  fulfillmentStatus: z.enum(FULFILLMENT_STATUSES).default("pending"),
+  deliveryFee: z.number().min(0).default(0),
+  items: z.array(orderItemSchema).default([]),
   notes: z.string().optional().default(""),
+  scheduledDate: z.string().optional().default(""),
   address: orderAddressSchema.optional(),
-});
+}).refine(
+  (data) => {
+    const allowed = ALLOWED_PAYMENT_METHODS[data.orderType];
+    return allowed.includes(data.paymentMethod);
+  },
+  (data) => ({
+    message: `Payment method "${data.paymentMethod}" is not allowed for order type "${data.orderType}". Allowed: ${ALLOWED_PAYMENT_METHODS[data.orderType].join(", ")}`,
+    path: ["paymentMethod"],
+  })
+);
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;
+
+export const updateOrderStatusSchema = z.object({
+  fulfillmentStatus: z.enum(FULFILLMENT_STATUSES).optional(),
+  paymentStatus: z.enum(PAYMENT_STATUSES).optional(),
+  reason: z.string().min(1, "Reason is required"),
+});
+export type UpdateOrderStatusInput = z.infer<typeof updateOrderStatusSchema>;
+
+export const bulkOrderStatusSchema = z.object({
+  orderIds: z.array(z.string()).min(1),
+  fulfillmentStatus: z.enum(FULFILLMENT_STATUSES),
+  reason: z.string().optional().default("Bulk update"),
+});
+export type BulkOrderStatusInput = z.infer<typeof bulkOrderStatusSchema>;
+
+export const quickPaySchema = z.object({
+  orderId: z.string().min(1),
+  paymentMethod: z.enum(PAYMENT_METHODS),
+  amount: z.number().min(0.01, "Amount must be greater than 0"),
+  gcashReferenceNumber: z.string().optional().default(""),
+  note: z.string().optional().default(""),
+});
+export type QuickPayInput = z.infer<typeof quickPaySchema>;
 
 export const logPaymentSchema = z.object({
   orderId: z.string().min(1),
@@ -104,6 +261,12 @@ export const settingsSchema = z.object({
   font: z.string().optional().default("Inter"),
   colorTheme: z.string().optional().default("blue"),
   gradient: z.string().optional().default("none"),
+  gcashNumber: z.string().optional().default(""),
+  gcashQrImageUrl: z.string().optional().default(""),
+  storeAddress: z.string().optional().default(""),
+  storeContactNumber: z.string().optional().default(""),
+  autoApplyOffers: z.boolean().optional(),
+  showSavingsSummary: z.boolean().optional(),
 });
 export type SettingsInput = z.infer<typeof settingsSchema>;
 
@@ -117,6 +280,35 @@ export const ledgerEntrySchema = z.object({
   referenceId: z.string().optional().default(""),
 });
 export type LedgerEntryInput = z.infer<typeof ledgerEntrySchema>;
+
+export const offerItemSchema = z.object({
+  itemId: z.string().min(1),
+  itemName: z.string().min(1),
+  discountValue: z.number().min(0).default(0),
+});
+export type OfferItemInput = z.infer<typeof offerItemSchema>;
+
+export const createOfferBaseSchema = z.object({
+  name: z.string().min(1, "Offer name is required"),
+  description: z.string().optional().default(""),
+  isActive: z.boolean().default(true),
+  startDate: z.string().min(1, "Start date is required"),
+  endDate: z.string().min(1, "End date is required"),
+  offerType: z.enum(OFFER_TYPES),
+  items: z.array(offerItemSchema).min(1, "Add at least one item to the offer"),
+});
+
+export const createOfferSchema = createOfferBaseSchema.refine(
+  (data) => new Date(data.endDate) >= new Date(data.startDate),
+  { message: "End date must be after or equal to start date", path: ["endDate"] }
+).refine(
+  (data) => new Date(data.endDate) >= new Date(new Date().setHours(0, 0, 0, 0)),
+  { message: "End date cannot be in the past", path: ["endDate"] }
+);
+export type CreateOfferInput = z.infer<typeof createOfferBaseSchema>;
+
+export const updateOfferSchema = createOfferBaseSchema.partial();
+export type UpdateOfferInput = z.infer<typeof updateOfferSchema>;
 
 export interface IUser {
   _id: string;
@@ -154,8 +346,11 @@ export interface ICustomer {
 export interface IOrderItem {
   itemId: string;
   itemName: string;
-  quantity: number;
-  unitPrice: number;
+  qty: number;
+  originalUnitPrice: number;
+  discountedUnitPrice: number;
+  discountApplied: boolean;
+  offerName: string;
   lineTotal: number;
 }
 
@@ -181,9 +376,17 @@ export interface IOrder {
   customerName: string;
   items: IOrderItem[];
   totalAmount: number;
+  subtotal: number;
+  deliveryFee: number;
+  orderType: OrderType;
+  orderChannel: OrderChannel;
+  paymentStatus: PaymentStatus;
+  paymentMethod: PaymentMethod;
+  fulfillmentStatus: FulfillmentStatus;
   sourceChannel: string;
   notes: string;
-  currentStatus: OrderStatusType;
+  scheduledDate?: string;
+  currentStatus: string;
   statusHistory: IStatusEntry[];
   address?: IOrderAddress;
   lockedBy?: string;
@@ -260,6 +463,34 @@ export interface ISettings {
   font: string;
   colorTheme: string;
   gradient: string;
+  gcashNumber: string;
+  gcashQrImageUrl: string;
+  storeAddress: string;
+  storeContactNumber: string;
+  autoApplyOffers: boolean;
+  showSavingsSummary: boolean;
+}
+
+export interface IOfferItem {
+  itemId: string;
+  itemName: string;
+  discountValue: number;
+}
+
+export interface IOffer {
+  _id: string;
+  name: string;
+  description: string;
+  isActive: boolean;
+  startDate: string;
+  endDate: string;
+  offerType: OfferType;
+  items: IOfferItem[];
+  createdBy: string;
+  usageCount: number;
+  totalSavingsGenerated: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface DashboardStats {
@@ -274,4 +505,11 @@ export interface DashboardStats {
   criticalStock: number;
   lowStock: number;
   totalInventoryValue: number;
+  paymentStatusCounts: Record<string, number>;
+  orderTypeCounts: Record<string, number>;
+  orderChannelCounts: Record<string, number>;
+  activeOffersCount: number;
+  activeOfferNames: string[];
+  recentOrders: IOrder[];
+  upcomingReservations: IOrder[];
 }

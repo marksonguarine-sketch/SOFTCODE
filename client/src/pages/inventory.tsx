@@ -145,6 +145,15 @@ export default function InventoryPage() {
     enabled: isAdmin,
   });
 
+  const { data: activeOffersData } = useQuery<{ success: boolean; data: { offers: Array<{ items: Array<{ itemId: string }> }> } }>({
+    queryKey: ["/api/offers", "active"],
+    queryFn: () => fetch("/api/offers?status=active&page=1&pageSize=100").then((r) => r.json()),
+  });
+
+  const saleItemIds = new Set<string>(
+    (activeOffersData?.data?.offers || []).flatMap((o) => o.items.map((it) => it.itemId))
+  );
+
   const items = itemsData?.data?.items || [];
   const categories = categoriesData?.data || [];
   const pendingApprovals = approvalsData?.data || [];
@@ -467,7 +476,12 @@ export default function InventoryPage() {
                   </div>
                 </div>
                 <CardContent className="p-3 space-y-1">
-                  <div className="font-semibold text-sm truncate" data-testid={`text-item-name-${item._id}`}>{item.itemName}</div>
+                  <div className="flex items-start justify-between gap-1">
+                    <div className="font-semibold text-sm truncate flex-1" data-testid={`text-item-name-${item._id}`}>{item.itemName}</div>
+                    {saleItemIds.has(item._id) && (
+                      <span className="shrink-0 text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded" data-testid={`badge-sale-${item._id}`}>SALE</span>
+                    )}
+                  </div>
                   <div className="text-xs text-muted-foreground">{item.category}</div>
                   <div className="text-xs text-muted-foreground">{item.supplierName || "-"}</div>
                   <div className="flex justify-between items-center text-xs mt-1">
@@ -537,7 +551,14 @@ export default function InventoryPage() {
                             )}
                           </div>
                         </TableCell>
-                        <TableCell className="font-medium">{item.itemName}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium">{item.itemName}</span>
+                            {saleItemIds.has(item._id) && (
+                              <span className="text-[10px] font-bold bg-red-500 text-white px-1.5 py-0.5 rounded" data-testid={`badge-sale-list-${item._id}`}>SALE</span>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>{item.category}</TableCell>
                         <TableCell className="text-muted-foreground">{item.supplierName || "-"}</TableCell>
                         <TableCell className="text-right">{formatCurrency(item.unitPrice)}</TableCell>

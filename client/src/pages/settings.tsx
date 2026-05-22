@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Settings, Loader2, Save, Type, Palette, Layers } from "lucide-react";
+import { Settings, Loader2, Save, Type, Palette, Layers, CreditCard, Store } from "lucide-react";
 import { settingsSchema, type SettingsInput, type ISettings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { GRADIENT_OPTIONS } from "@/lib/settings-context";
@@ -10,9 +10,10 @@ import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage, FormDescription } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useEffect } from "react";
 
@@ -87,6 +88,12 @@ export default function SettingsPage() {
       font: settings?.font || "Inter",
       colorTheme: settings?.colorTheme || "blue",
       gradient: settings?.gradient || "none",
+      gcashNumber: (settings as any)?.gcashNumber || "",
+      gcashQrImageUrl: (settings as any)?.gcashQrImageUrl || "",
+      storeAddress: (settings as any)?.storeAddress || "",
+      storeContactNumber: (settings as any)?.storeContactNumber || "",
+      autoApplyOffers: (settings as any)?.autoApplyOffers ?? true,
+      showSavingsSummary: (settings as any)?.showSavingsSummary ?? true,
     },
     values: settings ? {
       companyName: settings.companyName,
@@ -96,6 +103,12 @@ export default function SettingsPage() {
       font: settings.font || "Inter",
       colorTheme: settings.colorTheme || "blue",
       gradient: settings.gradient || "none",
+      gcashNumber: (settings as any)?.gcashNumber || "",
+      gcashQrImageUrl: (settings as any)?.gcashQrImageUrl || "",
+      storeAddress: (settings as any)?.storeAddress || "",
+      storeContactNumber: (settings as any)?.storeContactNumber || "",
+      autoApplyOffers: (settings as any)?.autoApplyOffers ?? true,
+      showSavingsSummary: (settings as any)?.showSavingsSummary ?? true,
     } : undefined,
   });
 
@@ -302,6 +315,76 @@ export default function SettingsPage() {
                     ))}
                   </div>
                   <FormMessage />
+                </FormItem>
+              )} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <CreditCard className="h-4 w-4" /> Payment Information
+              </CardTitle>
+              <CardDescription>Configure GCash and store payment details shown to customers</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField control={form.control} name="gcashNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>GCash Number</FormLabel>
+                  <FormControl><Input placeholder="e.g. 0917-123-4567" {...field} data-testid="input-gcash-number" /></FormControl>
+                  <FormDescription>Phone number customers use to send GCash payments</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="gcashQrImageUrl" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>GCash QR Code Image URL</FormLabel>
+                  <FormControl><Input placeholder="https://..." {...field} data-testid="input-gcash-qr-url" /></FormControl>
+                  <FormDescription>URL of your GCash QR code image for customers to scan</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Store className="h-4 w-4" /> Store Details
+              </CardTitle>
+              <CardDescription>Store contact information and offers behavior</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField control={form.control} name="storeAddress" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Store Address</FormLabel>
+                  <FormControl><Input placeholder="e.g. 123 Main Street, Quezon City" {...field} data-testid="input-store-address" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="storeContactNumber" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Store Contact Number</FormLabel>
+                  <FormControl><Input placeholder="e.g. 0917-123-4567" {...field} data-testid="input-store-contact" /></FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="autoApplyOffers" render={({ field }) => (
+                <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <FormLabel className="text-sm font-medium">Auto-Apply Offers</FormLabel>
+                    <FormDescription>Automatically apply active offers when creating orders</FormDescription>
+                  </div>
+                  <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-auto-apply-offers" /></FormControl>
+                </FormItem>
+              )} />
+              <FormField control={form.control} name="showSavingsSummary" render={({ field }) => (
+                <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                  <div>
+                    <FormLabel className="text-sm font-medium">Show Savings Summary</FormLabel>
+                    <FormDescription>Show total savings to customers when offers are applied</FormDescription>
+                  </div>
+                  <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-show-savings-summary" /></FormControl>
                 </FormItem>
               )} />
             </CardContent>
