@@ -1,0 +1,369 @@
+You are working on a full-stack ERP system called **JOAP Hardware Trading**. The stack is:
+- React 18 + TypeScript + Vite (frontend)
+- Express.js v5 + Node.js 20 (backend)
+- MongoDB via Mongoose
+- Tailwind CSS v3 + shadcn/ui (Radix UI)
+- TanStack Query v5, Wouter routing, Socket.io, Zod, Lucide React, Recharts
+- Shared Zod schemas in `shared/schema.ts`
+
+Below are all the changes, new features, and enhancements you must implement. Read everything carefully before writing a single line of code. Plan all schema/model changes first before touching the UI, since the entire system must stay consistent end-to-end.
+
+---
+
+## 1. ORDER TYPE & PAYMENT STATUS — SCHEMA REDESIGN
+
+### 1A. Update the Order Mongoose model (`server/models/Order.ts`) and Zod schema (`shared/schema.ts`)
+
+Replace the single `status` field with two distinct fields:
+
+**`orderType`** — how/where the order was placed and fulfilled:
+"online_delivery"       → Online order, to be delivered
+"online_pickup"         → Online order, customer will pick up
+"walkin_delivery"       → Walk-in customer, needs delivery
+"walkin_pickup"         → Walk-in customer, picking up at store
+"online_reservation"    → Reservation made online (pay-first)
+"walkin_reservation"    → Reservation made in person (pay-first)
+
+**`orderChannel`** — how the customer contacted/placed the order:
+"walkin"    → Customer physically present
+"email"     → Order came via email
+"sms"       → Order came via SMS/text message
+"messenger" → Order came via Messenger/social media
+"phone"     → Order came via phone call
+
+**`paymentStatus`** — current payment state:
+"pending_payment"   → Not yet paid
+"partial"           → Partially paid
+"paid"              → Fully paid
+"refunded"          → Refunded (UI display only, no backend logic yet)
+
+**`paymentMethod`** — how they paid or will pay:
+"cash"      → Physical cash
+"gcash"     → GCash QR or number
+"cod"       → Cash on delivery
+"gcash_qr"  → GCash QR specifically (for online)
+"bank"      → Bank transfer
+
+**Allowed payment methods per order type (enforce via Zod + backend validation):**
+online_delivery:      cod, gcash_qr
+online_pickup:        gcash_qr, cash
+walkin_delivery:      cash, cod, gcash_qr
+walkin_pickup:        gcash_qr, cash
+online_reservation:   gcash_qr  (pay-first required)
+walkin_reservation:   cash, gcash_qr  (pay-first required)
+
+**`deliveryFee`**: Number, default `0`. Add the field but always set to 0 for now. Add a UI note that says "Delivery fee calculation coming soon."
+
+Keep the existing `status` field but rename it to `fulfillmentStatus` with values:
+"pending" | "processing" | "ready" | "out_for_delivery" | "completed" | "cancelled"
+
+Migrate all existing order documents by adding default values for new fields. Write a migration function in `server/seed.ts` that runs once to patch old orders.
+
+---
+
+## 2. REDESIGNED "CREATE ORDER" PANEL (NO SCROLL HELL)
+
+Completely rebuild the Create Order dialog/sheet in `client/src/pages/orders.tsx`. The current version is a simple scrolling form — replace it with a multi-step side panel (use shadcn Sheet component, wide variant ~720px) with **3 clearly separated steps**:
+
+### Step 1 — Order Info (left column of a 2-column layout)
+- **Customer search-select dropdown**: Searchable combobox. As user types, filter existing customers by name or phone. Show avatar initials + name + phone in dropdown options.
+- **Order Type dropdown** (searchable select): Show all 6 types with icons and a short description per option. When selected, auto-filter the available Payment Method options in the next field.
+- **Order Channel dropdown**: walkin, email, sms, messenger, phone.
+- **Payment Method dropdown**: Only show options valid for the selected order type (see Section 1A mapping). This field is disabled until Order Type is selected.
+- **Payment Status dropdown**: pending_payment, partial, paid.
+- **Notes textarea**: Optional free text.
+- **Delivery fee field**: Disabled input showing "₱0.00 (Coming Soon)" with a small info tooltip.
+- If `orderType` is `online_reservation` or `walkin_reservation`, show a highlighted banner: "⚠️ Reservation requires upfront payment."
+- If `orderChannel` is `email`, show an inline tip: "Tip: Ask customer for online/onsite payment preference. If online, send GCash QR or number. If onsite, they may scan the store QR or pay cash."
+- If `orderChannel` is `sms`, show: "Tip: Send the company GCash number to the customer."
+
+### Step 2 — Add Items (the most important, dedicate most space here)
+This must NOT require heavy scrolling. Use a two-panel layout inside the step:
+
+**Left panel — Item Search & Add:**
+- A prominent `<Input>` search bar at the top. As the user types, filter items in real time by:
+  - Item name
+  - SKU/code
+  - Category
+- Below the search bar, show items in a **categorized accordion list** (shadcn Accordion). Group items by their `category` field. Each category is a collapsible section showing matching items.
+- Each item row in the list shows: item name, SKU, unit price, current stock (warn in orange if stock ≤ 5, red if 0).
+- A `+` button or click on row adds item to the order. If already in the order, clicking again increments qty.
+- Keyboard support: Arrow Up/Down navigate the list, Enter adds the highlighted item.
+
+**Right panel — Order Cart:**
+- Shows added items as a table: Item Name | Qty (editable inline number input) | Unit Price | Line Total | Remove button.
+- Inline quantity edit: user can click the qty and type directly. Min 1.
+- If an offer/discount is active for the item (see Section 4), show the discounted price in green with the original struck through.
+- Running subtotal at the bottom.
+- Empty state: "No items added yet. Search and add items from the left."
+
+### Step 3 — Review & Confirm
+- Full read-only summary: customer, order type, channel, payment method, payment status, all items with quantities and prices.
+- Grand total (items + delivery fee, delivery fee shows ₱0.00).
+- Active discounts/offers applied (if any) shown as a summary line.
+- Two buttons: "Back" and "Confirm Order."
+- On confirm: POST to `/api/orders`, show success toast, close panel, refresh order list.
+
+Add a step indicator at the top of the Sheet: Step 1 → Step 2 → Step 3 with completion checkmarks.
+
+---
+
+## 3. DASHBOARD — PAYMENT STATUS + ORDER TYPE WIDGETS
+
+Update `client/src/pages/dashboard.tsx` to include two new stat sections:
+
+### 3A. Payment Status Summary
+A row of 3 stat cards (using the existing card style):
+- **Pending Payment** — count of orders with `paymentStatus: "pending_payment"`. Badge color: amber.
+- **Partial Payment** — count of `paymentStatus: "partial"`. Badge color: orange.
+- **Fully Paid** — count of `paymentStatus: "paid"`. Badge color: green.
+
+Each card is clickable and navigates to `/orders?paymentStatus=<value>` so the orders page filters automatically.
+
+### 3B. Order Type Breakdown
+A donut/pie chart (Recharts PieChart) showing the distribution of active orders by `orderType`. Use distinct colors per type. Show a legend below with count + label per type.
+
+Also add a small "Order Channel" breakdown as a horizontal bar list (not a chart, just a visual list with progress bars):
+- Walk-in | Email | SMS | Messenger | Phone
+Each bar shows count and percentage of today's orders.
+
+### 3C. Recent Orders Table Enhancement
+In the existing recent orders table on the dashboard, add two new columns:
+- **Order Type** — display as a colored badge (e.g., "Online Delivery", "Walk-in Pickup")
+- **Payment Status** — colored badge (amber/orange/green)
+
+Create a new backend route `GET /api/dashboard/stats` that returns:
+```json
+{
+  "paymentStatusCounts": { "pending_payment": N, "partial": N, "paid": N },
+  "orderTypeCounts": { "online_delivery": N, ... },
+  "orderChannelCounts": { "walkin": N, "email": N, ... },
+  "recentOrders": [...] // last 10 with new fields populated
+}
+```
+
+---
+
+## 4. "OFFERS" — NEW NAV PAGE & FULL PROMOTIONS ENGINE
+
+### 4A. Navigation
+Add **"Offers"** to the sidebar navigation in `client/src/components/app-sidebar.tsx`, between Orders and Billing. Use the `Tag` icon from Lucide React. Route: `/offers`. Add the route in `App.tsx`.
+
+Create a new page file: `client/src/pages/offers.tsx`.
+
+### 4B. Offers Data Model
+Create a new Mongoose model `server/models/Offer.ts`:
+
+```typescript
+{
+  name: String,           // e.g. "Christmas Sale 2024", "Summer Deals"
+  description: String,
+  isActive: Boolean,      // Toggle on/off without deleting
+  startDate: Date,
+  endDate: Date,
+  offerType: "percentage_discount" | "b1t1" | "buy1_take_percentage" | "flat_discount",
+  // For percentage_discount: item-level discount percentages (not global)
+  // For b1t1: buy 1 get 1 free of same item
+  // For buy1_take_percentage: buy 1, get second at X% off
+  // For flat_discount: flat ₱ amount off per item
+  items: [
+    {
+      itemId: ObjectId (ref Item),
+      itemName: String,       // denormalized for display
+      discountValue: Number,  // percentage (0-100) or flat amount in ₱
+      // For b1t1, discountValue is ignored (always 100% off second)
+      // For buy1_take_percentage, discountValue = % off the second item
+    }
+  ],
+  createdBy: ObjectId (ref User),
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+Add to `shared/schema.ts`: `createOfferSchema`, `updateOfferSchema`, `OfferItem` type.
+
+### 4C. Offers Page UI (`client/src/pages/offers.tsx`)
+
+**Top section — Active Offers Banner:**
+Show currently active offers (today's date between startDate and endDate and isActive=true) in a highlighted strip with countdown timer to end date.
+
+**Main section — Offers List:**
+A table/card grid of all offers (past, present, scheduled). Columns/info:
+- Offer name + description
+- Type badge (% Discount / B1T1 / Buy1 Take % / Flat Discount)
+- Date range
+- Items count
+- Active toggle (switch)
+- Actions: Edit, View Details, Delete
+
+**Create/Edit Offer Dialog** (shadcn Dialog, not a page):
+- Name, description fields
+- Offer type selector (radio or select with description of each type)
+- Date range picker (start + end)
+- Active toggle
+- **Item selection section** (this is the core):
+  - Searchable item picker (same component as Create Order's item search)
+  - Add items one by one
+  - For each added item, show: Item name | Discount Value input (with % or ₱ label based on type) | Remove
+  - For B1T1: no discount value input needed, just show "Buy 1 Get 1 Free"
+  - For buy1_take_percentage: input for the percentage off the second item (e.g., enter 30 = second item is 30% off)
+  - Running preview: "e.g., Nails ₱50.00 → ₱40.00 (20% off)"
+
+**Offer Detail View** (expandable row or modal):
+- Show all items with their individual discounts
+- History of when it was activated/deactivated
+
+### 4D. Applying Offers to Orders
+In the backend `POST /api/orders` and the order schema:
+- When creating an order, check for active offers on each item.
+- For each item in the order, find any active offer covering that item.
+- Apply the discount:
+  - `percentage_discount`: `lineTotal = qty * price * (1 - discount/100)`
+  - `b1t1`: if qty >= 2, customer pays for ceil(qty/2) items (buy 1 take 1, buy 3 take 1 extra, etc.)
+  - `buy1_take_percentage`: the second item in each pair costs `price * (1 - discount/100)`
+  - `flat_discount`: `lineTotal = qty * (price - flatAmount)`, min ₱0
+- Store on the order item: `{ itemId, itemName, qty, originalUnitPrice, discountedUnitPrice, discountApplied: boolean, offerName: string, lineTotal }`
+- Do NOT deduct stock for the "free" items in B1T1 (they are still physical items leaving inventory — DO deduct them but flag them).
+
+### 4E. Offers API Routes (add to `server/routes.ts`)
+GET    /api/offers              → list all offers (with pagination + filter by active/inactive)
+POST   /api/offers              → create new offer
+PUT    /api/offers/:id          → update offer
+DELETE /api/offers/:id          → delete offer
+PATCH  /api/offers/:id/toggle   → toggle isActive
+GET    /api/offers/active       → list currently active offers (for use in Create Order)
+
+---
+
+## 5. ORDERS PAGE — FILTER & DISPLAY UPDATES
+
+Update `client/src/pages/orders.tsx`:
+
+### 5A. Filter Bar
+Add filter chips/dropdowns above the orders table:
+- **Payment Status** filter: All | Pending | Partial | Paid
+- **Order Type** filter: All | 6 types
+- **Order Channel** filter: All | walkin | email | sms | messenger | phone
+- **Fulfillment Status** filter: All | pending | processing | ready | out_for_delivery | completed | cancelled
+- Date range picker for order date
+- All filters combine (AND logic)
+- Show active filter count badge on a "Filters" button that toggles the filter bar visibility (mobile-friendly)
+- Sync filter state to URL query params (e.g. `?paymentStatus=pending_payment&orderType=walkin_pickup`) so links from dashboard cards work.
+
+### 5B. Orders Table Columns
+Update the table to show:
+- Order # (tracking number)
+- Customer name
+- **Order Type** (colored badge)
+- **Order Channel** (icon + label: envelope icon for email, message icon for sms, etc.)
+- **Payment Status** (colored badge)
+- **Fulfillment Status** (colored badge)
+- Items count
+- Total amount (with discounted total if offers were applied, show original struck through)
+- Created date
+- Actions: View, Edit status, Quick pay
+
+### 5C. Order Status Edit Modal
+When clicking "Edit Status," show two separate selects:
+1. **Fulfillment Status** — change the fulfillment stage
+2. **Payment Status** — change the payment stage
+Both update independently. Add a notes/reason field for status changes that gets logged to SystemLog.
+
+### 5D. Quick Pay Button
+A lightning bolt icon button on each order row. Opens a small popover/dialog with:
+- Amount to pay input (pre-filled with remaining balance)
+- Payment method selector
+- GCash reference number field (shown if method is gcash/gcash_qr)
+- Confirm button → POST to `/api/billing/payments`
+
+---
+
+## 6. ORDER DETAIL PAGE UPDATES (`client/src/pages/order-detail.tsx`)
+
+- Show the new `orderType`, `orderChannel`, `paymentMethod`, `paymentStatus`, `fulfillmentStatus` fields prominently at the top.
+- Payment Method context panel (collapsible): Based on the channel and type, show the relevant payment instructions:
+  - Email + online payment → "Send GCash QR and number to customer via email"
+  - Email + onsite → "Customer can scan store QR, pay cash, or use COD"
+  - SMS/phone → "Send company GCash number via text"
+  - Walk-in → "Show customer QR code at counter; accept cash or COD"
+- Show applied offers/discounts in the items table with original vs. discounted prices.
+- Delivery fee row (shows ₱0.00 with "TBD" label).
+
+---
+
+## 7. GENERAL ENHANCEMENTS (add all of these)
+
+### 7A. Item Categories
+Ensure items have a `category` field in `server/models/Item.ts` (if not already). Seed at least these categories: Fasteners, Pipes & Fittings, Cement & Masonry, Lumber & Wood, Paint & Coatings, Electrical, Plumbing, Tools, Hardware & Fixtures, Safety Equipment.
+
+Update the inventory page to show category as a filterable column and add a category filter dropdown.
+
+### 7B. Real-time Offer Badges in Inventory
+On the inventory page's item list, add a small "On Sale" badge (with offer name on hover tooltip) for items currently covered by an active offer.
+
+### 7C. GCash QR Placeholder in Order Detail
+On order detail, if payment method involves GCash, show a placeholder GCash QR section with a note: "Upload store GCash QR in Settings → Payment QR Code." In Settings page, add a "Payment QR Code" section where admin can upload an image that gets displayed here.
+
+### 7D. Offer Awareness in Dashboard
+Add a small "Active Promotions" widget on the dashboard showing count of currently active offers and their names as chips/badges. Clicking navigates to `/offers`.
+
+### 7E. SystemLog entries for all new actions
+Log these events to SystemLog (existing model):
+- `OFFER_CREATED`, `OFFER_UPDATED`, `OFFER_TOGGLED`, `OFFER_DELETED`
+- `ORDER_TYPE_UPDATED`, `ORDER_PAYMENT_STATUS_UPDATED`
+- Include the acting user's username and relevant document IDs.
+
+### 7F. Validation & Error States
+- If user tries to set `paymentMethod` not allowed for the selected `orderType`, show inline validation error: "This payment method is not available for [Order Type]. Allowed: [list]."
+- If creating an `online_reservation` or `walkin_reservation` and `paymentStatus` is not `paid`, show a warning: "Reservations require upfront payment. Are you sure?"
+- If an item's stock is 0 and user tries to add to order, show error: "Item out of stock."
+- If an item's stock would go below 0 after the order, show warning: "Order quantity exceeds available stock."
+
+### 7G. Mobile Responsiveness
+The new Create Order panel and Offers page must be fully responsive. On mobile (<768px):
+- The Create Order Sheet should be full screen
+- The two-panel item search layout stacks vertically (search on top, cart on bottom)
+- The filter bar on orders page collapses into a single "Filters" button
+
+### 7H. Keyboard Shortcuts in Create Order
+- `Escape` closes the panel (with confirmation if items are added)
+- `/` or `Ctrl+F` focuses the item search input from anywhere in the panel
+- `Tab` navigates between form fields naturally
+- `Enter` in item search adds the first/highlighted result
+
+---
+
+## 8. IMPLEMENTATION ORDER
+
+Implement in this exact order to avoid breaking things:
+
+1. **Schema first**: Update `shared/schema.ts` with all new Zod schemas (order fields, offer schema, etc.)
+2. **Models**: Update `server/models/Order.ts`, create `server/models/Offer.ts`, update `server/models/Item.ts` for category
+3. **Migration**: Add migration logic in `server/seed.ts` to patch existing orders with default new fields
+4. **Backend routes**: Add all new/updated API routes in `server/routes.ts` (offers CRUD, updated order creation, dashboard stats, toggle active)
+5. **Dashboard**: Update `client/src/pages/dashboard.tsx` with new stat cards, charts, and columns
+6. **Orders page**: Rebuild Create Order panel, update table, add filters, status edit modal, quick pay
+7. **Order detail page**: Update to show all new fields
+8. **Offers page**: Create full new page with CRUD dialogs
+9. **Sidebar + routing**: Add Offers to nav and `App.tsx`
+10. **Inventory page**: Add category filter and on-sale badges
+11. **Settings page**: Add payment QR upload section
+12. **Polish**: Validation messages, keyboard shortcuts, mobile responsiveness
+
+---
+
+## 9. CODING STANDARDS TO FOLLOW
+
+- All new API routes must have Zod validation using `z.parse()` or `z.safeParse()` before touching the DB.
+- All new frontend data fetching uses TanStack Query (`useQuery` / `useMutation`).
+- Invalidate relevant query caches after mutations (e.g., after creating an offer, invalidate `["/api/offers"]` and `["/api/dashboard/stats"]`).
+- Use shadcn/ui components for all UI: Dialog, Sheet, Select, Combobox (Command component), Badge, Accordion, Switch, Tabs.
+- Use `cn()` from `lib/utils.ts` for all conditional class merging.
+- Define all new TypeScript types from the Zod schemas using `z.infer<typeof schema>`.
+- Follow the existing `apiRequest()` pattern for all fetch calls.
+- Every user-facing action that succeeds should show a `toast({ title: "...", description: "..." })`.
+- Every error from the API should show a `toast({ title: "Error", description: err.message, variant: "destructive" })`.
+- Keep all color coding consistent: amber = pending/warning, green = success/paid, red = error/cancelled, blue = processing/online, purple = reservation.
+- Do not remove or break any existing functionality. All existing routes, pages, and features must continue to work.
+- After all changes, run `npm run check` (TypeScript check) and fix all type errors before finishing.
