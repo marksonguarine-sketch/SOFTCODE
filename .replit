@@ -1,9 +1,10 @@
-modules = ["nodejs-20"]
+modules = ["nodejs-20", "web", "nix"]
 [nix]
 channel = "stable-25_05"
 
 [agent]
 expertMode = true
+stack = "FULLSTACK_JS"
 
 [userenv]
 
@@ -40,5 +41,5 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "autoscale"
-run = ["node", "dist/index.cjs"]
+run = ["node", "./dist/index.cjs"]
 build = ["npm", "run", "build"]
