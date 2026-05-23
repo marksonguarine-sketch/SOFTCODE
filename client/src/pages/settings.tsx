@@ -1,7 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Settings, Loader2, Save, Type, Palette, Layers, CreditCard, Store } from "lucide-react";
+import { Settings, Loader2, Save, Type, Palette, Layers, CreditCard, Store, Volume2 } from "lucide-react";
 import { settingsSchema, type SettingsInput, type ISettings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { GRADIENT_OPTIONS } from "@/lib/settings-context";
@@ -94,6 +94,7 @@ export default function SettingsPage() {
       storeContactNumber: (settings as any)?.storeContactNumber || "",
       autoApplyOffers: (settings as any)?.autoApplyOffers ?? true,
       showSavingsSummary: (settings as any)?.showSavingsSummary ?? true,
+      ttsVoice: (settings as any)?.ttsVoice || "en-US-AriaNeural",
     },
     values: settings ? {
       companyName: settings.companyName,
@@ -109,6 +110,7 @@ export default function SettingsPage() {
       storeContactNumber: (settings as any)?.storeContactNumber || "",
       autoApplyOffers: (settings as any)?.autoApplyOffers ?? true,
       showSavingsSummary: (settings as any)?.showSavingsSummary ?? true,
+      ttsVoice: (settings as any)?.ttsVoice || "en-US-AriaNeural",
     } : undefined,
   });
 
@@ -385,6 +387,40 @@ export default function SettingsPage() {
                     <FormDescription>Show total savings to customers when offers are applied</FormDescription>
                   </div>
                   <FormControl><Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-show-savings-summary" /></FormControl>
+                </FormItem>
+              )} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Volume2 className="h-4 w-4 text-primary" />Voice Announcements (TTS)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <FormField control={form.control} name="ttsVoice" render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-sm font-medium">Announcement Voice</FormLabel>
+                  <FormDescription>
+                    Voice used to announce new orders and reservations. Powered by Microsoft Edge TTS.
+                  </FormDescription>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger data-testid="select-tts-voice">
+                        <SelectValue placeholder="Select a voice" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="en-US-AriaNeural">Aria — Warm, expressive (US English)</SelectItem>
+                      <SelectItem value="en-US-GuyNeural">Guy — Deep, authoritative (US English)</SelectItem>
+                      <SelectItem value="en-GB-SoniaNeural">Sonia — Crisp and literary (British)</SelectItem>
+                      <SelectItem value="en-GB-RyanNeural">Ryan — Dramatic and clear (British)</SelectItem>
+                      <SelectItem value="en-AU-NatashaNeural">Natasha — Smooth and natural (Australian)</SelectItem>
+                      <SelectItem value="en-IE-EmilyNeural">Emily — Gentle and immersive (Irish)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
                 </FormItem>
               )} />
             </CardContent>

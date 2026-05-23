@@ -267,6 +267,7 @@ export const settingsSchema = z.object({
   storeContactNumber: z.string().optional().default(""),
   autoApplyOffers: z.boolean().optional(),
   showSavingsSummary: z.boolean().optional(),
+  ttsVoice: z.string().optional().default("en-US-AriaNeural"),
 });
 export type SettingsInput = z.infer<typeof settingsSchema>;
 
@@ -469,6 +470,7 @@ export interface ISettings {
   storeContactNumber: string;
   autoApplyOffers: boolean;
   showSavingsSummary: boolean;
+  ttsVoice: string;
 }
 
 export interface IOfferItem {

@@ -6,8 +6,9 @@ import { useLocation } from "wouter";
 import {
   Plus, Search, Loader2, ShoppingCart, Trash2, MapPin, UserCheck, Package,
   AlertCircle, ChevronRight, Sun, Moon, Sunset, Filter, ChevronLeft,
-  CheckSquare, Tag, Info, Minimize2, Maximize2, X,
+  CheckSquare, Tag, Info,
 } from "lucide-react";
+import { speakTTS, formatAmountForTTS } from "@/lib/tts";
 import {
   createOrderSchema, type CreateOrderInput, type IOrder, type IItem, type IOrderItem,
   ALLOWED_PAYMENT_METHODS, ORDER_TYPE_LABELS, ORDER_CHANNEL_LABELS,
@@ -129,7 +130,6 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const [itemQty, setItemQty] = useState(1);
   const [showAddress, setShowAddress] = useState(false);
   const [itemSearch, setItemSearch] = useState("");
-  const [isMinimized, setIsMinimized] = useState(false);
 
   const form = useForm<CreateOrderInput>({
     resolver: zodResolver(createOrderSchema),
@@ -158,6 +158,16 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      const data = form.getValues();
+      const itemsList = orderItems.map((i) => `${i.qty} ${i.itemName}`).join(", ");
+      const total = orderItems.reduce((s, i) => s + i.lineTotal, 0) + (Number(data.deliveryFee) || 0);
+      const typeLabel = ORDER_TYPE_LABELS[data.orderType] || data.orderType;
+      speakTTS(
+        `New ${typeLabel} order has been created for ${data.customerName}. ` +
+        `Items ordered: ${itemsList}. ` +
+        `Total amount: ${formatAmountForTTS(total)} pesos. ` +
+        `Payment method: ${PAYMENT_METHOD_LABELS[data.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] || data.paymentMethod}.`
+      );
       onClose();
       form.reset();
       setOrderItems([]);
@@ -225,7 +235,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   );
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); setIsMinimized(false); } }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); } }}>
       <DialogContent className="fixed inset-0 max-w-none !w-screen !h-screen !translate-x-0 !translate-y-0 !left-0 !top-0 !rounded-none m-0 flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="flex-shrink-0 px-6 py-4 border-b bg-background">
           <div className="flex items-center justify-between">
@@ -233,19 +243,9 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
               <DialogTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5" />Create New Order</DialogTitle>
               <DialogDescription>Step {step + 1} of 5 — {STEP_LABELS[step]}</DialogDescription>
             </div>
-            <div className="flex items-center gap-1">
-              <button type="button" className="p-1.5 rounded hover:bg-muted transition-colors" title={isMinimized ? "Expand" : "Minimize"} onClick={() => setIsMinimized((m) => !m)}>
-                {isMinimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
-              </button>
-              <button type="button" className="p-1.5 rounded hover:bg-muted transition-colors" title="Close" onClick={() => { onClose(); setStep(0); setOrderItems([]); form.reset(); setIsMinimized(false); }}>
-                <X className="h-4 w-4" />
-              </button>
-            </div>
           </div>
         </DialogHeader>
 
-        {!isMinimized && (
-        <>
         <div className="flex-1 overflow-y-auto px-6 py-4">
 
         {/* Progress bar */}
@@ -343,12 +343,6 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                     </div>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <Input type="number" min={1} value={itemQty} onChange={(e) => setItemQty(parseInt(e.target.value) || 1)} className="w-24" placeholder="Qty" data-testid="input-order-item-qty" />
-                  <Button type="button" variant="secondary" onClick={addItem} disabled={!selectedItemId} data-testid="button-add-order-item">
-                    Add Item
-                  </Button>
-                </div>
                 {orderItems.length === 0 ? (
                   <div className="text-center py-8 text-muted-foreground text-sm border-2 border-dashed rounded-lg">Search and add items above</div>
                 ) : (
@@ -368,11 +362,22 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                           <TableRow key={oi.itemId}>
                             <TableCell className="text-sm">{oi.itemName}</TableCell>
                             <TableCell className="text-center">
-                              <Input type="number" min={1} value={oi.qty} className="w-16 h-7 text-sm text-center"
-                                onChange={(e) => {
-                                  const newQty = parseInt(e.target.value) || 1;
-                                  setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
-                                }} />
+                              <div className="flex items-center justify-center gap-1">
+                                <button type="button"
+                                  className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent text-base font-bold leading-none"
+                                  onClick={() => {
+                                    const newQty = Math.max(1, oi.qty - 1);
+                                    setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
+                                  }}>−</button>
+                                <span className="w-8 text-center text-sm font-medium select-none">{oi.qty}</span>
+                                <button type="button"
+                                  className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent text-base font-bold leading-none"
+                                  onClick={() => {
+                                    const stock = allItems.find((i) => i._id === oi.itemId)?.currentQuantity ?? 999;
+                                    const newQty = Math.min(stock, oi.qty + 1);
+                                    setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
+                                  }}>+</button>
+                              </div>
                             </TableCell>
                             <TableCell className="text-right text-sm">{formatCurrency(oi.originalUnitPrice)}</TableCell>
                             <TableCell className="text-right text-sm font-medium">{formatCurrency(oi.lineTotal)}</TableCell>
@@ -555,8 +560,6 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
             )}
           </div>
         </div>
-        </>
-        )}
       </DialogContent>
     </Dialog>
   );

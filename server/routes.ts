@@ -1998,6 +1998,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── TTS ────────────────────────────────────────────────
+  app.post("/api/tts", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { text } = req.body as { text?: string };
+      if (!text || !text.trim()) return fail(res, 400, "text is required");
+      const settings = await Settings.findOne();
+      const voice = settings?.ttsVoice || "en-US-AriaNeural";
+      const { MsEdgeTTS, OUTPUT_FORMAT } = await import("msedge-tts");
+      const tts = new MsEdgeTTS();
+      await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
+      res.setHeader("Content-Type", "audio/mpeg");
+      res.setHeader("Cache-Control", "no-store");
+      const readable = tts.toStream(text.slice(0, 500));
+      readable.on("error", (err) => { if (!res.headersSent) fail(res, 500, err.message); });
+      readable.pipe(res);
+    } catch (err: any) {
+      if (!res.headersSent) return fail(res, 500, err.message);
+    }
+  });
+
   // ─── SEARCH ─────────────────────────────────────────────
   app.get("/api/search", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {

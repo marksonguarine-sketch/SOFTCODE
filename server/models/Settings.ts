@@ -17,6 +17,7 @@ export interface ISettingsDoc extends Document {
   storeContactNumber: string;
   autoApplyOffers: boolean;
   showSavingsSummary: boolean;
+  ttsVoice: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,6 +40,7 @@ const settingsSchema = new Schema<ISettingsDoc>(
     storeContactNumber: { type: String, default: "" },
     autoApplyOffers: { type: Boolean, default: true },
     showSavingsSummary: { type: Boolean, default: true },
+    ttsVoice: { type: String, default: "en-US-AriaNeural" },
   },
   { timestamps: true }
 );

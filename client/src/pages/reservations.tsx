@@ -6,8 +6,9 @@ import {
   CalendarCheck, ChevronLeft, ChevronRight, Search, X, Filter, FileText,
   Phone, User, Clock, Copy, Check, Loader2, Eye, MoreHorizontal,
   StickyNote, Printer, CalendarDays, MapPin, CreditCard, Package,
-  AlertCircle, CheckCircle2, Ban, ChevronDown
+  AlertCircle, CheckCircle2, Ban, ChevronDown, Plus,
 } from "lucide-react";
+import type { IItem } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { getStatusBadgeClass } from "@/lib/utils";
@@ -20,9 +21,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { speakTTS } from "@/lib/tts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -40,6 +43,315 @@ const PAYMENT_LABELS: Record<string, string> = {
 
 function formatPHP(v: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
+}
+
+function pdfCurrency(v: number): string {
+  const abs = Math.abs(v);
+  const parts = abs.toFixed(2).split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (v < 0 ? "-PHP " : "PHP ") + parts[0] + "." + parts[1];
+}
+
+type ResItemLocal = {
+  itemId: string; itemName: string; qty: number;
+  originalUnitPrice: number; discountedUnitPrice: number;
+  discountApplied: boolean; offerName: string; lineTotal: number;
+};
+
+const RES_ORDER_TYPES = ["walkin_reservation", "online_reservation"] as const;
+const RES_ORDER_CHANNELS = ["walkin", "email", "sms", "messenger", "phone"] as const;
+const RES_ALLOWED_METHODS: Record<string, string[]> = {
+  walkin_reservation: ["cash", "gcash_qr"],
+  online_reservation: ["gcash_qr"],
+};
+const RES_PAYMENT_STATUSES = ["pending_payment", "partial", "paid"] as const;
+const RES_FULFILLMENT_STATUSES = ["pending", "processing", "ready", "completed", "cancelled"] as const;
+
+function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; onClose: () => void; allItems: IItem[] }) {
+  const { toast } = useToast();
+  const [orderItems, setOrderItems] = useState<ResItemLocal[]>([]);
+  const [itemSearch, setItemSearch] = useState("");
+  const [orderType, setOrderType] = useState<"walkin_reservation" | "online_reservation">("walkin_reservation");
+  const [orderChannel, setOrderChannel] = useState("walkin");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentStatus, setPaymentStatus] = useState("pending_payment");
+  const [fulfillmentStatus, setFulfillmentStatus] = useState("pending");
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
+  const [scheduledDate, setScheduledDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const allowedMethods = RES_ALLOWED_METHODS[orderType] || ["cash"];
+
+  const filteredItems = allItems.filter(
+    (it) => !orderItems.find((oi) => oi.itemId === it._id) &&
+      (itemSearch === "" || it.itemName.toLowerCase().includes(itemSearch.toLowerCase()))
+  );
+
+  function addItemToList(item: IItem) {
+    const exists = orderItems.find((oi) => oi.itemId === item._id);
+    if (exists) {
+      setOrderItems((prev) => prev.map((oi) => oi.itemId === item._id
+        ? { ...oi, qty: oi.qty + 1, lineTotal: (oi.qty + 1) * oi.discountedUnitPrice } : oi));
+    } else {
+      setOrderItems((prev) => [...prev, {
+        itemId: item._id, itemName: item.itemName, qty: 1,
+        originalUnitPrice: item.unitPrice, discountedUnitPrice: item.unitPrice,
+        discountApplied: false, offerName: "", lineTotal: item.unitPrice,
+      }]);
+    }
+    setItemSearch("");
+  }
+
+  function removeItem(itemId: string) {
+    setOrderItems((prev) => prev.filter((oi) => oi.itemId !== itemId));
+  }
+
+  const subtotal = orderItems.reduce((s, i) => s + i.lineTotal, 0);
+
+  function validate() {
+    const e: Record<string, string> = {};
+    if (!customerName.trim()) e.customerName = "Customer name is required";
+    if (!scheduledDate) e.scheduledDate = "Scheduled date and time is required";
+    if (!paymentMethod) e.paymentMethod = "Payment method is required";
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }
+
+  function resetForm() {
+    setCustomerName(""); setCustomerPhone(""); setScheduledDate(""); setNotes("");
+    setOrderItems([]); setItemSearch(""); setErrors({});
+    setOrderType("walkin_reservation"); setOrderChannel("walkin");
+    setPaymentMethod("cash"); setPaymentStatus("pending_payment"); setFulfillmentStatus("pending");
+  }
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/orders", {
+        customerName: customerName.trim(),
+        customerPhone: customerPhone.trim(),
+        orderType, orderChannel, paymentMethod, paymentStatus, fulfillmentStatus,
+        scheduledDate, notes, deliveryFee: 0, items: orderItems,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      const dateLabel = scheduledDate
+        ? new Date(scheduledDate).toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric" })
+        : "a scheduled date";
+      const itemsList = orderItems.length > 0
+        ? orderItems.map((i) => `${i.qty} ${i.itemName}`).join(", ")
+        : "no specific items";
+      const typeLabel = orderType === "online_reservation" ? "online reservation" : "walk-in reservation";
+      speakTTS(
+        `New ${typeLabel} has been created for ${customerName}, scheduled for ${dateLabel}. ` +
+        `Items: ${itemsList}. ` +
+        (subtotal > 0 ? `Total amount: ${new Intl.NumberFormat("en-PH", { style: "decimal", minimumFractionDigits: 2 }).format(subtotal)} pesos. ` : "") +
+        `Payment via ${paymentMethod === "gcash_qr" ? "GCash" : paymentMethod}.`
+      );
+      toast({ title: "Reservation created successfully" });
+      onClose();
+      resetForm();
+    },
+    onError: (err: Error) => toast({ title: "Failed to create reservation", description: err.message, variant: "destructive" }),
+  });
+
+  function handleSubmit() {
+    if (!validate()) return;
+    createMutation.mutate();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); resetForm(); } }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <CalendarCheck className="h-5 w-5" />New Reservation
+          </DialogTitle>
+          <DialogDescription>Fill in all required details to schedule a new reservation.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-5 py-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Customer Name <span className="text-destructive">*</span></label>
+              <Input placeholder="e.g. Juan dela Cruz" value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)} data-testid="input-res-customer-name" />
+              {errors.customerName && <p className="text-xs text-destructive">{errors.customerName}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Customer Phone</label>
+              <Input placeholder="e.g. 0917-123-4567" value={customerPhone}
+                onChange={(e) => setCustomerPhone(e.target.value)} data-testid="input-res-customer-phone" />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Reservation Type <span className="text-destructive">*</span></label>
+            <div className="grid grid-cols-2 gap-2">
+              {RES_ORDER_TYPES.map((type) => (
+                <button key={type} type="button"
+                  className={`p-3 rounded-lg border text-sm text-left transition-colors ${orderType === type ? "border-primary bg-primary/5 font-medium" : "border-border hover:border-primary/50"}`}
+                  onClick={() => {
+                    setOrderType(type);
+                    const allowed = RES_ALLOWED_METHODS[type] || ["cash"];
+                    if (!allowed.includes(paymentMethod)) setPaymentMethod(allowed[0]);
+                  }}>
+                  {type === "walkin_reservation" ? "Walk-in Reservation" : "Online Reservation"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Scheduled Date & Time <span className="text-destructive">*</span></label>
+            <Input type="datetime-local" value={scheduledDate}
+              onChange={(e) => setScheduledDate(e.target.value)} data-testid="input-res-scheduled-date" />
+            {errors.scheduledDate && <p className="text-xs text-destructive">{errors.scheduledDate}</p>}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Order Channel</label>
+            <Select value={orderChannel} onValueChange={setOrderChannel}>
+              <SelectTrigger data-testid="select-res-channel"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {RES_ORDER_CHANNELS.map((ch) => (
+                  <SelectItem key={ch} value={ch}>{ch.charAt(0).toUpperCase() + ch.slice(1)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Payment Method <span className="text-destructive">*</span></label>
+              <div className="grid grid-cols-2 gap-2">
+                {allowedMethods.map((method) => (
+                  <button key={method} type="button"
+                    className={`p-2 rounded-lg border text-xs text-center transition-colors ${paymentMethod === method ? "border-primary bg-primary/5 font-medium" : "border-border hover:border-primary/50"}`}
+                    onClick={() => setPaymentMethod(method)}>
+                    {method === "gcash_qr" ? "GCash QR" : method.charAt(0).toUpperCase() + method.slice(1)}
+                  </button>
+                ))}
+              </div>
+              {errors.paymentMethod && <p className="text-xs text-destructive">{errors.paymentMethod}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Payment Status</label>
+              <Select value={paymentStatus} onValueChange={setPaymentStatus}>
+                <SelectTrigger data-testid="select-res-payment-status"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {RES_PAYMENT_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s === "pending_payment" ? "Pending Payment" : s === "partial" ? "Partial" : "Paid"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Fulfillment Status</label>
+            <Select value={fulfillmentStatus} onValueChange={setFulfillmentStatus}>
+              <SelectTrigger data-testid="select-res-fulfillment"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {RES_FULFILLMENT_STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Items <span className="text-muted-foreground text-xs">(optional)</span></label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input className="pl-9" placeholder="Search items to add…" value={itemSearch}
+                onChange={(e) => setItemSearch(e.target.value)} data-testid="input-res-item-search" />
+              {itemSearch && filteredItems.length > 0 && (
+                <div className="absolute top-full left-0 right-0 z-50 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto mt-1">
+                  {filteredItems.slice(0, 8).map((it) => (
+                    <button key={it._id} type="button"
+                      className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent text-left"
+                      onClick={() => addItemToList(it)} data-testid={`option-res-item-${it._id}`}>
+                      <span>{it.itemName}</span>
+                      <span className="text-muted-foreground text-xs">{formatPHP(it.unitPrice)} · {it.currentQuantity} avail</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {orderItems.length > 0 && (
+              <div className="border rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/50">
+                      <th className="p-2 text-left font-medium">Item</th>
+                      <th className="p-2 text-center font-medium">Qty</th>
+                      <th className="p-2 text-right font-medium">Price</th>
+                      <th className="p-2 text-right font-medium">Total</th>
+                      <th className="p-2 w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orderItems.map((oi) => (
+                      <tr key={oi.itemId} className="border-b">
+                        <td className="p-2">{oi.itemName}</td>
+                        <td className="p-2">
+                          <div className="flex items-center justify-center gap-1">
+                            <button type="button"
+                              className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent font-bold text-base leading-none"
+                              onClick={() => {
+                                const newQty = Math.max(1, oi.qty - 1);
+                                setOrderItems((prev) => prev.map((i) => i.itemId === oi.itemId ? { ...i, qty: newQty, lineTotal: newQty * i.discountedUnitPrice } : i));
+                              }}>−</button>
+                            <span className="w-8 text-center font-medium">{oi.qty}</span>
+                            <button type="button"
+                              className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent font-bold text-base leading-none"
+                              onClick={() => {
+                                const stock = allItems.find((i) => i._id === oi.itemId)?.currentQuantity ?? 999;
+                                const newQty = Math.min(stock, oi.qty + 1);
+                                setOrderItems((prev) => prev.map((i) => i.itemId === oi.itemId ? { ...i, qty: newQty, lineTotal: newQty * i.discountedUnitPrice } : i));
+                              }}>+</button>
+                          </div>
+                        </td>
+                        <td className="p-2 text-right">{formatPHP(oi.originalUnitPrice)}</td>
+                        <td className="p-2 text-right font-medium">{formatPHP(oi.lineTotal)}</td>
+                        <td className="p-2">
+                          <button type="button" onClick={() => removeItem(oi.itemId)}
+                            className="text-destructive hover:text-destructive/80 p-1">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="p-2 text-right text-sm font-semibold">Subtotal: {formatPHP(subtotal)}</div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium">Notes</label>
+            <Textarea placeholder="Any special instructions or notes…" value={notes}
+              onChange={(e) => setNotes(e.target.value)} rows={2} data-testid="input-res-notes" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { onClose(); resetForm(); }} type="button">Cancel</Button>
+          <Button onClick={handleSubmit} disabled={createMutation.isPending} type="button" data-testid="button-create-reservation">
+            {createMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            <CalendarCheck className="h-4 w-4 mr-2" />Create Reservation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function StatusBadge({ status, size = "sm" }: { status: string; size?: "xs" | "sm" }) {
@@ -127,9 +439,9 @@ function generatePDF(reservation: any, settings?: any) {
     const rows = reservation.items.map((it: any) => [
       it.itemName,
       String(it.qty ?? it.quantity ?? 1),
-      formatPHP(it.originalUnitPrice || it.unitPrice || 0),
-      it.discountApplied ? formatPHP((it.originalUnitPrice - it.discountedUnitPrice) * (it.qty ?? 1)) : "—",
-      formatPHP(it.lineTotal ?? 0),
+      pdfCurrency(it.originalUnitPrice || it.unitPrice || 0),
+      it.discountApplied ? pdfCurrency((it.originalUnitPrice - it.discountedUnitPrice) * (it.qty ?? 1)) : "—",
+      pdfCurrency(it.lineTotal ?? 0),
     ]);
     autoTable(doc, {
       startY: y,
@@ -146,10 +458,10 @@ function generatePDF(reservation: any, settings?: any) {
     const delivery = reservation.deliveryFee || 0;
     const total = reservation.totalAmount || 0;
     doc.setFontSize(9);
-    doc.text(`Subtotal: ${formatPHP(subtotal)}`, pageW - 14, y, { align: "right" });
-    doc.text(`Delivery Fee: ${formatPHP(delivery)}`, pageW - 14, y + 5, { align: "right" });
+    doc.text(`Subtotal: ${pdfCurrency(subtotal)}`, pageW - 14, y, { align: "right" });
+    doc.text(`Delivery Fee: ${pdfCurrency(delivery)}`, pageW - 14, y + 5, { align: "right" });
     doc.setFont("helvetica", "bold");
-    doc.text(`Total: ${formatPHP(total)}`, pageW - 14, y + 12, { align: "right" });
+    doc.text(`Total: ${pdfCurrency(total)}`, pageW - 14, y + 12, { align: "right" });
     y += 20;
   }
 
@@ -911,11 +1223,17 @@ export default function ReservationsPage() {
   const [, params] = useLocation();
   const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
   const defaultTab = urlParams.get("tab") || "calendar";
+  const [createResOpen, setCreateResOpen] = useState(false);
 
   const { data, isLoading } = useQuery<{ success: boolean; data: any[] }>({
     queryKey: ["/api/reservations"],
     queryFn: () => apiRequest("GET", "/api/reservations").then((r) => r.json()),
   });
+
+  const { data: itemsData } = useQuery<{ success: boolean; data: IItem[] }>({
+    queryKey: ["/api/items/all"],
+  });
+  const allItems = itemsData?.data || [];
 
   const reservations = data?.data || [];
   const upcomingCount = reservations.filter((r) => r.scheduledDate && isFuture(new Date(r.scheduledDate)) &&
@@ -924,6 +1242,7 @@ export default function ReservationsPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+      <CreateReservationDialog open={createResOpen} onClose={() => setCreateResOpen(false)} allItems={allItems} />
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
@@ -933,6 +1252,9 @@ export default function ReservationsPage() {
             <p className="text-sm text-muted-foreground mt-0.5">Manage all scheduled reservations</p>
           </div>
           <div className="flex gap-2 flex-wrap">
+            <Button onClick={() => setCreateResOpen(true)} data-testid="button-new-reservation">
+              <Plus className="h-4 w-4 mr-2" />New Reservation
+            </Button>
             {pendingCount > 0 && (
               <div className="flex items-center gap-1.5 text-sm bg-amber-50 text-amber-800 border border-amber-200 rounded-lg px-3 py-1.5">
                 <AlertCircle className="h-4 w-4" />
