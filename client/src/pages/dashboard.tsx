@@ -1659,22 +1659,15 @@ export default function DashboardPage() {
     queryFn: () => fetchDashboard(topSalesPeriod),
   });
 
-  const { data: allOrdersData } = useQuery<{ success: boolean; data: { orders: any[] } }>({
-    queryKey: ["/api/orders", "dashboard-mini"],
-    queryFn: () => apiRequest("GET", "/api/orders?pageSize=500").then((r) => r.json()),
+  const { data: dashStatsData } = useQuery<{ success: boolean; data: any }>({
+    queryKey: ["/api/dashboard/stats"],
   });
-
-  const { data: activeOffersCountData } = useQuery<{ success: boolean; data: { total: number } }>({
-    queryKey: ["/api/offers", "dashboard-count"],
-    queryFn: () => fetch("/api/offers?status=active&page=1&pageSize=1").then((r) => r.json()),
-  });
-
-  const allOrdersList = allOrdersData?.data?.orders || [];
-  const unpaidOrders = allOrdersList.filter((o: any) => o.paymentStatus === "unpaid" || o.paymentStatus === "partially_paid").length;
-  const pendingFulfillment = allOrdersList.filter((o: any) => o.fulfillmentStatus === "unfulfilled" || o.fulfillmentStatus === "partially_fulfilled").length;
-  const now = new Date();
-  const upcomingReservations = allOrdersList.filter((o: any) => o.orderType === "reservation" && o.scheduledDate && new Date(o.scheduledDate) >= now).length;
-  const activeOffersCount = (activeOffersCountData as any)?.data?.total ?? 0;
+  const dashStats = dashStatsData?.data;
+  const activeOffersCount = dashStats?.activeOffersCount ?? 0;
+  const unpaidOrders = dashStats?.unpaidOrdersCount ?? 0;
+  const pendingFulfillment = dashStats?.pendingFulfillmentCount ?? 0;
+  const upcomingReservationsCount = dashStats?.upcomingReservationsCount ?? 0;
+  const upcomingReservationsList: any[] = dashStats?.upcomingReservations || [];
 
   const earnings = earningsData?.data;
   const orders = ordersData?.data;
@@ -1791,7 +1784,7 @@ export default function DashboardPage() {
         </div>
         <div
           className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate("/orders")}
+          onClick={() => navigate("/orders?fulfillmentStatus=pending")}
           data-testid="card-pending-fulfillment"
         >
           <div className="flex items-center justify-between mb-2">
@@ -1805,7 +1798,7 @@ export default function DashboardPage() {
         </div>
         <div
           className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate("/orders")}
+          onClick={() => navigate("/reservations")}
           data-testid="card-upcoming-reservations"
         >
           <div className="flex items-center justify-between mb-2">
@@ -1814,10 +1807,38 @@ export default function DashboardPage() {
               <CalendarDays className="w-4 h-4 text-purple-500" />
             </div>
           </div>
-          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-upcoming-reservations">{upcomingReservations}</div>
+          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-upcoming-reservations">{upcomingReservationsCount}</div>
           <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">scheduled ahead</p>
         </div>
       </div>
+
+      {upcomingReservationsList.length > 0 && (
+        <div className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/50 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 text-purple-500" />Upcoming Reservations (Next 7 Days)
+            </h3>
+            <button onClick={() => navigate("/reservations")} className="text-xs text-primary hover:underline">View All Reservations →</button>
+          </div>
+          <div className="space-y-2">
+            {upcomingReservationsList.slice(0, 5).map((r: any) => (
+              <div key={r._id} className="flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-muted/30 cursor-pointer transition-colors"
+                onClick={() => navigate(`/reservations?detail=${r._id}`)}>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{r.customerName}</p>
+                  <p className="text-xs text-muted-foreground">{r.scheduledDate ? new Date(r.scheduledDate).toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" }) : "Date TBD"}</p>
+                </div>
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${r.orderType === "online_reservation" ? "bg-blue-100 text-blue-800" : "bg-teal-100 text-teal-800"}`}>
+                  {r.orderType === "online_reservation" ? "Online" : "Walk-in"}
+                </span>
+                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${r.paymentStatus === "paid" ? "bg-green-100 text-green-800" : r.paymentStatus === "partial" ? "bg-orange-100 text-orange-800" : "bg-amber-100 text-amber-800"}`}>
+                  {r.paymentStatus === "paid" ? "Paid" : r.paymentStatus === "partial" ? "Partial" : "Unpaid"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <RevenueSection
         data={revenue?.revenueChart ?? []}

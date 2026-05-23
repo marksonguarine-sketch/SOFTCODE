@@ -539,11 +539,25 @@ export default function OffersPage() {
                     <TableBody>
                       {offers.map((offer) => {
                         const isCurrentlyActive = offer.isActive && new Date(offer.startDate) <= now && new Date(offer.endDate) >= now;
+                        const isExpired = new Date(offer.endDate) < now;
+                        const isScheduled = new Date(offer.startDate) > now;
+                        const daysLeft = differenceInDays(new Date(offer.endDate), now);
+                        const isExpiringSoon = offer.isActive && !isExpired && daysLeft >= 0 && daysLeft <= 7;
                         return (
-                          <TableRow key={offer._id} data-testid={`row-offer-${offer._id}`}>
+                          <TableRow
+                            key={offer._id}
+                            className="cursor-pointer hover:bg-muted/30 transition-colors"
+                            onClick={() => setViewOffer(offer)}
+                            data-testid={`row-offer-${offer._id}`}
+                          >
                             <TableCell>
                               <div>
-                                <p className="font-medium text-sm">{offer.name}</p>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <p className="font-medium text-sm">{offer.name}</p>
+                                  {isExpired && <Badge className="text-[9px] px-1.5 py-0 h-4 bg-gray-100 text-gray-600 border-gray-200 font-medium">Expired</Badge>}
+                                  {isScheduled && !isExpired && <Badge className="text-[9px] px-1.5 py-0 h-4 bg-blue-100 text-blue-700 border-blue-200 font-medium">Scheduled</Badge>}
+                                  {isExpiringSoon && <Badge className="text-[9px] px-1.5 py-0 h-4 bg-amber-100 text-amber-700 border-amber-200 font-medium">Expiring Soon</Badge>}
+                                </div>
                                 {offer.description && <p className="text-xs text-muted-foreground truncate max-w-[180px]">{offer.description}</p>}
                               </div>
                             </TableCell>
@@ -567,29 +581,23 @@ export default function OffersPage() {
                                 data-testid={`switch-offer-toggle-${offer._id}`}
                               />
                             </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex items-center justify-end gap-1">
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewOffer(offer)} data-testid={`button-view-offer-${offer._id}`}><Eye className="h-3.5 w-3.5" /></Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>View Details</TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditOffer(offer)} data-testid={`button-edit-offer-${offer._id}`}><Pencil className="h-3.5 w-3.5" /></Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setEditOffer(offer); }} data-testid={`button-edit-offer-${offer._id}`}><Pencil className="h-3.5 w-3.5" /></Button>
                                   </TooltipTrigger>
                                   <TooltipContent>Edit</TooltipContent>
                                 </Tooltip>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => duplicateMutation.mutate(offer._id)} disabled={duplicateMutation.isPending} data-testid={`button-duplicate-offer-${offer._id}`}><Copy className="h-3.5 w-3.5" /></Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); duplicateMutation.mutate(offer._id); }} disabled={duplicateMutation.isPending} data-testid={`button-duplicate-offer-${offer._id}`}><Copy className="h-3.5 w-3.5" /></Button>
                                   </TooltipTrigger>
                                   <TooltipContent>Duplicate</TooltipContent>
                                 </Tooltip>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => { setDeleteOffer(offer); setDeleteConfirmText(""); }} data-testid={`button-delete-offer-${offer._id}`}><Trash2 className="h-3.5 w-3.5" /></Button>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setDeleteOffer(offer); setDeleteConfirmText(""); }} data-testid={`button-delete-offer-${offer._id}`}><Trash2 className="h-3.5 w-3.5" /></Button>
                                   </TooltipTrigger>
                                   <TooltipContent>Delete</TooltipContent>
                                 </Tooltip>
@@ -616,9 +624,9 @@ export default function OffersPage() {
         </Card>
       </div>
 
-      <OfferFormDialog open={createOpen} onClose={() => setCreateOpen(false)} onSuccess={() => {}} />
-      {editOffer && <OfferFormDialog open onClose={() => setEditOffer(null)} initialData={editOffer} onSuccess={() => setEditOffer(null)} />}
-      {viewOffer && <OfferDetailModal offer={viewOffer} onClose={() => setViewOffer(null)} />}
+      {createOpen && <OfferFormDialog key="create-offer" open onClose={() => setCreateOpen(false)} onSuccess={() => setCreateOpen(false)} />}
+      {editOffer && <OfferFormDialog key={editOffer._id} open onClose={() => setEditOffer(null)} initialData={editOffer} onSuccess={() => setEditOffer(null)} />}
+      {viewOffer && <OfferDetailModal key={viewOffer._id} offer={viewOffer} onClose={() => setViewOffer(null)} />}
 
       <AlertDialog open={!!deleteOffer} onOpenChange={() => { setDeleteOffer(null); setDeleteConfirmText(""); }}>
         <AlertDialogContent>

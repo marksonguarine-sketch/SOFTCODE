@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -121,11 +121,23 @@ export default function InventoryPage() {
   const { isAdmin } = useAuth();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [stockFilter, setStockFilter] = useState<"all" | "critical" | "low" | "normal">(() => {
+    const p = new URLSearchParams(window.location.search);
+    return (p.get("filter") as any) || "all";
+  });
   const [addOpen, setAddOpen] = useState(false);
   const [restockItem, setRestockItem] = useState<IItem | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">(() => {
     return (localStorage.getItem("inventory-view") as "grid" | "list") || "list";
   });
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const f = p.get("filter");
+    if (f === "critical" || f === "low" || f === "normal") {
+      setStockFilter(f);
+    }
+  }, []);
 
   const toggleView = (mode: "grid" | "list") => {
     setViewMode(mode);
@@ -163,8 +175,14 @@ export default function InventoryPage() {
       item.itemName.toLowerCase().includes(search.toLowerCase()) ||
       item.barcode?.toLowerCase().includes(search.toLowerCase());
     const matchCategory = categoryFilter === "all" || item.category === categoryFilter;
-    return matchSearch && matchCategory;
+    const matchStock =
+      stockFilter === "all" ||
+      (stockFilter === "critical" && item.currentQuantity <= 0) ||
+      (stockFilter === "low" && item.currentQuantity > 0 && item.currentQuantity <= item.reorderLevel) ||
+      (stockFilter === "normal" && item.currentQuantity > item.reorderLevel);
+    return matchSearch && matchCategory && matchStock;
   });
+  const filteredValue = filtered.reduce((acc, i) => acc + i.unitPrice * i.currentQuantity, 0);
 
   const totalItems = items.length;
   const criticalStock = items.filter((i) => i.currentQuantity <= 0).length;
@@ -331,6 +349,17 @@ export default function InventoryPage() {
         </Button>
       </div>
 
+      {stockFilter === "critical" && criticalStock > 0 && (
+        <div className="flex items-center gap-3 bg-destructive/10 border border-destructive/30 rounded-lg px-4 py-3">
+          <AlertCircle className="h-5 w-5 text-destructive shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-destructive">Critical Stock Alert</p>
+            <p className="text-xs text-destructive/80">{criticalStock} item(s) are completely out of stock and need immediate restocking.</p>
+          </div>
+          <Button size="sm" variant="destructive" onClick={() => setStockFilter("all")}>Clear Filter</Button>
+        </div>
+      )}
+
       {isAdmin && pendingApprovals.length > 0 && (
         <Card className="border-yellow-500/50">
           <CardHeader className="pb-2">
@@ -409,45 +438,71 @@ export default function InventoryPage() {
         </Card>
       </div>
 
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Search items..."
-            className="pl-9"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            data-testid="input-search-items"
-          />
+      <div className="space-y-2">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search items..."
+              className="pl-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              data-testid="input-search-items"
+            />
+          </div>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[180px]" data-testid="select-category-filter">
+              <SelectValue placeholder="All Categories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Categories</SelectItem>
+              {categories.map((cat) => (
+                <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex gap-1">
+            <Button
+              variant={viewMode === "grid" ? "default" : "outline"}
+              size="icon"
+              onClick={() => toggleView("grid")}
+              data-testid="button-view-grid"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "list" ? "default" : "outline"}
+              size="icon"
+              onClick={() => toggleView("list")}
+              data-testid="button-view-list"
+            >
+              <List className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-        <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-[180px]" data-testid="select-category-filter">
-            <SelectValue placeholder="All Categories" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {categories.map((cat) => (
-              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <div className="flex gap-1">
-          <Button
-            variant={viewMode === "grid" ? "default" : "outline"}
-            size="icon"
-            onClick={() => toggleView("grid")}
-            data-testid="button-view-grid"
-          >
-            <LayoutGrid className="h-4 w-4" />
-          </Button>
-          <Button
-            variant={viewMode === "list" ? "default" : "outline"}
-            size="icon"
-            onClick={() => toggleView("list")}
-            data-testid="button-view-list"
-          >
-            <List className="h-4 w-4" />
-          </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-muted-foreground font-medium">Stock:</span>
+          {(["all", "critical", "low", "normal"] as const).map((f) => {
+            const labels = { all: `All (${totalItems})`, critical: `Critical (${criticalStock})`, low: `Low (${lowStock})`, normal: `In Stock (${totalItems - criticalStock - lowStock})` };
+            const styles = { all: "", critical: "border-destructive/50 text-destructive hover:bg-destructive/10", low: "border-yellow-400/50 text-yellow-700 hover:bg-yellow-50", normal: "border-green-400/50 text-green-700 hover:bg-green-50" };
+            return (
+              <Button
+                key={f}
+                size="sm"
+                variant={stockFilter === f ? "default" : "outline"}
+                className={`h-7 text-xs ${stockFilter !== f ? styles[f] : ""}`}
+                onClick={() => setStockFilter(f)}
+                data-testid={`button-stock-filter-${f}`}
+              >
+                {labels[f]}
+              </Button>
+            );
+          })}
+          {stockFilter !== "all" && (
+            <span className="text-xs text-muted-foreground ml-2">
+              Showing {filtered.length} items · Total value: {formatCurrency(filteredValue)}
+            </span>
+          )}
         </div>
       </div>
 
@@ -506,8 +561,9 @@ export default function InventoryPage() {
                   <TableHead>Item Name</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead>Supplier</TableHead>
-                  <TableHead className="text-right">Price</TableHead>
+                  <TableHead className="text-right">Unit Price</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Stock Value</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -563,6 +619,7 @@ export default function InventoryPage() {
                         <TableCell className="text-muted-foreground">{item.supplierName || "-"}</TableCell>
                         <TableCell className="text-right">{formatCurrency(item.unitPrice)}</TableCell>
                         <TableCell className="text-right">{item.currentQuantity}</TableCell>
+                        <TableCell className="text-right text-muted-foreground text-xs">{formatCurrency(item.unitPrice * item.currentQuantity)}</TableCell>
                         <TableCell><StockBadge item={item} /></TableCell>
                         <TableCell>
                           <Button

@@ -112,6 +112,29 @@ async function performAutoBackup() {
   }
 }
 
+cron.schedule("0 * * * *", async () => {
+  try {
+    const now = new Date();
+    const in24h = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+    const upcoming = await Order.find({
+      orderType: { $in: ["online_reservation", "walkin_reservation"] },
+      scheduledDate: { $gte: now, $lte: in24h },
+      fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+    }).lean();
+    if (upcoming.length > 0 && io) {
+      io.emit("reservations:upcoming_24h", {
+        count: upcoming.length,
+        reservations: upcoming.map((r: any) => ({
+          _id: r._id, customerName: r.customerName,
+          scheduledDate: r.scheduledDate, trackingNumber: r.trackingNumber,
+        })),
+      });
+    }
+  } catch (err) {
+    console.error("[cron] Reservation notification check failed:", err);
+  }
+});
+
 cron.schedule("0 0 * * *", async () => {
   try {
     const now = new Date();
@@ -259,6 +282,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         activeOffers,
         recentOrdersDocs,
         upcomingReservations,
+        activeOrdersCount,
+        unpaidOrdersCount,
+        pendingFulfillmentCount,
+        upcomingReservationsCount,
       ] = await Promise.all([
         Order.countDocuments({ createdAt: { $gte: todayStart } }),
         Order.countDocuments({ fulfillmentStatus: "completed" }),
@@ -282,6 +309,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           fulfillmentStatus: { $nin: ["completed", "cancelled"] },
           scheduledDate: { $gte: now, $lte: sevenDaysLater },
         }).sort({ scheduledDate: 1 }).limit(10).lean(),
+        Order.countDocuments({ fulfillmentStatus: { $nin: ["completed", "cancelled"] } }),
+        Order.countDocuments({ paymentStatus: { $in: ["pending_payment", "partial"] } }),
+        Order.countDocuments({ fulfillmentStatus: { $in: ["pending", "processing"] } }),
+        Order.countDocuments({
+          orderType: { $in: ["online_reservation", "walkin_reservation"] },
+          fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+          scheduledDate: { $gte: now },
+        }),
       ]);
 
       const settings = await Settings.findOne();
@@ -320,6 +355,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         activeOfferNames: activeOffers.map((o: any) => o.name),
         recentOrders: recentOrdersDocs,
         upcomingReservations,
+        activeOrdersCount,
+        unpaidOrdersCount,
+        pendingFulfillmentCount,
+        upcomingReservationsCount,
       });
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -909,6 +948,158 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await logAction("ITEM_PRICE_ADJUSTED", req.user!.username, item.itemName, { unitPrice });
       emitEvent("INVENTORY_LOG_CREATED");
       return ok(res, item);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── INVENTORY CRITICAL ───────────────────────────────────
+  app.get("/api/inventory/critical", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const items = await Item.find({ $or: [{ currentQuantity: 0 }, { currentQuantity: { $lte: 5 } }] })
+        .sort({ currentQuantity: 1 })
+        .lean();
+      return ok(res, items);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── RESERVATIONS ────────────────────────────────────────
+  app.get("/api/reservations", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, date, month, search, type } = req.query as Record<string, string>;
+      const filter: any = { orderType: { $in: ["online_reservation", "walkin_reservation"] } };
+      if (type && type !== "all") filter.orderType = type;
+      if (status && status !== "all") filter.fulfillmentStatus = status;
+      if (date) {
+        const d = new Date(date);
+        const next = new Date(d); next.setDate(d.getDate() + 1);
+        filter.scheduledDate = { $gte: d, $lt: next };
+      }
+      if (month) {
+        const [y, m] = month.split("-").map(Number);
+        const start = new Date(y, m - 1, 1);
+        const end = new Date(y, m, 1);
+        filter.scheduledDate = { $gte: start, $lt: end };
+      }
+      if (search) {
+        filter.$or = [
+          { customerName: { $regex: search, $options: "i" } },
+          { trackingNumber: { $regex: search, $options: "i" } },
+        ];
+      }
+      const reservations = await Order.find(filter).populate("customerId", "name phone email address").sort({ scheduledDate: 1 }).lean();
+      const mapped = reservations.map((r: any) => ({
+        ...r,
+        customerPhone: (r.customerId as any)?.phone || "",
+        customerEmail: (r.customerId as any)?.email || "",
+      }));
+      return ok(res, mapped);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.get("/api/reservations/calendar", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { year, month } = req.query as Record<string, string>;
+      const y = parseInt(year) || new Date().getFullYear();
+      const m = parseInt(month) || new Date().getMonth() + 1;
+      const start = new Date(y, m - 1, 1);
+      const end = new Date(y, m, 1);
+      const reservations = await Order.find({
+        orderType: { $in: ["online_reservation", "walkin_reservation"] },
+        scheduledDate: { $gte: start, $lt: end },
+      }).lean();
+      const grouped: Record<string, any[]> = {};
+      reservations.forEach((r: any) => {
+        if (!r.scheduledDate) return;
+        const key = r.scheduledDate.toISOString().split("T")[0];
+        if (!grouped[key]) grouped[key] = [];
+        grouped[key].push(r);
+      });
+      return ok(res, grouped);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.get("/api/reservations/today", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const start = new Date(); start.setHours(0, 0, 0, 0);
+      const end = new Date(); end.setHours(23, 59, 59, 999);
+      const reservations = await Order.find({
+        orderType: { $in: ["online_reservation", "walkin_reservation"] },
+        scheduledDate: { $gte: start, $lte: end },
+      }).lean();
+      return ok(res, reservations);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.get("/api/reservations/upcoming", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const now = new Date();
+      const in30 = new Date(now.getTime() + 30 * 86400000);
+      const reservations = await Order.find({
+        orderType: { $in: ["online_reservation", "walkin_reservation"] },
+        fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+        scheduledDate: { $gte: now, $lte: in30 },
+      }).sort({ scheduledDate: 1 }).lean();
+      return ok(res, reservations);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.get("/api/reservations/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findOne({
+        _id: req.params.id,
+        orderType: { $in: ["online_reservation", "walkin_reservation"] },
+      }).populate("customerId", "name phone email address").lean();
+      if (!order) return fail(res, 404, "Reservation not found");
+      const o = order as any;
+      return ok(res, {
+        ...o,
+        customerPhone: (o.customerId as any)?.phone || "",
+        customerEmail: (o.customerId as any)?.email || "",
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.patch("/api/reservations/:id/status", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { fulfillmentStatus, paymentStatus, orderType } = req.body;
+      const updates: any = {};
+      if (fulfillmentStatus) { updates.fulfillmentStatus = fulfillmentStatus; updates.currentStatus = fulfillmentStatus; }
+      if (paymentStatus) updates.paymentStatus = paymentStatus;
+      if (orderType) updates.orderType = orderType;
+      const order = await Order.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
+      if (!order) return fail(res, 404, "Reservation not found");
+      await logAction("RESERVATION_STATUS_UPDATED", req.user!.username, order.trackingNumber, updates);
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.post("/api/reservations/:id/notes", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { note } = req.body;
+      if (!note?.trim()) return fail(res, 400, "Note is required");
+      const order = await Order.findByIdAndUpdate(
+        req.params.id,
+        { $push: { notesHistory: { note: note.trim(), addedBy: req.user!.username, addedAt: new Date() } } },
+        { new: true }
+      );
+      if (!order) return fail(res, 404, "Reservation not found");
+      await logAction("RESERVATION_NOTE_ADDED", req.user!.username, order.trackingNumber, { note: note.trim() });
+      return ok(res, order);
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

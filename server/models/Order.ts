@@ -26,6 +26,12 @@ export interface IAddressSub {
   zipCode: string;
 }
 
+export interface INoteEntrySub {
+  note: string;
+  addedBy: string;
+  addedAt: Date;
+}
+
 export interface IOrderDoc extends Document {
   trackingNumber: string;
   customerId: mongoose.Types.ObjectId;
@@ -44,6 +50,7 @@ export interface IOrderDoc extends Document {
   scheduledDate?: Date;
   currentStatus: string;
   statusHistory: IStatusEntrySub[];
+  notesHistory: INoteEntrySub[];
   address?: IAddressSub;
   lockedBy: string;
   lockStartedAt?: Date;
@@ -137,6 +144,14 @@ const orderSchema = new Schema<IOrderDoc>(
     assignedToName: { type: String, default: "" },
     assignedAt: { type: Date },
     assignedBy: { type: String, default: "" },
+    notesHistory: {
+      type: [{
+        note: { type: String, required: true },
+        addedBy: { type: String, required: true },
+        addedAt: { type: Date, default: Date.now },
+      }],
+      default: [],
+    },
   },
   { timestamps: true }
 );

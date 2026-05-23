@@ -42,6 +42,7 @@ import HelpPage from "@/pages/help";
 import SystemLogsPage from "@/pages/system-logs";
 import MaintenancePage from "@/pages/maintenance";
 import OffersPage from "@/pages/offers";
+import ReservationsPage from "@/pages/reservations";
 
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAdmin } = useAuth();
@@ -76,6 +77,7 @@ function Router() {
       <Route path="/help" component={HelpPage} />
       <Route path="/system-logs" component={SystemLogsPage} />
       <Route path="/maintenance" component={MaintenancePage} />
+      <Route path="/reservations" component={ReservationsPage} />
       <Route component={NotFound} />
     </Switch>
   );

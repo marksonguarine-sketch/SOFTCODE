@@ -15,6 +15,7 @@ import {
   Info,
   Hammer,
   Tag,
+  CalendarCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -37,6 +38,7 @@ const mainNavItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
   { title: "Inventory", url: "/inventory", icon: Package },
   { title: "Orders", url: "/orders", icon: ShoppingCart },
+  { title: "Reservations", url: "/reservations", icon: CalendarCheck },
   { title: "Billing", url: "/billing", icon: CreditCard },
   { title: "Accounting", url: "/accounting", icon: BookOpen },
   { title: "Reports", url: "/reports", icon: BarChart3 },
