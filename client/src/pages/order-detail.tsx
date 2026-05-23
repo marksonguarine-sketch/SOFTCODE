@@ -32,59 +32,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { GoogleMap, useJsApiLoader, MarkerF } from "@react-google-maps/api";
-
-function OrderAddressMap({ address, apiKey }: { address: { street: string; unitNumber: string; city: string; province: string; zipCode: string }; apiKey: string }) {
-  const { isLoaded } = useJsApiLoader({ googleMapsApiKey: apiKey });
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [mapError, setMapError] = useState(false);
-  const geocoded = useRef(false);
-  const fullAddress = [address.unitNumber, address.street, address.city, address.province, address.zipCode].filter(Boolean).join(", ") + ", Philippines";
-
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    if (geocoded.current) return;
-    geocoded.current = true;
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ address: fullAddress }, (results, status) => {
-      if (status === "OK" && results && results[0]) {
-        const loc = results[0].geometry.location;
-        const pos = { lat: loc.lat(), lng: loc.lng() };
-        setCoords(pos);
-        map.panTo(pos);
-        map.setZoom(16);
-      } else {
-        setMapError(true);
-      }
-    });
-  }, [fullAddress]);
-
-  if (!isLoaded) {
-    return (
-      <div className="h-[300px] flex items-center justify-center bg-muted rounded-lg">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg overflow-hidden border" data-testid="map-order-address">
-      <GoogleMap
-        mapContainerStyle={{ width: "100%", height: "300px" }}
-        center={coords || { lat: 14.5995, lng: 120.9842 }}
-        zoom={coords ? 16 : 6}
-        onLoad={onMapLoad}
-        options={{ mapTypeControl: true, streetViewControl: true, fullscreenControl: true, zoomControl: true }}
-      >
-        {coords && <MarkerF position={coords} title={fullAddress} />}
-      </GoogleMap>
-      {mapError && (
-        <div className="p-2 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-xs text-center">
-          Could not locate exact address on map
-        </div>
-      )}
-    </div>
-  );
-}
 
 function StatusBadge({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
@@ -130,17 +77,12 @@ export default function OrderDetailPage() {
     refetchInterval: 15000,
   });
 
-  const { data: mapsKeyData } = useQuery<{ success: boolean; data: { key: string } }>({
-    queryKey: ["/api/config/maps-key"],
-  });
-
   const { data: usersData } = useQuery<{ success: boolean; data: { username: string; role: string }[] }>({
     queryKey: ["/api/users/simple"],
     enabled: isAdmin,
   });
 
   const order = orderData?.data?.order;
-  const mapsApiKey = mapsKeyData?.data?.key || "";
   const allUsers = usersData?.data || [];
 
   const acquireLock = useCallback(async () => {
@@ -455,19 +397,6 @@ export default function OrderDetailPage() {
             </CardContent>
           </Card>
 
-          {order.address && (order.address.street || order.address.city) && mapsApiKey && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Navigation className="h-4 w-4" /> Location Map
-                </CardTitle>
-                <CardDescription>Delivery address on Google Maps</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <OrderAddressMap address={order.address} apiKey={mapsApiKey} />
-              </CardContent>
-            </Card>
-          )}
 
           <Card>
             <CardHeader>

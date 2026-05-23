@@ -79,19 +79,26 @@ function DateRangePicker({
 
 // ─── PDF + EXCEL HELPERS ─────────────────────────────────────────────────────
 
+function pdfCurrency(v: number): string {
+  const abs = Math.abs(v);
+  const parts = abs.toFixed(2).split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (v < 0 ? "-PHP " : "PHP ") + parts[0] + "." + parts[1];
+}
+
 function pdfHeader(doc: jsPDF, title: string, subtitle?: string) {
   const pageW = doc.internal.pageSize.getWidth();
   const primaryColor: [number, number, number] = [30, 58, 95];
   doc.setFillColor(...primaryColor);
-  doc.rect(0, 0, pageW, 32, "F");
+  doc.rect(0, 0, pageW, 42, "F");
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14); doc.setFont("helvetica", "bold");
-  doc.text("JOAP Hardware Trading", 14, 13);
-  doc.setFontSize(11); doc.setFont("helvetica", "normal");
-  doc.text(title, 14, 22);
-  if (subtitle) { doc.setFontSize(9); doc.text(subtitle, pageW - 14, 22, { align: "right" }); }
+  doc.setFontSize(16); doc.setFont("helvetica", "bold");
+  doc.text("JOAP HARDWARE TRADING", pageW / 2, 14, { align: "center" });
+  doc.setFontSize(10); doc.setFont("helvetica", "normal");
+  doc.text(title, pageW / 2, 24, { align: "center" });
+  if (subtitle) { doc.setFontSize(9); doc.text(subtitle, pageW / 2, 33, { align: "center" }); }
   doc.setTextColor(0, 0, 0);
-  return 40;
+  return 50;
 }
 
 function pdfFooter(doc: jsPDF) {
@@ -163,8 +170,8 @@ function SalesReport({ orders, startD, endD }: { orders: IOrder[]; startD: Date;
     let y = pdfHeader(doc, "Sales Report", `${format(startD, "MMM d yyyy")} – ${format(endD, "MMM d yyyy")}`);
     doc.setFontSize(10);
     const stats = [
-      ["Total Orders", String(totalOrders)], ["Total Revenue", formatPHP(totalRevenue)],
-      ["Avg Order Value", formatPHP(avgOrderValue)], ["Collected Revenue", formatPHP(paidRevenue)],
+      ["Total Orders", String(totalOrders)], ["Total Revenue", pdfCurrency(totalRevenue)],
+      ["Avg Order Value", pdfCurrency(avgOrderValue)], ["Collected Revenue", pdfCurrency(paidRevenue)],
     ];
     stats.forEach(([l, v], i) => {
       doc.setFont("helvetica", "bold"); doc.text(`${l}:`, 14, y + i * 6);
@@ -174,7 +181,7 @@ function SalesReport({ orders, startD, endD }: { orders: IOrder[]; startD: Date;
     autoTable(doc, {
       startY: y,
       head: [["Item Name", "Qty Sold", "Revenue"]],
-      body: topItems.map((it) => [it.name, String(it.qty), formatPHP(it.revenue)]),
+      body: topItems.map((it) => [it.name, String(it.qty), pdfCurrency(it.revenue)]),
       headStyles: { fillColor: [30, 58, 95] },
       styles: { fontSize: 9 },
     });
@@ -328,7 +335,7 @@ function InventoryReport({ items }: { items: IItem[] }) {
     doc.setFontSize(9);
     [
       ["Total Items", String(items.length)],
-      ["Total Stock Value", formatPHP(totalValue)],
+      ["Total Stock Value", pdfCurrency(totalValue)],
       ["Critical (0 qty)", String(criticalItems.length)],
       ["Low Stock", String(lowItems.length)],
     ].forEach(([l, v], i) => {
@@ -341,7 +348,7 @@ function InventoryReport({ items }: { items: IItem[] }) {
       autoTable(doc, {
         startY: y,
         head: [["Item Name", "Category", "Supplier", "Unit Price", "Qty"]],
-        body: criticalItems.map((it) => [it.itemName, it.category, it.supplierName || "-", formatPHP(it.unitPrice), String(it.currentQuantity)]),
+        body: criticalItems.map((it) => [it.itemName, it.category, it.supplierName || "-", pdfCurrency(it.unitPrice), String(it.currentQuantity)]),
         headStyles: { fillColor: [220, 53, 69] },
         styles: { fontSize: 8 },
       });
@@ -351,8 +358,8 @@ function InventoryReport({ items }: { items: IItem[] }) {
       startY: y,
       head: [["Item Name", "Category", "Price", "Qty", "Stock Value", "Status"]],
       body: items.map((it) => [
-        it.itemName, it.category, formatPHP(it.unitPrice), String(it.currentQuantity),
-        formatPHP(it.unitPrice * it.currentQuantity),
+        it.itemName, it.category, pdfCurrency(it.unitPrice), String(it.currentQuantity),
+        pdfCurrency(it.unitPrice * it.currentQuantity),
         it.currentQuantity <= 0 ? "Critical" : it.currentQuantity <= it.reorderLevel ? "Low" : "Normal",
       ]),
       headStyles: { fillColor: [30, 58, 95] },
@@ -533,7 +540,7 @@ function OrdersReport({ orders, startD, endD }: { orders: IOrder[]; startD: Date
       body: filtered.map((o: any) => [
         o.trackingNumber, o.customerName,
         format(new Date(o.createdAt || o.orderDate), "MMM d yyyy"),
-        (o.orderType || "").replace(/_/g, " "), formatPHP(o.totalAmount),
+        (o.orderType || "").replace(/_/g, " "), pdfCurrency(o.totalAmount),
         (o.paymentStatus || "").replace(/_/g, " "), o.fulfillmentStatus,
       ]),
       headStyles: { fillColor: [30, 58, 95] },
@@ -655,7 +662,7 @@ function OffersReport({ offers }: { offers: any[] }) {
       body: offers.map((o) => [
         o.name, o.offerType.replace(/_/g, " "),
         o.isActive ? "Active" : "Inactive",
-        String(o.usageCount), formatPHP(o.totalSavingsGenerated || 0),
+        String(o.usageCount), pdfCurrency(o.totalSavingsGenerated || 0),
         format(new Date(o.startDate), "MMM d yyyy"),
         format(new Date(o.endDate), "MMM d yyyy"),
       ]),
@@ -815,7 +822,7 @@ function ReservationsReport({ reservations, startD, endD }: { reservations: any[
         r.trackingNumber, r.customerName,
         r.orderType.replace(/_/g, " "),
         r.scheduledDate ? format(new Date(r.scheduledDate), "MMM d yyyy") : "—",
-        formatPHP(r.totalAmount || 0), r.paymentStatus.replace(/_/g, " "), r.fulfillmentStatus,
+        pdfCurrency(r.totalAmount || 0), r.paymentStatus.replace(/_/g, " "), r.fulfillmentStatus,
       ]),
       headStyles: { fillColor: [30, 58, 95] },
       styles: { fontSize: 7 },

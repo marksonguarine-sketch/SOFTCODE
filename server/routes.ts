@@ -307,7 +307,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         Order.find({
           orderType: { $in: ["online_reservation", "walkin_reservation"] },
           fulfillmentStatus: { $nin: ["completed", "cancelled"] },
-          scheduledDate: { $gte: now, $lte: sevenDaysLater },
+          $or: [
+            { scheduledDate: { $gte: now } },
+            { scheduledDate: null },
+            { scheduledDate: { $exists: false } },
+          ],
         }).sort({ scheduledDate: 1 }).limit(10).lean(),
         Order.countDocuments({ fulfillmentStatus: { $nin: ["completed", "cancelled"] } }),
         Order.countDocuments({ paymentStatus: { $in: ["pending_payment", "partial"] } }),
@@ -315,7 +319,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         Order.countDocuments({
           orderType: { $in: ["online_reservation", "walkin_reservation"] },
           fulfillmentStatus: { $nin: ["completed", "cancelled"] },
-          scheduledDate: { $gte: now },
+          $or: [
+            { scheduledDate: { $gte: now } },
+            { scheduledDate: null },
+            { scheduledDate: { $exists: false } },
+          ],
         }),
       ]);
 

@@ -36,6 +36,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setToken(null);
             }
           } else {
+            if (res.status === 401) {
+              localStorage.setItem("session_expired", "1");
+            }
             localStorage.removeItem("token");
             setToken(null);
           }

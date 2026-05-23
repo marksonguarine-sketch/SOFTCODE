@@ -6,7 +6,7 @@ import { useLocation } from "wouter";
 import {
   Plus, Search, Loader2, ShoppingCart, Trash2, MapPin, UserCheck, Package,
   AlertCircle, ChevronRight, Sun, Moon, Sunset, Filter, ChevronLeft,
-  CheckSquare, Tag, Info,
+  CheckSquare, Tag, Info, Minimize2, Maximize2, X,
 } from "lucide-react";
 import {
   createOrderSchema, type CreateOrderInput, type IOrder, type IItem, type IOrderItem,
@@ -129,6 +129,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const [itemQty, setItemQty] = useState(1);
   const [showAddress, setShowAddress] = useState(false);
   const [itemSearch, setItemSearch] = useState("");
+  const [isMinimized, setIsMinimized] = useState(false);
 
   const form = useForm<CreateOrderInput>({
     resolver: zodResolver(createOrderSchema),
@@ -224,15 +225,31 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   );
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); } }}>
-      <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5" />Create New Order</DialogTitle>
-          <DialogDescription>Step {step + 1} of 5 — {STEP_LABELS[step]}</DialogDescription>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); setIsMinimized(false); } }}>
+      <DialogContent className="fixed inset-0 max-w-none !w-screen !h-screen !translate-x-0 !translate-y-0 !left-0 !top-0 !rounded-none m-0 flex flex-col overflow-hidden p-0 gap-0">
+        <DialogHeader className="flex-shrink-0 px-6 py-4 border-b bg-background">
+          <div className="flex items-center justify-between">
+            <div>
+              <DialogTitle className="flex items-center gap-2"><ShoppingCart className="h-5 w-5" />Create New Order</DialogTitle>
+              <DialogDescription>Step {step + 1} of 5 — {STEP_LABELS[step]}</DialogDescription>
+            </div>
+            <div className="flex items-center gap-1">
+              <button type="button" className="p-1.5 rounded hover:bg-muted transition-colors" title={isMinimized ? "Expand" : "Minimize"} onClick={() => setIsMinimized((m) => !m)}>
+                {isMinimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
+              </button>
+              <button type="button" className="p-1.5 rounded hover:bg-muted transition-colors" title="Close" onClick={() => { onClose(); setStep(0); setOrderItems([]); form.reset(); setIsMinimized(false); }}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </DialogHeader>
 
+        {!isMinimized && (
+        <>
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+
         {/* Progress bar */}
-        <div className="flex gap-1 mb-1">
+        <div className="flex gap-1 mb-4">
           {STEP_LABELS.map((label, i) => (
             <div key={i} className="flex-1 flex flex-col items-center gap-1">
               <div className={`h-1.5 w-full rounded-full transition-colors ${i <= step ? "bg-primary" : "bg-muted"}`} />
@@ -301,7 +318,23 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                     <div className="absolute top-full left-0 right-0 z-50 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto mt-1">
                       {filteredItems.slice(0, 8).map((it) => (
                         <button key={it._id} type="button" className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent text-left"
-                          onClick={() => { setSelectedItemId(it._id); setItemSearch(it.itemName); }}
+                          onClick={() => {
+                            const item = allItems.find((i) => i._id === it._id);
+                            if (!item) return;
+                            if (itemQty > item.currentQuantity) {
+                              toast({ title: "Insufficient stock", description: `Only ${item.currentQuantity} available`, variant: "destructive" });
+                              return;
+                            }
+                            const exists = orderItems.find((oi) => oi.itemId === item._id);
+                            if (exists) {
+                              setOrderItems((prev) => prev.map((oi) => oi.itemId === item._id ? { ...oi, qty: oi.qty + itemQty, lineTotal: (oi.qty + itemQty) * oi.discountedUnitPrice } : oi));
+                            } else {
+                              setOrderItems((prev) => [...prev, { itemId: item._id, itemName: item.itemName, qty: itemQty, originalUnitPrice: item.unitPrice, discountedUnitPrice: item.unitPrice, discountApplied: false, offerName: "", lineTotal: itemQty * item.unitPrice }]);
+                            }
+                            setSelectedItemId("");
+                            setItemSearch("");
+                            setItemQty(1);
+                          }}
                           data-testid={`option-order-item-${it._id}`}>
                           <span>{it.itemName}</span>
                           <span className="text-muted-foreground text-xs">{formatCurrency(it.unitPrice)} · {it.currentQuantity} avail</span>
@@ -505,22 +538,25 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
             )}
           </form>
         </Form>
+        </div>
 
-        <DialogFooter className="gap-2 flex-wrap">
-          <div className="flex gap-2 w-full sm:w-auto">
-            {step > 0 && <Button type="button" variant="outline" onClick={handleBack} className="flex-1 sm:flex-none" data-testid="button-order-back"><ChevronLeft className="h-4 w-4 mr-1" />Back</Button>}
+        <div className="flex-shrink-0 px-6 py-3 border-t bg-background">
+          <div className="flex gap-2 flex-wrap justify-end">
+            {step > 0 && <Button type="button" variant="outline" onClick={handleBack} data-testid="button-order-back"><ChevronLeft className="h-4 w-4 mr-1" />Back</Button>}
             {step < 4 ? (
-              <Button type="button" onClick={handleNext} className="flex-1 sm:flex-none" data-testid="button-order-next">
+              <Button type="button" onClick={handleNext} data-testid="button-order-next">
                 Next <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             ) : (
-              <Button type="button" onClick={handleSubmit} disabled={createMutation.isPending} className="flex-1 sm:flex-none" data-testid="button-submit-order">
+              <Button type="button" onClick={handleSubmit} disabled={createMutation.isPending} data-testid="button-submit-order">
                 {createMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 <ShoppingCart className="h-4 w-4 mr-2" />Create Order
               </Button>
             )}
           </div>
-        </DialogFooter>
+        </div>
+        </>
+        )}
       </DialogContent>
     </Dialog>
   );

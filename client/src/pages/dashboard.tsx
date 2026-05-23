@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -22,14 +22,8 @@ import {
   FileText,
   X,
   Loader2,
-  MapPin,
-  Globe,
-  Eye,
   Sparkles,
-  Volume2,
-  Play,
 } from "lucide-react";
-import { GoogleMap, useJsApiLoader, OverlayView, OverlayViewF } from "@react-google-maps/api";
 import {
   AreaChart,
   Area,
@@ -47,7 +41,6 @@ import {
   Line,
 } from "recharts";
 import { apiRequest } from "@/lib/queryClient";
-import { VoiceInsightBubble } from "@/components/gemini-chat";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1026,380 +1019,6 @@ function DateDetailPanel({ detail, onClose }: { detail: DateDetail; onClose: () 
   );
 }
 
-const PH_CITY_COORDS: Record<string, { lat: number; lng: number }> = {
-  "Manila": { lat: 14.5995, lng: 120.9842 },
-  "Quezon City": { lat: 14.6760, lng: 121.0437 },
-  "Makati": { lat: 14.5547, lng: 121.0244 },
-  "Pasig": { lat: 14.5764, lng: 121.0851 },
-  "Taguig": { lat: 14.5176, lng: 121.0509 },
-  "Mandaluyong": { lat: 14.5794, lng: 121.0359 },
-  "San Juan": { lat: 14.6019, lng: 121.0355 },
-  "Parañaque": { lat: 14.4793, lng: 121.0198 },
-  "Las Piñas": { lat: 14.4445, lng: 120.9939 },
-  "Muntinlupa": { lat: 14.4081, lng: 121.0415 },
-  "Marikina": { lat: 14.6507, lng: 121.1029 },
-  "Caloocan": { lat: 14.6570, lng: 120.9726 },
-  "Valenzuela": { lat: 14.6942, lng: 120.9605 },
-  "Malabon": { lat: 14.6693, lng: 120.9570 },
-  "Navotas": { lat: 14.6667, lng: 120.9417 },
-  "Pasay": { lat: 14.5378, lng: 121.0014 },
-  "Cebu City": { lat: 10.3157, lng: 123.8854 },
-  "Davao City": { lat: 7.1907, lng: 125.4553 },
-  "Zamboanga City": { lat: 6.9214, lng: 122.0790 },
-  "Baguio": { lat: 16.4023, lng: 120.5960 },
-  "Iloilo City": { lat: 10.6969, lng: 122.5644 },
-  "Cagayan de Oro": { lat: 8.4542, lng: 124.6319 },
-  "General Santos": { lat: 6.1164, lng: 125.1716 },
-  "Antipolo": { lat: 14.5886, lng: 121.1762 },
-  "Bacoor": { lat: 14.4581, lng: 120.9378 },
-  "Imus": { lat: 14.4297, lng: 120.9367 },
-  "Dasmariñas": { lat: 14.3294, lng: 120.9367 },
-  "San Pedro": { lat: 14.3595, lng: 121.0476 },
-  "Biñan": { lat: 14.3346, lng: 121.0801 },
-  "Santa Rosa": { lat: 14.3122, lng: 121.1115 },
-  "Cainta": { lat: 14.5733, lng: 121.1225 },
-  "Taytay": { lat: 14.5572, lng: 121.1333 },
-  "Angeles City": { lat: 15.1450, lng: 120.5887 },
-  "San Fernando": { lat: 15.0286, lng: 120.6937 },
-  "Olongapo": { lat: 14.8293, lng: 120.2852 },
-  "Lipa": { lat: 13.9411, lng: 121.1626 },
-  "Batangas City": { lat: 13.7565, lng: 121.0583 },
-  "Naga": { lat: 13.6218, lng: 123.1948 },
-  "Legazpi": { lat: 13.1391, lng: 123.7438 },
-  "Tacloban": { lat: 11.2543, lng: 124.9600 },
-  "Bacolod": { lat: 10.6840, lng: 122.9563 },
-  "Dumaguete": { lat: 9.3068, lng: 123.3054 },
-  "Puerto Princesa": { lat: 9.7489, lng: 118.7554 },
-  "Butuan": { lat: 8.9475, lng: 125.5406 },
-  "Iligan": { lat: 8.2280, lng: 124.2452 },
-  "Cotabato City": { lat: 7.2236, lng: 124.2464 },
-};
-
-interface MapCityData {
-  city: string;
-  province: string;
-  count: number;
-  revenue: number;
-}
-
-function CustomerMapSection() {
-  const { data: mapsKeyData, isLoading: keyLoading } = useQuery<{ success: boolean; data: { key: string } }>({
-    queryKey: ["/api/config/maps-key"],
-  });
-  const mapsApiKey = mapsKeyData?.data?.key || "";
-
-  if (keyLoading) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-          <p className="text-sm">Loading map...</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!mapsApiKey) {
-    return (
-      <Card>
-        <CardContent className="p-8 text-center text-muted-foreground">
-          <Globe className="h-8 w-8 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">Google Maps API key not configured</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  return <CustomerMapInner apiKey={mapsApiKey} />;
-}
-
-function CustomerMapInner({ apiKey }: { apiKey: string }) {
-  const [mapPeriod, setMapPeriod] = useState<string>("yearly");
-  const [selectedCity, setSelectedCity] = useState<MapCityData | null>(null);
-  const [geminiInput, setGeminiInput] = useState("");
-  const [geminiResponse, setGeminiResponse] = useState("");
-  const [geminiAudio, setGeminiAudio] = useState<string>("");
-  const [geminiLoading, setGeminiLoading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [hoveredCity, setHoveredCity] = useState<string | null>(null);
-
-  const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: apiKey,
-  });
-
-  const { data: mapData } = useQuery<{ success: boolean; data: MapCityData[] }>({
-    queryKey: [`/api/dashboard/customer-map?period=${mapPeriod}`],
-  });
-
-  const cities = mapData?.data ?? [];
-
-  const maxCount = useMemo(() => Math.max(...cities.map(c => c.count), 1), [cities]);
-
-  const formatCurrency = (v: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
-
-  const onMapLoad = useCallback((map: google.maps.Map) => {
-    mapRef.current = map;
-  }, []);
-
-  const handleGeminiQuery = async (query: string, cityData?: MapCityData) => {
-    setGeminiLoading(true);
-    setGeminiAudio("");
-    setIsPlaying(false);
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    try {
-      const res = await apiRequest("POST", "/api/voice-insight", {
-        question: query,
-        clickedPoint: cityData ? { city: cityData.city, province: cityData.province, orderCount: cityData.count, revenue: cityData.revenue, period: mapPeriod } : {},
-      });
-      const data = await res.json();
-      setGeminiResponse(data.data?.text || "No response");
-      if (data.data?.audioBase64) {
-        setGeminiAudio(data.data.audioBase64);
-      }
-    } catch {
-      setGeminiResponse("Failed to get AI response");
-    } finally {
-      setGeminiLoading(false);
-    }
-  };
-
-  const playAudio = () => {
-    if (!geminiAudio) return;
-    if (isPlaying && audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-      setIsPlaying(false);
-      return;
-    }
-    const audio = new Audio(`data:audio/wav;base64,${geminiAudio}`);
-    audio.onended = () => { setIsPlaying(false); audioRef.current = null; };
-    audio.onerror = () => { setIsPlaying(false); audioRef.current = null; };
-    audioRef.current = audio;
-    audio.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
-  };
-
-  const handleDotClick = (city: MapCityData) => {
-    if (clickTimerRef.current) clearTimeout(clickTimerRef.current);
-    clickTimerRef.current = setTimeout(() => {
-      setSelectedCity(city);
-      setGeminiInput("");
-      setGeminiResponse("");
-      setGeminiAudio("");
-    }, 250);
-  };
-
-  const handleDotDoubleClick = (city: MapCityData) => {
-    if (clickTimerRef.current) { clearTimeout(clickTimerRef.current); clickTimerRef.current = null; }
-    setSelectedCity(city);
-    setGeminiInput(`Tell me about customer activity in ${city.city}`);
-    setGeminiResponse("");
-    setGeminiAudio("");
-    handleGeminiQuery(`Tell me about customer activity in ${city.city}, ${city.province}. They have ${city.count} orders worth ${formatCurrency(city.revenue)} in this period.`, city);
-  };
-
-  const cityOverlays = useMemo(() => {
-    return cities
-      .filter(c => PH_CITY_COORDS[c.city])
-      .map(city => {
-        const coords = PH_CITY_COORDS[city.city];
-        const ratio = city.count / maxCount;
-        const size = Math.max(14, Math.min(40, 14 + ratio * 26));
-        const hue = Math.round(200 - ratio * 200);
-        return { city, coords, size, hue };
-      });
-  }, [cities, maxCount]);
-
-  return (
-    <Card data-testid="card-customer-map">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <div>
-          <CardTitle className="text-base font-semibold flex items-center gap-2">
-            <MapPin className="h-4 w-4" /> Customer Distribution
-          </CardTitle>
-          <p className="text-xs text-muted-foreground mt-1">Order locations across the Philippines</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <select
-            value={mapPeriod}
-            onChange={e => setMapPeriod(e.target.value)}
-            className="h-7 text-xs rounded-md border bg-background px-2"
-            data-testid="select-map-period"
-          >
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
-        </div>
-      </CardHeader>
-      <CardContent>
-        <div className="relative">
-          {!isLoaded ? (
-            <div className="h-[400px] flex items-center justify-center bg-muted rounded-lg">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : (
-            <div className="rounded-lg overflow-hidden border" data-testid="map-customer-distribution">
-              <GoogleMap
-                mapContainerStyle={{ width: "100%", height: "400px" }}
-                center={{ lat: 12.8797, lng: 121.7740 }}
-                zoom={6}
-                onLoad={onMapLoad}
-                options={{
-                  mapTypeControl: true,
-                  streetViewControl: false,
-                  fullscreenControl: true,
-                  zoomControl: true,
-                  disableDoubleClickZoom: true,
-                  gestureHandling: "greedy",
-                }}
-              >
-                {cityOverlays.map(({ city, coords, size, hue }) => (
-                  <OverlayViewF
-                    key={city.city}
-                    position={coords}
-                    mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
-                  >
-                    <div
-                      style={{
-                        width: `${size}px`,
-                        height: `${size}px`,
-                        borderRadius: "50%",
-                        background: `hsl(${hue}, 80%, 50%)`,
-                        border: "2px solid white",
-                        boxShadow: "0 2px 6px rgba(0,0,0,0.3)",
-                        cursor: "pointer",
-                        transition: "transform 0.2s",
-                        transform: hoveredCity === city.city ? "scale(1.3) translate(-50%, -50%)" : "translate(-50%, -50%)",
-                        position: "relative",
-                      }}
-                      title={`${city.city}: ${city.count} orders, ${formatCurrency(city.revenue)}`}
-                      onMouseEnter={() => setHoveredCity(city.city)}
-                      onMouseLeave={() => setHoveredCity(null)}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.nativeEvent.stopImmediatePropagation();
-                        handleDotClick(city);
-                      }}
-                      onDoubleClick={(e) => {
-                        e.stopPropagation();
-                        e.nativeEvent.stopImmediatePropagation();
-                        e.preventDefault();
-                        handleDotDoubleClick(city);
-                      }}
-                      data-testid={`marker-city-${city.city}`}
-                    />
-                  </OverlayViewF>
-                ))}
-              </GoogleMap>
-            </div>
-          )}
-
-          {selectedCity && (
-            <div className="absolute bottom-4 left-4 right-4 bg-background/95 backdrop-blur-sm border rounded-lg p-4 shadow-lg" data-testid="panel-city-detail">
-              <div className="flex items-start justify-between mb-2">
-                <div>
-                  <h4 className="font-semibold text-sm flex items-center gap-1">
-                    <MapPin className="h-3 w-3" />
-                    {selectedCity.city}
-                    {selectedCity.province && <span className="text-muted-foreground font-normal">, {selectedCity.province}</span>}
-                  </h4>
-                  <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
-                    <span>{selectedCity.count} orders</span>
-                    <span>{formatCurrency(selectedCity.revenue)} revenue</span>
-                  </div>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setSelectedCity(null)} className="h-6 w-6 p-0" data-testid="button-close-city-panel">
-                  <X className="h-3 w-3" />
-                </Button>
-              </div>
-
-              <div className="flex gap-2 mt-2">
-                <input
-                  type="text"
-                  value={geminiInput}
-                  onChange={e => setGeminiInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === "Enter" && geminiInput.trim()) {
-                      handleGeminiQuery(`Regarding ${selectedCity.city}, ${selectedCity.province} which has ${selectedCity.count} orders worth ${formatCurrency(selectedCity.revenue)}: ${geminiInput}`, selectedCity);
-                    }
-                  }}
-                  placeholder={`Ask Gemini about ${selectedCity.city}...`}
-                  className="flex-1 h-8 text-xs rounded-md border bg-background px-2"
-                  data-testid="input-gemini-city"
-                />
-                <Button
-                  size="sm"
-                  className="h-8 text-xs"
-                  disabled={!geminiInput.trim() || geminiLoading}
-                  onClick={() => {
-                    if (geminiInput.trim()) {
-                      handleGeminiQuery(`Regarding ${selectedCity.city}, ${selectedCity.province} which has ${selectedCity.count} orders worth ${formatCurrency(selectedCity.revenue)}: ${geminiInput}`, selectedCity);
-                    }
-                  }}
-                  data-testid="button-gemini-city-ask"
-                >
-                  {geminiLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
-                </Button>
-              </div>
-
-              {geminiResponse && (
-                <div className="mt-2 p-2 bg-muted/50 rounded text-xs" data-testid="text-gemini-city-response">
-                  <div className="flex items-start gap-2">
-                    {geminiAudio && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 w-6 p-0 shrink-0 mt-0.5"
-                        onClick={playAudio}
-                        data-testid="button-play-city-audio"
-                      >
-                        {isPlaying ? <Volume2 className="h-3.5 w-3.5 text-primary animate-pulse" /> : <Play className="h-3.5 w-3.5" />}
-                      </Button>
-                    )}
-                    <p className="max-h-32 overflow-y-auto flex-1">{geminiResponse}</p>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {cities.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {cities.slice(0, 8).map(c => (
-              <Badge
-                key={c.city}
-                variant="outline"
-                className="text-xs cursor-pointer hover:bg-accent"
-                onClick={() => {
-                  setSelectedCity(c);
-                  const coords = PH_CITY_COORDS[c.city];
-                  if (coords && mapRef.current) {
-                    mapRef.current.panTo(coords);
-                    mapRef.current.setZoom(12);
-                  }
-                }}
-                data-testid={`badge-city-${c.city}`}
-              >
-                <MapPin className="h-2.5 w-2.5 mr-1" />
-                {c.city} ({c.count})
-              </Badge>
-            ))}
-          </div>
-        )}
-
-        {cities.length === 0 && isLoaded && (
-          <p className="text-xs text-muted-foreground text-center mt-3">No delivery orders found for this period</p>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 function CalendarSection() {
   const today = new Date();
   const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -1607,8 +1226,6 @@ function CalendarSection() {
 
 export default function DashboardPage() {
   const [, navigate] = useLocation();
-  const [voiceInsight, setVoiceInsight] = useState<{ position: { x: number; y: number }; clickedPoint: any; id: number } | null>(null);
-  const voiceInsightCounter = useRef(0);
   const [earningsPeriod, setEarningsPeriod] = useState("monthly");
   const [ordersPeriod, setOrdersPeriod] = useState("monthly");
   const [customersPeriod, setCustomersPeriod] = useState("yearly");
@@ -1677,15 +1294,6 @@ export default function DashboardPage() {
   const channel = channelData?.data;
   const topSales = topSalesData?.data;
 
-  const handleChartDoubleClick = (point: any, e: React.MouseEvent) => {
-    voiceInsightCounter.current += 1;
-    setVoiceInsight({
-      position: { x: e.clientX, y: e.clientY },
-      clickedPoint: point,
-      id: voiceInsightCounter.current,
-    });
-  };
-
   if (earningsLoading || ordersLoading) {
     return (
       <div className="p-3 sm:p-5 max-w-[1280px] mx-auto">
@@ -1710,7 +1318,6 @@ export default function DashboardPage() {
           onPeriodChange={setEarningsPeriod}
           testId="card-earnings"
           onClick={() => navigate("/billing")}
-          onDoubleClick={handleChartDoubleClick}
         />
         <SummaryCard
           title="Total Orders"
@@ -1724,7 +1331,6 @@ export default function DashboardPage() {
           onPeriodChange={setOrdersPeriod}
           testId="card-orders"
           onClick={() => navigate("/orders")}
-          onDoubleClick={handleChartDoubleClick}
         />
         <SummaryCard
           title="Customers"
@@ -1737,7 +1343,6 @@ export default function DashboardPage() {
           period={customersPeriod}
           onPeriodChange={setCustomersPeriod}
           testId="card-customers"
-          onDoubleClick={handleChartDoubleClick}
         />
         <SummaryCard
           title="Pending Balance"
@@ -1749,7 +1354,6 @@ export default function DashboardPage() {
           onPeriodChange={setBalancePeriod}
           testId="card-balance"
           onClick={() => navigate("/billing")}
-          onDoubleClick={handleChartDoubleClick}
         />
       </div>
 
@@ -1847,7 +1451,6 @@ export default function DashboardPage() {
         totalRevenue={revenue?.totalRevenue ?? 0}
         totalOrderValue={revenue?.totalOrderValue ?? 0}
         revenueTrend={revenue?.earnings?.trend ?? 0}
-        onChartDoubleClick={handleChartDoubleClick}
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -1863,18 +1466,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <CustomerMapSection />
-
       <CalendarSection />
-
-      {voiceInsight && (
-        <VoiceInsightBubble
-          key={voiceInsight.id}
-          position={voiceInsight.position}
-          clickedPoint={voiceInsight.clickedPoint}
-          onClose={() => setVoiceInsight(null)}
-        />
-      )}
     </div>
   );
 }

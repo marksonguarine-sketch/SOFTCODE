@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Hammer, Loader2 } from "lucide-react";
+import { Hammer, Loader2, AlertTriangle } from "lucide-react";
 import { loginSchema, type LoginInput } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +13,14 @@ export default function LoginPage() {
   const { login } = useAuth();
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  useEffect(() => {
+    if (localStorage.getItem("session_expired") === "1") {
+      setSessionExpired(true);
+      localStorage.removeItem("session_expired");
+    }
+  }, []);
 
   const form = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -46,6 +54,12 @@ export default function LoginPage() {
           </div>
         </CardHeader>
         <CardContent>
+          {sessionExpired && (
+            <div className="mb-4 flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/50 px-3 py-2 text-sm text-amber-800 dark:text-amber-300" data-testid="alert-session-expired">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>Your session was ended because the account was logged in elsewhere. Please log in again.</span>
+            </div>
+          )}
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField

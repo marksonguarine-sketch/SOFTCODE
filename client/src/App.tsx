@@ -22,7 +22,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useState, useEffect, useRef, useCallback } from "react";
-import { GeminiFloatingChat } from "@/components/gemini-chat";
 import { Tutorial } from "@/components/tutorial";
 import { Checkbox } from "@/components/ui/checkbox";
 import { GraduationCap } from "lucide-react";
@@ -257,8 +256,6 @@ function AuthenticatedLayout() {
           </main>
         </div>
       </div>
-
-      <GeminiFloatingChat />
 
       {/* TUTORIAL OVERHAUL: The Tutorial component needs to be overhauled.
           See task.txt for full instructions. Key changes:

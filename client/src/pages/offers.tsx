@@ -28,7 +28,6 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -198,20 +197,25 @@ function OfferFormDialog({
               <FormField control={form.control} name="offerType" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Offer Type *</FormLabel>
-                  <FormControl>
-                    <RadioGroup value={field.value} onValueChange={field.onChange} className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      {(["percentage_discount", "b1t1", "buy1_take_percentage", "flat_discount"] as OfferType[]).map((type) => (
-                        <div key={type} className={`flex items-start gap-2 border rounded-lg p-3 cursor-pointer transition-colors ${field.value === type ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"}`}
-                          onClick={() => field.onChange(type)}>
-                          <RadioGroupItem value={type} id={type} className="mt-0.5" />
-                          <div>
-                            <Label htmlFor={type} className="font-medium cursor-pointer text-sm">{OFFER_TYPE_LABELS[type]}</Label>
-                            <p className="text-xs text-muted-foreground mt-0.5">{OFFER_TYPE_DESCRIPTIONS[type]}</p>
-                          </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {(["percentage_discount", "b1t1", "buy1_take_percentage", "flat_discount"] as OfferType[]).map((type) => (
+                      <button
+                        key={type}
+                        type="button"
+                        className={`flex items-start gap-2 border rounded-lg p-3 cursor-pointer transition-colors text-left w-full ${field.value === type ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/50 hover:bg-muted/30"}`}
+                        onClick={() => field.onChange(type)}
+                        data-testid={`option-offer-type-${type}`}
+                      >
+                        <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${field.value === type ? "border-primary" : "border-muted-foreground/40"}`}>
+                          {field.value === type && <div className="w-2 h-2 rounded-full bg-primary" />}
                         </div>
-                      ))}
-                    </RadioGroup>
-                  </FormControl>
+                        <div>
+                          <Label className="font-medium cursor-pointer text-sm pointer-events-none">{OFFER_TYPE_LABELS[type]}</Label>
+                          <p className="text-xs text-muted-foreground mt-0.5">{OFFER_TYPE_DESCRIPTIONS[type]}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
                   <FormMessage />
                 </FormItem>
               )} />

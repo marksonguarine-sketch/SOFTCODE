@@ -34,6 +34,43 @@ A full-stack ERP (Enterprise Resource Planning) system for JOAP Hardware Trading
 
 ---
 
+## Completed Fixes & Features (May 2026)
+
+### PDF Exports
+- Added `pdfCurrency()` helper in `reports.tsx` — uses "PHP " prefix with manual thousands separator to avoid ₱ rendering as ± in jsPDF Helvetica font
+- Redesigned `pdfHeader()` to center "JOAP HARDWARE TRADING" as bold heading followed by centered report title
+- All PDF export functions (Sales Report, Billing, etc.) now use `pdfCurrency()` instead of `formatPHP()`
+
+### Concurrent Login Enforcement
+- `server/routes.ts`: JWT middleware tracks active session token per user; a new login invalidates the previous token
+- `client/src/lib/auth.tsx`: On 401 from `/api/auth/me`, sets `localStorage.session_expired = "1"` flag
+- `client/src/pages/login.tsx`: On mount, checks the flag and shows an amber warning banner: "Your session was ended because the account was logged in elsewhere."
+
+### Dashboard Fixes
+- Removed Google Maps section (`CustomerMapSection`, `PH_CITY_COORDS`, all related imports: `GoogleMap`, `useJsApiLoader`, `OverlayView`)
+- Removed VoiceInsightBubble component and all related state (`voiceInsight`, `voiceInsightCounter`, `handleChartDoubleClick`)
+- Removed all `onDoubleClick={handleChartDoubleClick}` props from SummaryCards and RevenueSection
+- Fixed "Upcoming Reservations" showing 0: server reservation query now includes reservations without `scheduledDate` using `$or` condition
+
+### Offers Page
+- Replaced RadioGroup+RadioGroupItem offer type selector with plain button cards using direct `field.onChange(type)` — fixes the bug where the type could not be changed after initial selection
+
+### Create Order Dialog
+- Made dialog full-screen (`fixed inset-0 !w-screen !h-screen !rounded-none`)
+- Added Minimize2/Maximize2 toggle button and X close button in the header
+- Content collapses to header-only when minimized
+- Clicking an item in the search dropdown immediately adds it to the order (no separate "Add" click needed)
+
+### Fulfillment Status
+- "Cancelled" status was already in `FULFILLMENT_STATUSES` and `FULFILLMENT_STATUS_LABELS` in `shared/schema.ts`
+- All dropdowns use `FULFILLMENT_STATUSES.map(...)` so Cancelled appears everywhere automatically
+
+### Removed Features
+- Gemini AI floating chat button (`GeminiFloatingChat`) removed from `App.tsx`
+- Google Maps `OrderAddressMap` card removed from `order-detail.tsx`
+
+---
+
 ## Planned Features Backlog
 
 All features below are requested by the owner and should be implemented as the project grows. Group them by module when building.
