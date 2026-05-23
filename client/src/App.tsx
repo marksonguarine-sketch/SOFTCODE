@@ -1,6 +1,7 @@
 import { Switch, Route, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "./lib/queryClient";
+import { unlockAudio } from "@/lib/tts";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -201,6 +202,12 @@ function AuthenticatedLayout() {
   const [showTutorialPrompt, setShowTutorialPrompt] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+
+  useEffect(() => {
+    const handler = () => { unlockAudio(); document.removeEventListener("click", handler, true); };
+    document.addEventListener("click", handler, true);
+    return () => document.removeEventListener("click", handler, true);
+  }, []);
 
   useEffect(() => {
     if (user) {
