@@ -162,5 +162,8 @@ orderSchema.index({ orderType: 1 });
 orderSchema.index({ orderChannel: 1 });
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ assignedTo: 1 });
+orderSchema.index({ customerName: "text" });
+orderSchema.index({ scheduledDate: 1 });
+orderSchema.index({ updatedAt: -1 });
 
 export default mongoose.model<IOrderDoc>("Order", orderSchema);

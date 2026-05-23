@@ -9,7 +9,7 @@ import path from "path";
 import fs from "fs";
 import cron from "node-cron";
 
-import { authMiddleware, adminOnly, generateToken, AuthRequest } from "./middleware/auth";
+import { authMiddleware, adminOnly, generateToken, clearSessionCache, clearAllSessionsForUser, AuthRequest } from "./middleware/auth";
 import User from "./models/User";
 import UserSession from "./models/UserSession";
 import Item from "./models/Item";
@@ -214,6 +214,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const hadActiveSessions = activeSessions.length > 0;
       await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
+      clearAllSessionsForUser(user._id.toString());
 
       const token = generateToken({ _id: user._id.toString(), username: user.username, role: user.role });
       await UserSession.create({ userId: user._id, token, isActive: true });
@@ -234,7 +235,10 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.post("/api/auth/logout", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const token = req.headers.authorization?.slice(7) || req.cookies?.token;
-      if (token) await UserSession.updateOne({ token }, { isActive: false });
+      if (token) {
+        await UserSession.updateOne({ token }, { isActive: false });
+        clearSessionCache(token);
+      }
       await logAction("USER_LOGOUT", req.user!.username);
       res.clearCookie("token");
       return ok(res, { message: "Logged out" });

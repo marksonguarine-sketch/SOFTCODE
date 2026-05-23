@@ -17,6 +17,41 @@ export function generateToken(payload: { _id: string; username: string; role: st
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "24h" });
 }
 
+// ── In-memory session cache ─────────────────────────────────────────────────
+// Avoids 3 sequential DB round trips on every authenticated request.
+// Cache entries expire after 30 s; cleared immediately on logout/deactivation.
+const SESSION_CACHE_TTL = 30_000;          // 30 s
+const LAST_ACTIVITY_THROTTLE = 60_000;     // update DB at most once per 60 s
+
+type CacheEntry = { user: NonNullable<AuthRequest["user"]>; expiresAt: number };
+const sessionCache = new Map<string, CacheEntry>();
+const lastActivityMap = new Map<string, number>();
+
+export function clearSessionCache(token: string) {
+  sessionCache.delete(token);
+  lastActivityMap.delete(token);
+}
+
+export function clearAllSessionsForUser(userId: string) {
+  for (const [token, entry] of sessionCache.entries()) {
+    if (entry.user._id === userId) {
+      sessionCache.delete(token);
+      lastActivityMap.delete(token);
+    }
+  }
+}
+
+// Prune expired entries periodically to prevent memory growth
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of sessionCache.entries()) {
+    if (entry.expiresAt <= now) {
+      sessionCache.delete(token);
+      lastActivityMap.delete(token);
+    }
+  }
+}, 60_000);
+
 export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const authHeader = req.headers.authorization;
@@ -27,24 +62,49 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
       return res.status(401).json({ success: false, error: "Authentication required" });
     }
 
-    const decoded = jwt.verify(token, JWT_SECRET) as { _id: string; username: string; role: "ADMIN" | "EMPLOYEE" };
-
-    const session = await UserSession.findOne({ token, isActive: true });
-    if (!session) {
-      return res.status(401).json({ success: false, error: "Session expired or invalid" });
+    // ── Fast path: serve from in-memory cache ──────────────────────────────
+    const cached = sessionCache.get(token);
+    if (cached && cached.expiresAt > Date.now()) {
+      req.user = cached.user;
+      // Throttle lastActivity DB writes to once per 60 s
+      const lastUpdate = lastActivityMap.get(token) ?? 0;
+      if (Date.now() - lastUpdate > LAST_ACTIVITY_THROTTLE) {
+        lastActivityMap.set(token, Date.now());
+        UserSession.updateOne({ token }, { lastActivity: new Date() }).catch(() => {});
+      }
+      return next();
     }
 
-    const user = await User.findById(decoded._id);
+    // ── Slow path: verify + DB lookup ─────────────────────────────────────
+    const decoded = jwt.verify(token, JWT_SECRET) as {
+      _id: string; username: string; role: "ADMIN" | "EMPLOYEE";
+    };
+
+    // Parallelize both DB queries
+    const [session, user] = await Promise.all([
+      UserSession.findOne({ token, isActive: true }).lean(),
+      User.findById(decoded._id).select("isActive").lean(),
+    ]);
+
+    if (!session) {
+      sessionCache.delete(token);
+      return res.status(401).json({ success: false, error: "Session expired or invalid" });
+    }
     if (!user || !user.isActive) {
+      sessionCache.delete(token);
       return res.status(401).json({ success: false, error: "Account is inactive" });
     }
 
-    session.lastActivity = new Date();
-    await session.save();
+    const userPayload = { _id: decoded._id, username: decoded.username, role: decoded.role };
 
-    req.user = { _id: decoded._id, username: decoded.username, role: decoded.role };
+    // Populate cache for subsequent requests
+    sessionCache.set(token, { user: userPayload, expiresAt: Date.now() + SESSION_CACHE_TTL });
+    lastActivityMap.set(token, Date.now());
+    UserSession.updateOne({ token }, { lastActivity: new Date() }).catch(() => {});
+
+    req.user = userPayload;
     next();
-  } catch (err) {
+  } catch {
     return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 }
