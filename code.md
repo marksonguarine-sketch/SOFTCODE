@@ -434,10 +434,10 @@ The largest file in the project (~1954 lines). Registers all API endpoints on th
 **Route groups:**
 
 #### Auth Routes
-- `POST /api/auth/login` — Validates username/password with `loginSchema`, checks user exists and is active, compares bcrypt hash, terminates any existing active sessions, creates a new UserSession, generates and returns a JWT in both the response body and an httpOnly cookie.
+- `POST /api/auth/login` — Validates username/password with `loginSchema`, checks user exists and is active, compares bcrypt hash, **deactivates all existing active sessions for that user** (concurrent login enforcement), creates a new `UserSession`, generates and returns a JWT in both the response body and an httpOnly cookie.
 - `POST /api/auth/logout` — Marks the current session as inactive, clears the cookie.
-- `GET /api/auth/me` — Returns the current authenticated user's profile (no password).
-- `GET /api/config/maps-key` — Returns the Google Maps API key from environment variables (used by the order detail map view).
+- `GET /api/auth/me` — Returns the current authenticated user's profile (no password). Returns `401` if the session has been invalidated (e.g., by a concurrent login elsewhere), which triggers the session-expired flow on the client.
+- `GET /api/config/maps-key` — Returns the Google Maps API key from environment (retained for backward compatibility; the client-side map view has been removed from `order-detail.tsx`).
 
 #### Dashboard Routes
 - `GET /api/dashboard/stats` — Returns a snapshot: today's order count, completed orders, pending payments, pending releases, today's revenue, total revenue, active users (sessions active in last hour), total items, critical stock count, low stock count, total inventory value. Reads reorder/low-stock thresholds from Settings.
@@ -625,10 +625,10 @@ QueryClientProvider → TooltipProvider → AuthProvider → AppContent
 - `<AppSidebar />` — left navigation
 - A sticky top header with the sidebar toggle, `GlobalSearch`, username display, and logout button
 - `<Router />` — the page content area
-- `<GeminiFloatingChat />` — the AI assistant button
 - `<Tutorial />` — the interactive guided tutorial (shown on demand)
 - A tutorial prompt dialog (asks on first login)
 - A logout confirmation dialog
+- Note: `GeminiFloatingChat` has been removed from this layout.
 
 **`AppContent`** — Checks auth state. Shows a spinner while loading. Shows `<LoginPage />` if not authenticated. Shows `<AuthenticatedLayout />` if authenticated.
 
@@ -639,17 +639,35 @@ QueryClientProvider → TooltipProvider → AuthProvider → AppContent
 ## Client Pages (`client/src/pages/`)
 
 ### `login.tsx`
-The login screen shown to unauthenticated users. A centered card with username and password fields. On submit, calls `useAuth().login(username, password)`. Shows error messages. Has a "forgot password" link (UI only, no backend implementation visible). The JOAP Hardware logo/icon is shown at the top.
+The login screen shown to unauthenticated users. A centered card with username and password fields. On submit, calls `useAuth().login(username, password)`. Shows error messages. The JOAP Hardware logo/icon is shown at the top.
+
+On mount, checks `localStorage` for a `session_expired` flag. If found, displays an amber warning banner: "Your session was ended because the account was logged in elsewhere. Please log in again." The flag is cleared after reading. This flag is set by `auth.tsx` when a 401 is received from `/api/auth/me` (which happens when a concurrent login has invalidated the current session).
 
 ### `dashboard.tsx`
-The home page after login. Fetches data from:
-- `GET /api/dashboard/stats` — shows 9 KPI cards (today's orders, revenue, inventory value, etc.)
-- `GET /api/dashboard/revenue-chart` — Recharts AreaChart of revenue over last 30 days
-- `GET /api/dashboard/orders-by-status` — Recharts PieChart of order distribution
-- `GET /api/dashboard/inventory-status` — horizontal bar or stat cards for stock health
-- `GET /api/dashboard/recent-orders` — a table of the last 10 orders
+The home page after login. A heavily data-driven page with multiple independent query period selectors per chart section.
 
-All data is refetched every 30 seconds. The page also connects to Socket.io and invalidates relevant queries when real-time events arrive (`order:created`, `billing:payment`, etc.).
+**Data sources:**
+- `GET /api/dashboard/stats` — KPI mini-cards: active offers, unpaid orders, pending fulfillment, upcoming reservations (count + list)
+- `GET /api/dashboard/advanced?period=<period>` — SummaryCards for Earnings, Total Orders, Customers, Pending Balance; each has its own independent period selector (monthly/yearly/daily)
+- `GET /api/dashboard/calendar-heatmap` — CalendarSection showing order-activity heatmap per day of the month
+- Revenue chart, channel breakdown donut, top-items list — each with independent period selectors
+
+**Key sub-components (defined inline in this file):**
+- `SummaryCard` — animated stat card with sparkline, trend indicator, and period toggle buttons
+- `RevenueSection` — area chart of revenue over time
+- `ChannelDonut` — donut chart of order channel breakdown
+- `TopSalesList` — ranked list of best-selling items
+- `FulfillmentBadge` — colored badge for fulfillment status values
+- `CalendarSection` — calendar heatmap for order activity
+- `DashboardSkeleton` — loading placeholder
+
+**Removed features (no longer in this file):**
+- `CustomerMapSection` and `PH_CITY_COORDS` — Google Maps customer-location map removed entirely
+- `VoiceInsightBubble` — AI voice insight overlay on chart double-click removed
+- `handleChartDoubleClick`, `voiceInsight` state, `voiceInsightCounter` ref — removed with the above
+- All `onDoubleClick` props on SummaryCards and RevenueSection removed
+
+**Bug fix — Upcoming Reservations showing 0:** The `/api/dashboard/stats` query previously missed reservations with no `scheduledDate`. Fixed with an `$or` condition to include records where `scheduledDate` is in the future, is null, or does not exist.
 
 ### `inventory.tsx`
 Full inventory management page. Features:
@@ -669,12 +687,24 @@ Fetches `GET /api/items` with query parameters. Mutations use `apiRequest` and i
 
 ### `orders.tsx`
 Order list and creation page. Features:
-- Paginated list of all orders with status badges
-- Filter by status, search by tracking number or customer name
-- "Create Order" dialog: select/search customers, add line items (each with item, quantity, price), notes, source channel, delivery address
-- Stock availability check before adding items
+- Paginated, filterable list of all orders with payment and fulfillment status badges
+- Filter by payment status, filter by fulfillment status (all statuses including Cancelled), search by tracking number or customer name
+- Bulk fulfillment status update for selected orders
 - Order assignment (admin only): assign to an employee
 - Real-time updates via Socket.io
+
+**Create Order dialog — full-screen mode:**
+- Opens as a true full-screen overlay (`fixed inset-0`, 100vw × 100vh, no border-radius)
+- Header contains the dialog title, a **Minimize/Maximize toggle** (Minimize2/Maximize2 icon), and an **X close button**
+- When minimized, only the header bar is visible; the form and footer collapse completely
+- A 5-step wizard: Customer & Order Type → Items → Payment → Fulfillment → Review
+- Step progress bar at the top of the form
+- **Item search dropdown:** typing in the search box shows matching items; clicking any result immediately adds it to the order (no separate "Add" button click needed). Stock availability is checked before adding.
+- Items table with per-row quantity editing and removal
+- Delivery address fields toggle on/off based on order type
+- Review step shows full order summary before submission
+
+**Fulfillment statuses available everywhere:** `pending`, `processing`, `ready`, `out_for_delivery`, `completed`, `cancelled` — driven by `FULFILLMENT_STATUSES` from `shared/schema.ts`, so all dropdowns and filters include all values including Cancelled.
 
 ### `order-detail.tsx`
 Detailed view for a single order, accessed via `/orders/:id`. Features:
@@ -682,9 +712,11 @@ Detailed view for a single order, accessed via `/orders/:id`. Features:
 - Collaborative lock indicator — shows who else has the order open
 - Status advancement buttons — moves order through lifecycle stages
 - Payment history tab — lists all payments logged against this order
-- Delivery address with optional Google Maps embed
+- Delivery address display (text only)
 - Status history timeline
 - Heartbeat polling every 10 seconds to maintain the edit lock
+
+**Removed:** The Google Maps embed (`OrderAddressMap` component, `useJsApiLoader`, `GET /api/config/maps-key` call) has been removed. The delivery address is now shown as plain text only.
 
 ### `billing.tsx`
 Payment management page. Features:
@@ -711,10 +743,22 @@ Double-entry bookkeeping page. Two tabs:
 Business intelligence and reporting page. Features:
 - Revenue report: daily/weekly/monthly breakdown with bar charts (Recharts)
 - Inventory report: table of all items with quantity and value
-- Orders report: by status and by source channel
+- Orders report: by status, by channel, and by fulfillment status
 - Top products: most sold items by quantity and by revenue
 - Export to PDF button (uses jsPDF + jspdf-autotable)
 - Date range picker for filtering
+
+**PDF currency fix:** All PDF exports use a `pdfCurrency()` helper that formats amounts as `"PHP 1,234.56"` (plain ASCII prefix, manual thousands separator). This replaces `formatPHP()` which used the `₱` symbol — jsPDF's built-in Helvetica font lacks this glyph and rendered it as `±`. The `pdfHeader()` function now centers "JOAP HARDWARE TRADING" as a bold heading, followed by the report title centered below it.
+
+**`offers.tsx`**
+Offer management page for creating and managing discounts and promotions. Features:
+- List of all offers with status badges (active/inactive/expired)
+- Create and edit offers via a form dialog
+- Offer type selector: Percentage Discount, Buy 1 Take 1, Buy 1 Take Percentage, Flat Discount — implemented as plain button cards with `field.onChange(type)` on click
+- Date range for offer validity, discount amount, applicable items selection
+- Toggle offer active/inactive
+
+**Bug fix — offer type selector:** The offer type was previously implemented with shadcn `RadioGroup`/`RadioGroupItem`, which had a bug where the value could not be changed after the initial selection. Replaced with plain `<button>` cards that call `field.onChange(type)` directly on click, fully resolving the issue.
 
 ### `users.tsx`
 User management page (admin only). Features:
@@ -787,7 +831,9 @@ The left navigation sidebar. Uses the shadcn/ui `Sidebar` compound components.
 The active route is highlighted using Wouter's `useLocation()`. The sidebar reads `settings.gradient` from `SettingsProvider` and dynamically applies the `.sidebar-gradient` CSS class to the sidebar inner element via a DOM query.
 
 ### `gemini-chat.tsx`
-A floating AI assistant chat widget. Renders as a circular button in the bottom-right corner. Clicking it opens a chat panel. Communicates with Google's Gemini API (via `@google/generative-ai` or a backend proxy route) to answer questions about the app or general queries. The chat panel has a message history, input field, and send button. Accessible to all logged-in users.
+Contains the `GeminiFloatingChat` and `VoiceInsightBubble` components. `GeminiFloatingChat` was a floating AI assistant chat widget (circular button, bottom-right corner, opens a chat panel using the Gemini API). `VoiceInsightBubble` was an AI voice overlay triggered by double-clicking charts on the dashboard.
+
+**Both components have been removed from active use:** `GeminiFloatingChat` is no longer rendered in `AuthenticatedLayout` (`App.tsx`), and `VoiceInsightBubble` is no longer rendered in `dashboard.tsx`. The file itself remains in the codebase but neither export is imported anywhere active.
 
 ### `tutorial.tsx`
 An interactive guided tour of the application. When triggered, it overlays a semi-transparent backdrop and walks users through each feature section with text callouts. Originally designed to use the Gemini TTS API for voice narration, the code includes a comment noting it should use local MP3 files instead (`tut1.mp3` through `tut17.mp3` in `/tutorial_mp3/`). The tutorial also includes a planned "alive cursor" feature that would animate a simulated cursor to show users where to click/hover. The `Tutorial` component accepts `isAdmin` prop to show admin-specific steps, and `onComplete` callback fired when the tour ends.
@@ -830,6 +876,8 @@ React Context provider for authentication state. The `AuthProvider` wraps the ap
 - `useAuth()` hook — throws if used outside `<AuthProvider>`
 
 The entire app is gated on `user` being non-null. If `user` is null and loading is done, `<LoginPage />` is shown.
+
+**Concurrent login handling:** If `GET /api/auth/me` returns a `401`, the token is cleared (logging the user out) and `localStorage.setItem("session_expired", "1")` is set. The login page reads this flag on mount and displays an amber warning banner explaining the session was ended by a login on another device.
 
 ### `queryClient.ts`
 Configures the TanStack Query client and provides the `apiRequest()` helper function.
