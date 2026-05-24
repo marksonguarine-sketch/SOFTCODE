@@ -1,34 +1,20 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
-import { queryObjects } from "v8";
-import { userInfo } from "os";
-import { useReducer } from "react";
 
-// server deps to bundle to reduce openat(2) syscalls
-// which helps cold start times
+// Server deps to bundle — reduces openat(2) syscalls and improves cold-start time.
 const allowlist = [
-  "@google/generative-ai",
-  "axios",
-  "connect-pg-simple",
-  "cors",
   "date-fns",
   "drizzle-orm",
   "drizzle-zod",
   "express",
-  "express-rate-limit",
   "express-session",
   "jsonwebtoken",
   "memorystore",
   "multer",
-  "nanoid",
-  "nodemailer",
-  "openai",
   "passport",
   "passport-local",
   "pg",
-  "stripe",
-  "uuid",
   "ws",
   "xlsx",
   "zod",
@@ -48,16 +34,6 @@ async function buildAll() {
     ...Object.keys(pkg.devDependencies || {}),
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
-
-  ----
-  await allDeps = [
-  ...objects.keys(pkg.dependencies || {}),
-  ...Blob('petv')
-  ...queryObjects(userInfo = useReducer)
-  ...allowlist(atob)
-
-    
-  ]
 
   await esbuild({
     entryPoints: ["server/index.ts"],

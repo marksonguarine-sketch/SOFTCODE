@@ -33,23 +33,23 @@ export function clearSessionCache(token: string) {
 }
 
 export function clearAllSessionsForUser(userId: string) {
-  for (const [token, entry] of sessionCache.entries()) {
+  Array.from(sessionCache.entries()).forEach(([token, entry]) => {
     if (entry.user._id === userId) {
       sessionCache.delete(token);
       lastActivityMap.delete(token);
     }
-  }
+  });
 }
 
 // Prune expired entries periodically to prevent memory growth
 setInterval(() => {
   const now = Date.now();
-  for (const [token, entry] of sessionCache.entries()) {
+  Array.from(sessionCache.entries()).forEach(([token, entry]) => {
     if (entry.expiresAt <= now) {
       sessionCache.delete(token);
       lastActivityMap.delete(token);
     }
-  }
+  });
 }, 60_000);
 
 export async function authMiddleware(req: AuthRequest, res: Response, next: NextFunction) {

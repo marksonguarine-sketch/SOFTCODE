@@ -776,3 +776,71 @@ Orders collection has indexes on `fulfillmentStatus`, `paymentStatus`, `orderTyp
 | `employee` | `employee123` | EMPLOYEE |
 
 **These are created automatically on first startup if the database is empty. Change them immediately in production via the Users page.**
+
+---
+
+## Recent Updates (2026-05-24)
+
+### `server_mongo.ts` (NEW — project root)
+Centralized, hardcoded MongoDB connection module. Created per project owner directive.
+
+- Exports `connectMongo(): Promise<mongoose>` — idempotent singleton connection.
+- Exports `disconnectMongo()` — for graceful shutdown.
+- Exports `MONGODB_URI` (hardcoded Atlas string) and `DB_NAME = "joap_hardware"`.
+- `process.env.MONGODB_URI` overrides the hardcoded value if present (useful for CI/staging).
+- Configures `strictQuery: true`, `serverSelectionTimeoutMS: 10_000`, `socketTimeoutMS: 45_000`, `maxPoolSize: 20`.
+- Logs `[mongo] connected to joap_hardware` on first connect, `[mongo] disconnected` on loss.
+
+**Connection string:** `mongodb+srv://qjmrebona_db_user:Gal5TOLmAQQNizKx@cluster0.cvabo7n.mongodb.net/`
+
+### `server/db.ts` (UPDATED)
+Now a thin re-export shim on top of `server_mongo.ts`. `connectDB()` calls `connectMongo()` internally and logs the result. All existing code that imports `connectDB` from `server/db.ts` continues to work unchanged. The old "exit if placeholder" check is gone — the app boots cleanly with no `.env` file.
+
+### `server/middleware/auth.ts` (FIXED)
+Fixed TypeScript error TS2802: `MapIterator` iteration in `clearAllSessionsForUser` and the periodic GC `setInterval` now uses `Array.from(sessionCache.entries()).forEach(...)` instead of `for...of` to satisfy the TypeScript target. This was the only TS error in the project.
+
+### `script/build.ts` (FIXED)
+Removed corrupted/garbage code that was injected between lines 52–60 (invalid `----`, `await allDeps = [...]`, `...objects.keys(...)`, `...Blob(...)`, `...queryObjects(...)` etc.). The build script now compiles and runs cleanly, producing `dist/public/` (Vite frontend bundle) and `dist/index.cjs` (esbuild server bundle).
+
+### `client/src/pages/accounting.tsx` (MAJOR UPDATE)
+Full overhaul of the Accounting page with:
+
+#### New Features
+- **PDF Export button** (top-right, next to "Add Entry"): exports a multi-page, well-designed PDF report including:
+  - Branded header with company name, report title, and date.
+  - **KPI Summary row** — Total Debits, Total Credits, Net Balance, Account Count — with colour-coded values.
+  - **Financial Position Summary** table — Assets, Liabilities, Revenue, Expenses totals.
+  - **Debits vs Credits Bar Chart** — drawn using jsPDF primitive rectangles (no canvas dependency). Shows top 8 accounts side-by-side in blue (debit) and green (credit). Includes axis lines and a colour legend.
+  - **Account Type Distribution table** — pie-style legend with colour swatches, balance, and percentage of total for each account type.
+  - **Chart of Accounts table** — all accounts with code, name, type, and balance. Alternating row colours.
+  - **General Ledger Entries table** (second page) — date, account, debit, credit, running balance, description, with a footer row showing totals. Filtered by the active date filter if one is set.
+  - Professional footer on every page with generation date and page count.
+
+- **Recharts charts** (in-page, not PDF):
+  - **Debits vs Credits Bar Chart** — grouped bars per account name, top 8, using Recharts `BarChart`. Responsive, with currency tooltip.
+  - **Account Type Distribution Donut Chart** — `PieChart` with `innerRadius=55`, colour legend, percentage labels.
+
+- **Financial Position mini-cards** — 4 cards showing Assets / Liabilities / Revenue / Expenses totals from the Chart of Accounts, always visible above the tabs.
+
+- **Enhanced KPI cards** — now show coloured backgrounds and icons (TrendingDown for Debits, TrendingUp for Credits, Calculator for Balance, BookOpen for Accounts). Colour-coded: blue, emerald, red/green by sign, violet.
+
+- **Ledger totals footer** — below the ledger table a compact row shows running totals for Debits, Credits, and Net Balance.
+
+- **Account Name autocomplete** — the "Add Entry" form's Account Name input now has a `<datalist>` driven by existing accounts for fast entry.
+
+- **Entry count badge** — in the filter bar, shows "N entries" for the active filter.
+
+#### Technical notes
+- `pdfCurrency()` helper avoids the ₱ → ± rendering bug in jsPDF Helvetica (outputs `PHP X,XXX.XX`).
+- `drawBarChart()` is a pure jsPDF-drawing function — no DOM canvas, no screenshot, works in all environments.
+- `drawPieChart()` helper is present for future pie rendering but the PDF currently uses a colour-legend table for maximum reliability across all PDF viewers.
+- Date filter applied before PDF generation — the PDF reflects exactly what is shown on screen.
+- `exportingPdf` loading state disables the button and shows a spinner during generation.
+
+---
+
+## Build Status (2026-05-24)
+
+- `npm run check` — **0 TypeScript errors** ✓
+- `npm run build` — **clean build** ✓ (Vite frontend + esbuild server, no errors)
+- Server boots without any `.env` file — uses hardcoded MongoDB Atlas URI from `server_mongo.ts`
