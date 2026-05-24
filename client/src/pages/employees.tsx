@@ -177,96 +177,208 @@ function ProfileModal({ username, onClose }: { username: string | null; onClose:
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <UserCircle className="h-5 w-5 text-primary" />Employee Profile
-          </DialogTitle>
-          <DialogDescription>Complete employee record and performance analytics</DialogDescription>
-        </DialogHeader>
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0">
+        {/* ─── Gradient hero header ────────────────────────────── */}
+        <div
+          className="relative px-6 pt-7 pb-5 text-white"
+          style={{
+            background:
+              "linear-gradient(135deg, hsl(28 65% 22%) 0%, hsl(38 75% 38%) 50%, hsl(38 92% 50%) 100%)",
+          }}
+        >
+          {/* Decorative pattern overlay */}
+          <div
+            className="absolute inset-0 opacity-10 pointer-events-none"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 20% 80%, rgba(255,255,255,.6) 0%, transparent 30%), radial-gradient(circle at 80% 20%, rgba(255,255,255,.5) 0%, transparent 25%)",
+            }}
+          />
+          <DialogHeader className="relative">
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <UserCircle className="h-5 w-5" /> Employee Profile
+            </DialogTitle>
+            <DialogDescription className="text-white/80">
+              Complete employee record · performance analytics · recent activity
+            </DialogDescription>
+          </DialogHeader>
+
+          {!isLoading && (
+            <div className="relative mt-5 flex items-end gap-5 flex-wrap">
+              <div className="relative">
+                {profile?.photoDataUrl ? (
+                  <img
+                    src={profile.photoDataUrl}
+                    alt={user?.username}
+                    className="w-24 h-24 rounded-2xl object-cover ring-4 ring-white/30 shadow-lg"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-2xl bg-white/15 ring-4 ring-white/20 backdrop-blur flex items-center justify-center shadow-lg">
+                    <UserCircle className="h-12 w-12 text-white/70" />
+                  </div>
+                )}
+                {/* Online dot */}
+                <span
+                  className={`absolute bottom-1 right-1 w-3.5 h-3.5 rounded-full ring-2 ring-white ${user?.isActive ? "bg-emerald-400" : "bg-gray-300"}`}
+                />
+              </div>
+              <div className="flex-1 min-w-0 space-y-1">
+                <h2 className="text-2xl font-bold tracking-tight leading-tight">
+                  {user?.username}
+                </h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] font-mono uppercase tracking-wider bg-white/15 px-2 py-0.5 rounded-full">
+                    {profile?.employeeId || "—"}
+                  </span>
+                  <span className="text-[11px] font-bold uppercase tracking-wider bg-white text-amber-900 px-2 py-0.5 rounded-full">
+                    {user?.role}
+                  </span>
+                  {user?.isActive ? (
+                    <span className="text-[11px] font-bold uppercase tracking-wider bg-emerald-500 text-white px-2 py-0.5 rounded-full">
+                      Active
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-bold uppercase tracking-wider bg-gray-400 text-white px-2 py-0.5 rounded-full">
+                      Inactive
+                    </span>
+                  )}
+                </div>
+                <p className="text-[12px] text-white/80">
+                  Since {fmtDate(profile?.hireDate)} · Last seen {fmtTime(user?.lastLogin)}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <label className="cursor-pointer">
+                  <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
+                  <Button size="sm" variant="secondary" className="h-8 text-xs gap-1.5 cursor-pointer shadow" asChild>
+                    <span>
+                      <Camera className="h-3.5 w-3.5" />
+                      {profile?.photoDataUrl ? "Replace" : "Upload"}
+                    </span>
+                  </Button>
+                </label>
+                {profile?.photoDataUrl && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="h-8 text-xs gap-1.5 text-red-700 shadow"
+                    onClick={() => updatePhotoMutation.mutate(null)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />Remove
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-8 text-xs gap-1.5 shadow"
+                  onClick={() => setMessageOpen(true)}
+                  data-testid="button-message-employee"
+                >
+                  <MessageSquare className="h-3.5 w-3.5" />Message
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="h-8 text-xs gap-1.5 shadow"
+                  onClick={exportPDF}
+                  data-testid="button-export-employee-pdf"
+                >
+                  <Download className="h-3.5 w-3.5" />Export
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
 
         {isLoading ? (
-          <Skeleton className="h-64 w-full" />
+          <div className="p-6">
+            <Skeleton className="h-64 w-full" />
+          </div>
         ) : (
-          <div className="space-y-5">
-            {/* Header card */}
-            <Card>
-              <CardContent className="pt-5">
-                <div className="flex items-start gap-5">
-                  <div className="relative flex-shrink-0">
-                    {profile?.photoDataUrl ? (
-                      <img src={profile.photoDataUrl} alt={user?.username} className="w-24 h-24 rounded-2xl object-cover border-2 border-primary/20" />
-                    ) : (
-                      <div className="w-24 h-24 rounded-2xl bg-primary/10 border-2 border-primary/20 flex items-center justify-center">
-                        <UserCircle className="h-12 w-12 text-primary/50" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex-1 space-y-1.5">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-xl font-bold">{user?.username}</h2>
-                      <Badge variant={user?.role === "ADMIN" ? "default" : "secondary"}>{user?.role}</Badge>
-                      <Badge className={user?.isActive ? "bg-green-600 text-white border-transparent" : "bg-gray-400 text-white border-transparent"}>
-                        {user?.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground font-mono">{profile?.employeeId}</p>
-                    <p className="text-xs text-muted-foreground">Employee since {fmtDate(profile?.hireDate)}</p>
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      <label className="cursor-pointer">
-                        <input type="file" accept="image/*" className="hidden" onChange={handlePhotoUpload} />
-                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1 cursor-pointer" asChild>
-                          <span><Camera className="h-3 w-3" />{profile?.photoDataUrl ? "Replace" : "Upload"} Photo</span>
-                        </Button>
-                      </label>
-                      {profile?.photoDataUrl && (
-                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-red-600" onClick={() => updatePhotoMutation.mutate(null)}>
-                          <Trash2 className="h-3 w-3" />Delete Photo
-                        </Button>
-                      )}
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => setMessageOpen(true)}>
-                        <MessageSquare className="h-3 w-3" />Message
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={exportPDF}>
-                        <Download className="h-3 w-3" />Export PDF
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Account info */}
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Account Information</CardTitle></CardHeader>
-              <CardContent className="grid grid-cols-2 gap-3 text-sm">
-                <div className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" /><span>{profile?.email || "—"}</span></div>
-                <div className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-muted-foreground" /><span>{profile?.contactNumber || "—"}</span></div>
-                <div className="flex items-center gap-2"><Calendar className="h-3.5 w-3.5 text-muted-foreground" />Created: {fmtDate(user?.createdAt)}</div>
-                <div className="flex items-center gap-2"><Clock className="h-3.5 w-3.5 text-muted-foreground" />Last login: {fmtTime(user?.lastLogin)}</div>
-              </CardContent>
-            </Card>
-
-            {/* KPI */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{kpi.completedOrders || 0}</div><p className="text-xs text-muted-foreground mt-0.5">Completed Orders</p></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{kpi.reservationsCreated30d || 0}</div><p className="text-xs text-muted-foreground mt-0.5">Reservations (30d)</p></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{profile?.approvedLeaves || 0}</div><p className="text-xs text-muted-foreground mt-0.5">Approved Leaves</p></CardContent></Card>
-              <Card><CardContent className="pt-4"><div className="text-2xl font-bold">{kpi.pendingLeaves || 0}</div><p className="text-xs text-muted-foreground mt-0.5">Pending Leaves</p></CardContent></Card>
+          <div className="space-y-5 p-6">
+            {/* Account info as inline grid */}
+            <div className="grid grid-cols-2 gap-3 text-[13px] bg-muted/30 rounded-lg p-4 border">
+              <div className="flex items-center gap-2">
+                <Mail className="h-3.5 w-3.5 text-primary" />
+                <span className="text-muted-foreground">Email</span>
+                <span className="ml-auto font-medium truncate">{profile?.email || "—"}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Phone className="h-3.5 w-3.5 text-primary" />
+                <span className="text-muted-foreground">Phone</span>
+                <span className="ml-auto font-medium truncate font-mono">{profile?.contactNumber || "—"}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Calendar className="h-3.5 w-3.5 text-primary" />
+                <span className="text-muted-foreground">Created</span>
+                <span className="ml-auto font-medium">{fmtDate(user?.createdAt)}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-3.5 w-3.5 text-primary" />
+                <span className="text-muted-foreground">Last login</span>
+                <span className="ml-auto font-medium">{fmtTime(user?.lastLogin)}</span>
+              </div>
             </div>
 
-            {/* Productivity chart */}
+            {/* KPI tiles — colored, with icons */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <KpiTile
+                label="Completed orders"
+                value={kpi.completedOrders || 0}
+                Icon={ShoppingCart}
+                color="emerald"
+              />
+              <KpiTile
+                label="Reservations (30d)"
+                value={kpi.reservationsCreated30d || 0}
+                Icon={CalendarCheck}
+                color="blue"
+              />
+              <KpiTile
+                label="Approved leaves"
+                value={profile?.approvedLeaves || 0}
+                Icon={Award}
+                color="amber"
+              />
+              <KpiTile
+                label="Pending leaves"
+                value={kpi.pendingLeaves || 0}
+                Icon={Briefcase}
+                color="rose"
+              />
+            </div>
+
+            {/* Productivity chart — gradient bars with subtle grid */}
             {productivity.length > 0 && (
-              <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Activity className="h-4 w-4" />Orders Per Day (Last 7 Days)</CardTitle></CardHeader>
-                <CardContent>
-                  <ResponsiveContainer width="100%" height={180}>
-                    <BarChart data={productivity}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="_id" tick={{ fontSize: 10 }} />
-                      <YAxis tick={{ fontSize: 10 }} />
-                      <ChartTooltip />
-                      <Bar dataKey="count" fill="hsl(var(--primary))" name="Orders" radius={[4, 4, 0, 0]} />
+              <Card className="overflow-hidden">
+                <CardHeader className="pb-2 bg-gradient-to-r from-primary/5 to-transparent">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-primary" />
+                    Orders per day · last 7 days
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-4">
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={productivity} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="empBarGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(38 92% 60%)" stopOpacity={0.95} />
+                          <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0.55} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="2 4" stroke="hsl(var(--border))" vertical={false} />
+                      <XAxis dataKey="_id" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                      <ChartTooltip
+                        cursor={{ fill: "hsl(var(--muted) / 0.4)" }}
+                        contentStyle={{
+                          background: "hsl(var(--card))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                      />
+                      <Bar dataKey="count" fill="url(#empBarGrad)" name="Orders" radius={[6, 6, 0, 0]} maxBarSize={42} />
                     </BarChart>
                   </ResponsiveContainer>
                 </CardContent>
@@ -372,6 +484,32 @@ function ProfileModal({ username, onClose }: { username: string | null; onClose:
         </Dialog>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** SaaS-style KPI tile with icon + colored ring */
+function KpiTile({ label, value, Icon, color }: {
+  label: string;
+  value: number;
+  Icon: any;
+  color: "emerald" | "blue" | "amber" | "rose";
+}) {
+  const colorMap = {
+    emerald: { bg: "bg-emerald-50 dark:bg-emerald-950/40", text: "text-emerald-600 dark:text-emerald-400", ring: "ring-emerald-500/20" },
+    blue: { bg: "bg-blue-50 dark:bg-blue-950/40", text: "text-blue-600 dark:text-blue-400", ring: "ring-blue-500/20" },
+    amber: { bg: "bg-amber-50 dark:bg-amber-950/40", text: "text-amber-600 dark:text-amber-400", ring: "ring-amber-500/20" },
+    rose: { bg: "bg-rose-50 dark:bg-rose-950/40", text: "text-rose-600 dark:text-rose-400", ring: "ring-rose-500/20" },
+  }[color];
+  return (
+    <div className={`rounded-xl border ring-1 ${colorMap.ring} bg-card p-3 hover:shadow-md transition-shadow`}>
+      <div className="flex items-start justify-between mb-1">
+        <p className="text-[10.5px] uppercase tracking-wider font-semibold text-muted-foreground">{label}</p>
+        <div className={`w-7 h-7 rounded-lg ${colorMap.bg} flex items-center justify-center`}>
+          <Icon className={`h-3.5 w-3.5 ${colorMap.text}`} />
+        </div>
+      </div>
+      <div className="font-mono tabular-nums text-2xl font-bold leading-none mt-2">{value}</div>
+    </div>
   );
 }
 

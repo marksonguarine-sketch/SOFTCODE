@@ -112,7 +112,7 @@ function buildCalendarData(userLogs: ISystemLog[]): Record<string, DayLoginData>
   return map;
 }
 
-function CalendarUserLog({ userLogs }: { userLogs: ISystemLog[] }) {
+function CalendarUserLog({ userLogs, targetUsername }: { userLogs: ISystemLog[]; targetUsername?: string }) {
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth()); // 0-based
@@ -227,9 +227,14 @@ function CalendarUserLog({ userLogs }: { userLogs: ISystemLog[] }) {
       {dayData && (
         <Card className="border-primary/30">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-primary" />
-              {new Date(selectedDay!).toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            <CardTitle className="text-sm flex items-center gap-2 flex-wrap">
+              <Calendar className="h-4 w-4 text-primary flex-shrink-0" />
+              <span className="flex-1 min-w-0">
+                {targetUsername ? (
+                  <><strong>{targetUsername}</strong>'s activity · </>
+                ) : null}
+                {new Date(selectedDay!).toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+              </span>
               <Badge variant="outline" className="ml-auto">{dayData.events.length} event{dayData.events.length !== 1 ? "s" : ""}</Badge>
             </CardTitle>
           </CardHeader>
@@ -290,8 +295,16 @@ export default function SystemLogsPage() {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedLog, setSelectedLog] = useState<ISystemLog | null>(null);
   const [page, setPage] = useState(1);
+  const [targetUser, setTargetUser] = useState<string>(""); // for User Log target selector
   const perPage = 20;
   const searchRef = useRef<HTMLDivElement>(null);
+
+  // Users list for the target dropdown (admin can inspect any user)
+  const { data: usersData } = useQuery<{ success: boolean; data: Array<{ username: string; role: string }> }>({
+    queryKey: ["/api/users/simple"],
+    enabled: isAdmin,
+  });
+  const allUsers = usersData?.data || [];
 
   const { data: logsData, isLoading } = useQuery<{
     success: boolean;
@@ -463,44 +476,50 @@ export default function SystemLogsPage() {
 
         {/* ── User Log Tab (Calendar) ── */}
         <TabsContent value="user-log" className="mt-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Target user selector — admin picks anyone, including themselves */}
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Inspect activity for:
+            </label>
+            <Select value={targetUser || "__none__"} onValueChange={(v) => setTargetUser(v === "__none__" ? "" : v)}>
+              <SelectTrigger className="w-[240px] h-9" data-testid="select-target-user">
+                <SelectValue placeholder="Choose user…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">— Select a user —</SelectItem>
+                {allUsers.map((u) => (
+                  <SelectItem key={u.username} value={u.username}>
+                    {u.username} ({u.role})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {targetUser && (
+              <span className="text-xs text-muted-foreground">
+                Showing logins/logouts for <strong className="text-foreground">{targetUser}</strong>
+              </span>
+            )}
+          </div>
+
+          {!targetUser ? (
+            <Card>
+              <CardContent className="py-16 text-center text-sm text-muted-foreground">
+                <Calendar className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                Select a user above to see their login/logout calendar.
+              </CardContent>
+            </Card>
+          ) : (
             <div>
               <p className="text-sm text-muted-foreground mb-4">
-                Click a day to see login / logout events. Green = logins, Red = logouts.
+                Click a day to see <strong>{targetUser}</strong>'s login / logout events.
+                Green dots = logins, red dots = logouts.
               </p>
-              <CalendarUserLog userLogs={userLogs} />
+              <CalendarUserLog
+                userLogs={userLogs.filter((l) => l.actor === targetUser)}
+                targetUsername={targetUser}
+              />
             </div>
-
-            {/* Recent user activity list */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-2">
-                <Clock className="h-4 w-4" />Recent Activity
-              </h3>
-              <div className="space-y-1.5 max-h-[500px] overflow-y-auto">
-                {userLogs.slice(0, 50).map((log) => (
-                  <div key={log._id} className="flex items-start gap-2.5 text-sm p-2.5 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-                    {log.action === "USER_LOGIN"
-                      ? <LogIn className="h-4 w-4 text-green-500 flex-shrink-0 mt-0.5" />
-                      : <LogOut className="h-4 w-4 text-red-400 flex-shrink-0 mt-0.5" />}
-                    <div className="flex-1 min-w-0">
-                      <span className="font-medium">{log.actor}</span>
-                      <span className="text-muted-foreground ml-1 text-xs">
-                        {log.action === "USER_LOGIN" ? "logged in" : "logged out"}
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
-                      {new Date(log.createdAt).toLocaleDateString("en-PH", { month: "short", day: "numeric" })}
-                      {" "}
-                      {formatTime(log.createdAt)}
-                    </span>
-                  </div>
-                ))}
-                {userLogs.length === 0 && (
-                  <div className="text-center py-8 text-muted-foreground text-sm">No user login/logout events recorded.</div>
-                )}
-              </div>
-            </div>
-          </div>
+          )}
         </TabsContent>
       </Tabs>
 

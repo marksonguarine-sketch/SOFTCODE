@@ -132,6 +132,7 @@ export default function SettingsPage() {
       autoApplyOffers: true,
       showSavingsSummary: true,
       ttsVoice: "en-US-AriaNeural",
+      dailySalesGoal: 100000,
     },
     values: settings ? {
       companyName: settings.companyName,
@@ -147,6 +148,7 @@ export default function SettingsPage() {
       autoApplyOffers: settings.autoApplyOffers ?? true,
       showSavingsSummary: settings.showSavingsSummary ?? true,
       ttsVoice: settings.ttsVoice || "en-US-AriaNeural",
+      dailySalesGoal: settings.dailySalesGoal ?? 100000,
     } : undefined,
   });
 
@@ -208,6 +210,25 @@ export default function SettingsPage() {
                   <FormItem>
                     <FormLabel>Company Name</FormLabel>
                     <FormControl><Input {...field} data-testid="input-company-name" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="dailySalesGoal" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Daily Sales Goal (₱)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        min={0}
+                        step={1000}
+                        {...field}
+                        onChange={(e) => field.onChange(Number(e.target.value))}
+                        data-testid="input-daily-sales-goal"
+                      />
+                    </FormControl>
+                    <FormDescription className="text-xs">
+                      Target revenue per day. Shown on every dashboard (admins + employees) as a progress ring.
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )} />

@@ -20,10 +20,10 @@ export function LiveClock({ className }: { className?: string }) {
     timeZone: "Asia/Manila",
   };
   const timeOpts: Intl.DateTimeFormatOptions = {
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
     second: "2-digit",
-    hour12: false,
+    hour12: true,
     timeZone: "Asia/Manila",
   };
 

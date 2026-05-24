@@ -32,6 +32,8 @@ import {
   MoreHorizontal,
   ImageIcon,
   X,
+  Edit2,
+  Trash2,
 } from "lucide-react";
 import {
   createItemSchema,
@@ -104,6 +106,11 @@ export default function InventoryPage() {
   const [category, setCategory] = useState<string>("All");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [editItem, setEditItem] = useState<IItem | null>(null);
+  const [editPrice, setEditPrice] = useState(0);
+  const [editQty, setEditQty] = useState(0);
+  const [editCategory, setEditCategory] = useState("");
+  const [editSupplier, setEditSupplier] = useState("");
 
   // ── Data ──────────────────────────────────────────────────────────────
   const { data: itemsRes, isLoading } = useQuery<{
@@ -172,6 +179,52 @@ export default function InventoryPage() {
       safetyStock: 0,
     },
   });
+  // Edit item — wired to the "…" button on each inventory row
+  const editMutation = useMutation({
+    mutationFn: async () => {
+      if (!editItem) throw new Error("No item selected");
+      const body = {
+        itemName: editItem.itemName,
+        category: editCategory,
+        supplierName: editSupplier,
+        unitPrice: editPrice,
+        currentQuantity: editQty,
+      };
+      const res = await apiRequest("PATCH", `/api/items/${editItem._id}`, body);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items/categories"] });
+      toast({ title: "Item updated" });
+      setEditItem(null);
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to update item", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const deleteItemMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/items/${id}`);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+      toast({ title: "Item deleted" });
+      setEditItem(null);
+    },
+    onError: (err: any) => toast({ title: "Failed to delete", description: err.message, variant: "destructive" }),
+  });
+
+  function openEdit(item: IItem) {
+    setEditItem(item);
+    setEditPrice(item.unitPrice || 0);
+    setEditQty(item.currentQuantity || 0);
+    setEditCategory(item.category || "");
+    setEditSupplier((item as any).supplierName || "");
+  }
+
   const addMutation = useMutation({
     mutationFn: async (data: CreateItemInput) => {
       const res = await apiRequest("POST", "/api/items", data);
@@ -404,7 +457,14 @@ export default function InventoryPage() {
                         {(item as any).supplierName || "—"}
                       </TableCell>
                       <TableCell>
-                        <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          title="Edit item"
+                          data-testid={`button-edit-item-${item._id}`}
+                          onClick={() => openEdit(item)}
+                        >
                           <MoreHorizontal className="w-3.5 h-3.5" />
                         </Button>
                       </TableCell>
@@ -599,6 +659,67 @@ export default function InventoryPage() {
               </div>
             </form>
           </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit item dialog — wired to the "…" button on each inventory row */}
+      <Dialog open={!!editItem} onOpenChange={(o) => !o && setEditItem(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit2 className="h-4 w-4 text-primary" />Edit item
+            </DialogTitle>
+            <DialogDescription>
+              {editItem ? <span className="font-mono">{editItem.itemName}</span> : null}
+            </DialogDescription>
+          </DialogHeader>
+          {editItem && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Category</label>
+                  <Input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} data-testid="input-edit-category" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Supplier</label>
+                  <Input value={editSupplier} onChange={(e) => setEditSupplier(e.target.value)} data-testid="input-edit-supplier" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unit price (₱)</label>
+                  <Input type="number" min={0} step="0.01" value={editPrice} onChange={(e) => setEditPrice(Number(e.target.value))} data-testid="input-edit-price" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Current stock</label>
+                  <Input type="number" min={0} value={editQty} onChange={(e) => setEditQty(Number(e.target.value))} data-testid="input-edit-qty" />
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-3 border-t">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:bg-destructive/10"
+                  onClick={() => {
+                    if (window.confirm(`Delete "${editItem.itemName}" permanently?`)) {
+                      deleteItemMutation.mutate(editItem._id);
+                    }
+                  }}
+                  disabled={deleteItemMutation.isPending}
+                  data-testid="button-delete-item"
+                >
+                  <Trash2 className="h-3.5 w-3.5 mr-1" />Delete
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setEditItem(null)}>Cancel</Button>
+                  <Button size="sm" onClick={() => editMutation.mutate()} disabled={editMutation.isPending} data-testid="button-save-item">
+                    {editMutation.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : null}
+                    Save
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

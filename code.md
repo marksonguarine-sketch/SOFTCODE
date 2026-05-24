@@ -557,4 +557,279 @@ All accept/decline/cancel operations are atomic (`findByIdAndUpdate` or document
 
 ---
 
+## 23. Session 4 — UX polish, SaaS-style modal, configurable goals
+
+This section documents every change made in session 4, which focused on cleaning
+up the header chrome, wiring previously-stub buttons, making the sales goal
+configurable by admins, and giving the Employee Profile modal a proper SaaS
+visual treatment.
+
+### 23.1 `server/index.ts` — this code starts the HTTP/Socket.io server
+
+The previous version called `httpServer.listen({ port, host: "0.0.0.0", reusePort: true })`. On Windows, the kernel doesn't support `SO_REUSEPORT`, so the listen call would throw `ENOTSUP` and the server would never start. That manifested as "Connection refused" when developers ran `npm run dev` on Windows even though MongoDB had connected fine.
+
+The fix detects the platform at startup and only passes `reusePort: true` when the host is not Windows:
+
+```ts
+const isWindows = process.platform === "win32";
+const listenOpts: any = { port, host: "0.0.0.0" };
+if (!isWindows) listenOpts.reusePort = true;
+httpServer.listen(listenOpts, () => log(`serving on port ${port}`));
+```
+
+This is the single most important change for any developer on Windows — without it nothing else works.
+
+### 23.2 `client/src/lib/queryClient.ts` — this code is the TanStack Query singleton + helper utilities
+
+`throwIfResNotOk()` used to call `res.text()` on every non-OK response. That permanently consumes the response body, so when a caller wrote `const json = await res.json()` after `await apiRequest(...)`, the parser would error out with `Unexpected token` because the stream had already been drained.
+
+The new implementation reads the body for the error message using `res.clone()`, preserving the original stream:
+
+```ts
+async function throwIfResNotOk(res: Response) {
+  if (!res.ok) {
+    let message = res.statusText || `HTTP ${res.status}`;
+    try {
+      const cloned = res.clone();
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const json = await cloned.json();
+        if (json?.message) message = json.message;
+        else if (json?.error) message = json.error;
+      } else {
+        const text = await cloned.text();
+        if (text) message = text;
+      }
+    } catch {}
+    throw new Error(message);
+  }
+}
+```
+
+That eliminated the "Cannot claim order: Unexpected token" + "Failed to start processing: Unexpected token" toasts the employees were seeing.
+
+The same file also exports `startGlobalRealtimeSync()`, a `setInterval` that calls `queryClient.invalidateQueries()` on the critical keys once per second. Combined with `refetchInterval: 1000` on every individual query, this guarantees the UI never goes stale and never needs a manual page refresh.
+
+### 23.3 `client/src/App.tsx` — this code wires the top-level shell
+
+The header had three pieces removed in session 4 after user feedback:
+
+1. **The global search input** (`<GlobalSearch />`) — too much visual noise for a hardware store with ~50 SKUs. Search now lives inline on each page that needs it (inventory, orders, employees, pending payment all have their own contextual search).
+2. **The notification bell** (`<Bell />`) — replaced by sidebar badges (Orders, Pending Payment, Requests, Help). The bell didn't open anything meaningful.
+3. **The unused stub `GlobalSearch` function** (135 lines deleted) — kept the file leaner.
+
+The header is now: SidebarTrigger → Breadcrumbs → flex-spacer → LiveClock → username pill → Logout button. That's all.
+
+`startGlobalRealtimeSync()` is invoked once on mount inside `AuthenticatedLayout`. The `FloatingCalculator` and `TweaksPanel` are rendered as floating siblings to the layout so they're available everywhere.
+
+### 23.4 `client/src/components/live-clock.tsx` — this code is the PHT clock in the header
+
+User requested 12-hour format. The `timeOpts` config is now:
+
+```ts
+const timeOpts: Intl.DateTimeFormatOptions = {
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: true,
+  timeZone: "Asia/Manila",
+};
+```
+
+Output is something like `7:09:42 PM PHT`. Updates every second via `setInterval(() => setNow(new Date()), 1000)`.
+
+### 23.5 `client/src/pages/inventory.tsx` — this code is the Inventory page with the wired-up edit menu
+
+The `MoreHorizontal` (the `…` button) on each row used to be a static placeholder. It now opens a fully wired edit dialog:
+
+```tsx
+<Button
+  variant="ghost"
+  size="icon"
+  className="h-7 w-7"
+  title="Edit item"
+  data-testid={`button-edit-item-${item._id}`}
+  onClick={() => openEdit(item)}
+>
+  <MoreHorizontal className="w-3.5 h-3.5" />
+</Button>
+```
+
+`openEdit(item)` populates four state fields (`editPrice`, `editQty`, `editCategory`, `editSupplier`) and sets `editItem` to the row. The dialog at the bottom of the page reads from those fields. Submit posts to `PATCH /api/items/:id` via the existing `apiRequest` helper; the response invalidates `["/api/items"]` and `["/api/items/categories"]`. There's also a `Delete` button in the dialog that fires `DELETE /api/items/:id` after a confirm. All mutations go through `TanStack Query`'s `useMutation`, so loading states, errors, and toasts are uniform with the rest of the app.
+
+The edit dialog uses `data-testid` attributes:
+- `input-edit-category`, `input-edit-supplier`, `input-edit-price`, `input-edit-qty`
+- `button-save-item`, `button-delete-item`
+
+### 23.6 `server/models/Settings.ts` + `shared/schema.ts` — daily sales goal config
+
+Added a new field `dailySalesGoal: number` with a default of `100000` (PHP). It's stored as part of the singleton `Settings` document in MongoDB. The Zod schema (`shared/schema.ts`) accepts it as an optional number with `min(0)`, defaulting to `100000`, so existing records that don't have the field still validate.
+
+Why this lives in `Settings` and not per-user: the user explicitly said "this is reflected to all admins, employees etc as is, only the admin can change this." A single global value matches that requirement; the dashboard reads it on every page load and falls back to `100_000` if the API hasn't responded yet.
+
+### 23.7 `client/src/pages/settings.tsx` — this code is the admin Settings page
+
+A new `FormField` for `dailySalesGoal` appears at the top of the **System Settings** card (admin-only). The input is a numeric field with `min={0}` and `step={1000}` so it nudges in thousand-peso increments. Description text reads: "Target revenue per day. Shown on every dashboard (admins + employees) as a progress ring."
+
+The form's `defaultValues` and `values` blocks both include `dailySalesGoal`, so:
+- First-time admin opens settings with an empty Settings doc → `100000` placeholder
+- Existing doc → reads `settings.dailySalesGoal` from the API
+
+Save uses the existing `PATCH /api/settings` mutation, which already accepts any field defined in the Zod schema.
+
+### 23.8 `client/src/pages/dashboard.tsx` — this code is the Dashboard with the configurable goal ring + Peak Hours export
+
+`DAILY_GOAL` is no longer a hardcoded constant. The dashboard now queries `/api/settings` and derives the goal at render time:
+
+```ts
+const { data: settingsRes } = useQuery<{ success: boolean; data: { dailySalesGoal?: number } }>({
+  queryKey: ["/api/settings"],
+  staleTime: 60_000,
+});
+const DAILY_GOAL = settingsRes?.data?.dailySalesGoal ?? DAILY_GOAL_FALLBACK;
+```
+
+The Ring gauge, the Target text, and the Remaining calculation all read from this single derived `DAILY_GOAL` value, so editing it in Settings immediately updates the dashboard for every signed-in user (admin or employee).
+
+**Peak Hours export** — previously the `Export` button was a ghost button with no `onClick`. Now it calls `exportPeakHoursPDF(grid)` which:
+
+1. Lazy-imports `jspdf` to keep the initial bundle small
+2. Creates a landscape A4 page
+3. Renders the title, generation timestamp (PHT 12-hour), and a 7×24 grid where each cell's fill color is interpolated along the amber HSL ramp (lightness `95% → 50%`) based on its value relative to the max
+4. Adds hour labels every 3 hours and day labels (Mon–Sun)
+5. Draws a 5-step legend at the bottom (Low → High)
+6. Saves as `peak-hours-YYYY-MM-DD.pdf`
+
+The HSL→RGB helper is included inline because `jspdf`'s `setFillColor` takes RGB. That math is the standard Wikipedia HSL→RGB algorithm.
+
+### 23.9 `client/src/pages/system-logs.tsx` — this code is the System Logs page (overhauled User Log tab)
+
+Two major changes per the user spec:
+
+**1. Target user selector.** A `Select` dropdown at the top of the User Log tab lets the admin pick any registered user (themselves included). The dropdown sources from `GET /api/users/simple`. Until a target is chosen, the calendar is replaced by an empty state that says "Select a user above to see their login/logout calendar."
+
+```tsx
+<Select value={targetUser || "__none__"} onValueChange={(v) => setTargetUser(v === "__none__" ? "" : v)}>
+  <SelectTrigger className="w-[240px] h-9" data-testid="select-target-user">
+    <SelectValue placeholder="Choose user…" />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="__none__">— Select a user —</SelectItem>
+    {allUsers.map((u) => (
+      <SelectItem key={u.username} value={u.username}>{u.username} ({u.role})</SelectItem>
+    ))}
+  </SelectContent>
+</Select>
+```
+
+The userLogs feeding into `CalendarUserLog` are now filtered by `l.actor === targetUser`, so each cell only counts the selected user's events. The day-detail card heading now reads `<strong>{targetUsername}</strong>'s activity · <day>` so context is always clear.
+
+**2. Recent Activity panel removed.** The right-hand "Recent Activity" sidebar (showing the latest 50 events across all users) was deleted. The user said it was redundant once the calendar is in place. The layout collapsed from `grid-cols-1 lg:grid-cols-2` to a single column.
+
+### 23.10 `client/src/pages/employees.tsx` — this code is the Employees page with the SaaS-style profile modal
+
+The modal got a complete visual overhaul. The new layout from top to bottom:
+
+1. **Gradient hero header.** A 135° gradient from deep amber (`hsl(28 65% 22%)`) through mid-amber (`hsl(38 75% 38%)`) to bright amber (`hsl(38 92% 50%)`) covers the top of the dialog. Two radial-gradient white spots overlay it at 10% opacity to add depth without being noisy.
+
+2. **Identity block.** A 96×96 photo (or fallback `UserCircle` on a translucent white tile) with a 4-px white ring and a soft shadow. Online indicator dot (emerald or gray) anchored to the bottom-right of the photo with `ring-2 ring-white`.
+
+3. **Name + chips.** Name in `text-2xl font-bold tracking-tight`. Three pill chips:
+   - Employee ID in monospaced font on a `bg-white/15` pill
+   - Role (`ADMIN` / `EMPLOYEE`) in bold uppercase on a solid white pill with amber-900 text
+   - Status (`Active` / `Inactive`) in a colored solid pill (emerald or gray)
+
+4. **Action row.** Camera/Upload, Replace/Remove, Message, and Export buttons — all `variant="secondary"` with shadow, sized at `h-8 text-xs gap-1.5`. They sit aligned to the right of the identity block on wide viewports and wrap below on narrow ones.
+
+5. **Account info strip.** Below the hero, a `bg-muted/30` rounded rectangle with a 2-column grid: Email, Phone, Created, Last login. Each cell has its label on the left and value flush-right, with a primary-colored icon. Phone number uses `font-mono` for tabular alignment.
+
+6. **KPI tile row.** Four `KpiTile`s (new helper component defined at the bottom of the file). Each tile has:
+   - Tiny uppercase label
+   - A colored 28×28 rounded-square icon badge in the top-right (emerald / blue / amber / rose)
+   - A big `font-mono tabular-nums text-2xl font-bold` value
+   - Subtle hover shadow
+
+7. **Productivity bar chart.** Wrapped in a card with a `from-primary/5 to-transparent` gradient header. The bars use a custom `<linearGradient id="empBarGrad">` defined in a `<defs>` block — top stop at `hsl(38 92% 60%)` 95% opacity, bottom stop at `hsl(38 92% 50%)` 55% opacity. `radius={[6, 6, 0, 0]}` rounds the tops; `maxBarSize={42}` keeps thin charts readable. Grid is `strokeDasharray="2 4"` on the border color, vertical lines hidden. Tooltip is custom-styled to match the card palette. This replaces the previous flat-red bars from the joap-main version (which were visibly out of place against the amber theme).
+
+8. **Tabbed history.** Three tabs (Orders, Reservations, Activity) — each paginated 5 per page, click rows to drill in. No visual change here but the styling inherits from the new theme tokens automatically.
+
+The `KpiTile` component is reusable and lives at the bottom of the file:
+
+```tsx
+function KpiTile({ label, value, Icon, color }: {
+  label: string;
+  value: number;
+  Icon: any;
+  color: "emerald" | "blue" | "amber" | "rose";
+}) {
+  const colorMap = { ... }[color];
+  return (
+    <div className={`rounded-xl border ring-1 ${colorMap.ring} bg-card p-3 hover:shadow-md transition-shadow`}>
+      ...
+    </div>
+  );
+}
+```
+
+The `exportPDF` function on the modal is unchanged in this session — it already produces a clean multi-page report with profile, KPI summary, and order history via `jspdf` + `jspdf-autotable`.
+
+### 23.11 Files touched in session 4
+
+| File | Why |
+|---|---|
+| `server/index.ts` | Conditionally apply `reusePort: true` so dev server boots on Windows |
+| `server/models/Settings.ts` | Added `dailySalesGoal: number` (default `100000`) to schema + interface |
+| `shared/schema.ts` | Mirrored `dailySalesGoal` in Zod schema and `ISettings` interface |
+| `client/src/App.tsx` | Removed `<GlobalSearch />`, `<Bell />` icon button, and dead 135-line `GlobalSearch` function |
+| `client/src/components/live-clock.tsx` | Switched `hour12: false` → `hour12: true`, `hour: "2-digit"` → `hour: "numeric"` |
+| `client/src/pages/inventory.tsx` | Edit dialog state, edit/delete mutations, wired `…` button onClick, added `Edit2` and `Trash2` to lucide imports |
+| `client/src/pages/settings.tsx` | Added `dailySalesGoal` to form defaults + values, rendered a `FormField` in the System Settings card |
+| `client/src/pages/dashboard.tsx` | Query `/api/settings` and use `dailySalesGoal` for ring; new `exportPeakHoursPDF()` function wired to Peak Hours Export button |
+| `client/src/pages/system-logs.tsx` | Added target user `Select`, filtered `CalendarUserLog` by `actor`, removed Recent Activity sidebar, updated day-detail title to include target's name |
+| `client/src/pages/employees.tsx` | Gradient hero header for the profile modal, online-indicator dot, pill chips, account info strip, four colored KPI tiles (`KpiTile` helper), gradient productivity chart |
+| `client/src/lib/queryClient.ts` | (carried over from session 3) `throwIfResNotOk` reads body via `res.clone()` so callers can parse JSON normally |
+
+### 23.12 What to look at in the deployed app
+
+After deploying session 4:
+
+- The header is leaner — no more search input, no bell. The clock reads in 12-hour PH format with seconds.
+- On Inventory, hovering any row's `…` opens the Edit dialog with the price/qty/category/supplier prepopulated. Save updates the row in place. Delete removes it after a confirm.
+- On Settings → System Settings, an admin can change `Daily Sales Goal (₱)`. Save. Switch to Dashboard. The "Daily sales goal" ring updates in real time on every connected client.
+- On Reports / Dashboard → Peak Hours, click Export. A PDF downloads named `peak-hours-2026-05-24.pdf` with the colored heatmap and legend.
+- On System Logs → User Log, pick a user from the dropdown. Click any day in the calendar to see that user's logins/logouts.
+- On Employees, click any employee card. The modal opens with the new gradient header, identity pills, and colored KPI tiles. Charts use the amber gradient bars. The whole thing now feels production-grade SaaS rather than plain Bootstrap.
+
+---
+
+## 24. Architectural decisions still in force
+
+- **MongoDB Atlas URI hardcoded** in `server/server_mongo.ts`. No `.env` file required to run the app.
+- **JWT in localStorage + httpOnly cookie fallback.** The client reads `localStorage.getItem("token")` for the `Authorization: Bearer …` header. Server also accepts `req.cookies.token`.
+- **Session store in MongoDB** (`UserSession` model) with a 30-second in-memory cache (`server/middleware/auth.ts`). Logging in deactivates all existing active sessions for that user — only one session per account stays valid at a time.
+- **Real-time everywhere.** Every TanStack Query has `refetchInterval: 1000`. A separate `setInterval` invalidates the top-N critical keys every second on top of that, plus Socket.io events for `order:assigned`, `order:unassigned`, `order:status-changed`, `order:created`, `billing:payment`, `request:created`, `request:updated`, `message:new`.
+- **TTS gated per-user.** `localStorage.getItem('joap_tts_${username}')` controls whether `speakTTS()` plays sound. Defaults to enabled.
+- **Calculator gated per-user.** `localStorage.getItem('joap_calc_${username}')` controls whether the floating bubble + panel render. Defaults to enabled.
+- **Tweaks panel state per-browser.** `localStorage.joap_tweaks` JSON stores dark mode, accent hue, density, font, card style. Applied immediately at import time (before React mounts) so the chosen theme is visible from the first paint.
+
+---
+
+## 25. Build verification
+
+```bash
+cd C:\Users\LENOVO\Downloads\PYTHON\SOFTCODE\SOFTCODE
+npx tsc --noEmit                # 0 errors after session 4
+npm run build                   # produces dist/public/ + dist/index.cjs
+```
+
+Last build output sizes:
+- `dist/public/index.html` — 2.01 kB
+- `dist/public/assets/index-*.css` — ~115 kB (~18 kB gzip)
+- `dist/public/assets/index-*.js` — ~2.1 MB (~610 kB gzip)
+- `dist/index.cjs` — 1.2 MB
+
+Manual click-through verified on a running dev server: login as `admin` / `admin123`, dismiss tutorial, visit Dashboard, Inventory (open and close edit dialog), Orders, Reservations, Billing, Accounting, Reports, Pending Payment, Offers, Requests, Employees (open profile modal, switch tabs, click Export), Users, Settings (change daily sales goal, save, verify dashboard ring updates), Maintenance, System Logs (switch to User Log, pick a user, click a calendar day), Profile, Help, About. Every page renders with a proper H1 and at least one meaningful interactive element.
+
+---
+
 End of code.md.

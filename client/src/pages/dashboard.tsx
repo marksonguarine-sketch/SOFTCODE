@@ -88,7 +88,7 @@ const pesoCompact = (n: number) => {
 };
 
 // ── Hardcoded settings ──────────────────────────────────────────────────────
-const DAILY_GOAL = 100_000;
+const DAILY_GOAL_FALLBACK = 100_000;
 
 // ── Trend-period selector ───────────────────────────────────────────────────
 const TREND_PERIODS = [
@@ -130,6 +130,13 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("daily");
   const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // Daily sales goal sourced from system settings (set by admin in Settings)
+  const { data: settingsRes } = useQuery<{ success: boolean; data: { dailySalesGoal?: number } }>({
+    queryKey: ["/api/settings"],
+    staleTime: 60_000,
+  });
+  const DAILY_GOAL = settingsRes?.data?.dailySalesGoal ?? DAILY_GOAL_FALLBACK;
 
   // ── Real backend queries ─────────────────────────────────────────────────
   const { data: statsRes, isLoading: statsLoading } = useQuery<{
@@ -743,13 +750,18 @@ export default function DashboardPage() {
       </div>
 
       {/* 07. Peak hours heatmap */}
-      <Card className="mb-4">
+      <Card className="mb-4" id="peak-hours-card">
         <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-[13.5px] font-semibold tracking-tight">Peak hours</CardTitle>
             <div className="text-[12px] text-muted-foreground mt-0.5">Order volume by hour of day · last 4 weeks</div>
           </div>
-          <Button variant="ghost" size="sm">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => exportPeakHoursPDF(peakHours.map((r) => r.values))}
+            data-testid="button-export-peak-hours"
+          >
             <Download className="w-3.5 h-3.5 mr-1.5" />
             Export
           </Button>
@@ -811,6 +823,100 @@ export default function DashboardPage() {
 }
 
 /** "2 hours ago" relative formatter — keeps things terse like the prototype. */
+/**
+ * Export the Peak Hours heatmap to a polished PDF.
+ * Uses jspdf to render the title + a heatmap table + a legend with the same
+ * amber gradient as the on-screen heatmap.
+ */
+async function exportPeakHoursPDF(grid: number[][]) {
+  const { default: jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+
+  // Title block
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.text("Peak hours — JOAP Hardware Trading", 40, 50);
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(120);
+  doc.text("Order volume by hour of day · last 4 weeks", 40, 70);
+  doc.text(
+    `Generated ${new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", hour12: true })}`,
+    40,
+    86
+  );
+  doc.setTextColor(0);
+
+  // Grid: 7 rows × 24 columns
+  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const startX = 90;
+  const startY = 130;
+  const cellW = 28;
+  const cellH = 26;
+  const max = Math.max(1, ...grid.flat());
+
+  // Hour labels (every 3)
+  doc.setFontSize(8);
+  doc.setTextColor(140);
+  for (let h = 0; h < 24; h++) {
+    if (h % 3 === 0) doc.text(String(h).padStart(2, "0"), startX + h * cellW + cellW / 2 - 5, startY - 6);
+  }
+
+  // Day labels + cells
+  doc.setFontSize(9);
+  for (let r = 0; r < days.length; r++) {
+    doc.setTextColor(80);
+    doc.text(days[r], startX - 35, startY + r * cellH + cellH / 2 + 3);
+    for (let c = 0; c < 24; c++) {
+      const v = grid[r]?.[c] ?? 0;
+      const t = v / max;
+      // amber gradient: hsl(38 92% 95% → 50%)
+      const lightness = Math.round(95 - t * 45);
+      const [R, G, B] = hslToRgb(38 / 360, 0.92, lightness / 100);
+      doc.setFillColor(R, G, B);
+      doc.rect(startX + c * cellW, startY + r * cellH, cellW - 2, cellH - 2, "F");
+    }
+  }
+
+  // Legend
+  const legendY = startY + days.length * cellH + 24;
+  doc.setTextColor(140);
+  doc.setFontSize(9);
+  doc.text("Low", startX - 35, legendY + 12);
+  doc.text("High", startX + 24 * cellW + 4, legendY + 12);
+  for (let i = 0; i < 5; i++) {
+    const t = (i + 1) / 5;
+    const l = Math.round(95 - t * 45);
+    const [R, G, B] = hslToRgb(38 / 360, 0.92, l / 100);
+    doc.setFillColor(R, G, B);
+    doc.rect(startX + i * 36, legendY, 30, 10, "F");
+  }
+
+  doc.save(`peak-hours-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  let r: number, g: number, b: number;
+  if (s === 0) {
+    r = g = b = l;
+  } else {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1 / 3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1 / 3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
 function relativeTime(d: Date): string {
   const diff = (Date.now() - d.getTime()) / 1000;
   if (diff < 60) return "just now";
