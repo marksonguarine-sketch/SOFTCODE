@@ -10,6 +10,18 @@ interface UseSocketNotificationsOptions {
   enabled: boolean;
 }
 
+function isTtsEnabled(username: string): boolean {
+  return localStorage.getItem(`joap_tts_${username}`) !== "false";
+}
+
+function invalidateOrderQueries() {
+  queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/orders?assignedToMe=true"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/orders/my-active"] });
+  queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+}
+
 export function useSocketNotifications({ username, enabled }: UseSocketNotificationsOptions) {
   const { toast } = useToast();
   const socketRef = useRef<Socket | null>(null);
@@ -34,12 +46,13 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
 
     // ── Order assigned / claimed ──────────────────────────────────────────────
     socket.on("order:assigned", (data: IOrderAssignedEvent) => {
-      // Invalidate caches so pages auto-refresh
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      invalidateOrderQueries();
 
       if (data.assignedTo === username) {
-        const script = buildAssignmentTTSScript(data);
-        speakTTS(script);
+        if (isTtsEnabled(username)) {
+          const script = buildAssignmentTTSScript(data);
+          speakTTS(script);
+        }
         toast({
           title: `Order ${data.trackingNumber} assigned to you`,
           description: `By ${data.assignedBy}. Customer: ${data.customerName}`,
@@ -49,11 +62,13 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
 
     // ── Order unassigned ──────────────────────────────────────────────────────
     socket.on("order:unassigned", (data: IOrderUnassignedEvent) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      invalidateOrderQueries();
 
       if (data.previousAssignedTo === username) {
-        const script = buildUnassignmentTTSScript(data);
-        speakTTS(script);
+        if (isTtsEnabled(username)) {
+          const script = buildUnassignmentTTSScript(data);
+          speakTTS(script);
+        }
         toast({
           title: `Order ${data.trackingNumber} unassigned`,
           description: `Returned to pool by ${data.actor}`,
@@ -64,19 +79,18 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
 
     // ── Status changed ────────────────────────────────────────────────────────
     socket.on("order:status-changed", () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      invalidateOrderQueries();
     });
 
     // ── Order created ─────────────────────────────────────────────────────────
     socket.on("order:created", () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      invalidateOrderQueries();
     });
 
     // ── Billing payment ───────────────────────────────────────────────────────
     socket.on("billing:payment", () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      invalidateOrderQueries();
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
     });
 
     return () => {

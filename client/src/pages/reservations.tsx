@@ -6,7 +6,7 @@ import {
   CalendarCheck, ChevronLeft, ChevronRight, Search, X, Filter, FileText,
   Phone, User, Clock, Copy, Check, Loader2, Eye, MoreHorizontal,
   StickyNote, Printer, CalendarDays, MapPin, CreditCard, Package,
-  AlertCircle, CheckCircle2, Ban, ChevronDown, Plus,
+  AlertCircle, CheckCircle2, Ban, ChevronDown, Plus, Trash2,
 } from "lucide-react";
 import type { IItem } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -1016,6 +1016,30 @@ function ReservationDetailDrawer({ reservation: initialRes, onClose }: { reserva
     },
   });
 
+  const [deletePasswordOpen, setDeletePasswordOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deletePasswordError, setDeletePasswordError] = useState("");
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      // Verify password first
+      const verifyRes = await apiRequest("POST", "/api/auth/verify-password", { password: deletePassword });
+      if (!verifyRes.ok) throw new Error("Incorrect password");
+      const deleteRes = await apiRequest("DELETE", `/api/reservations/${reservation._id}`);
+      if (!deleteRes.ok) { const e = await deleteRes.json(); throw new Error(e?.message || "Delete failed"); }
+      return deleteRes.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      toast({ title: "Reservation deleted" });
+      setDeletePasswordOpen(false);
+      onClose();
+    },
+    onError: (err: Error) => {
+      setDeletePasswordError(err.message);
+    },
+  });
+
   const hasSavings = reservation.items?.some((it: any) => it.discountApplied);
 
   function StatusDropdown({ field, value, options }: { field: string; value: string; options: Record<string, string> }) {
@@ -1206,11 +1230,50 @@ function ReservationDetailDrawer({ reservation: initialRes, onClose }: { reserva
             <Button variant="outline" onClick={() => generatePDF(reservation)}>
               <Printer className="h-4 w-4 mr-2" />Print Confirmation
             </Button>
-            <Button variant="outline" className="text-destructive border-destructive hover:bg-destructive/10"
-              onClick={() => { if (window.confirm("Cancel this reservation?")) cancelMutation.mutate(); }}>
-              <Ban className="h-4 w-4 mr-2" />Cancel Reservation
-            </Button>
+            {reservation.fulfillmentStatus !== "cancelled" && reservation.fulfillmentStatus !== "completed" && (
+              <Button variant="outline" className="text-destructive border-destructive hover:bg-destructive/10"
+                onClick={() => { if (window.confirm("Cancel this reservation?")) cancelMutation.mutate(); }}>
+                <Ban className="h-4 w-4 mr-2" />Cancel Reservation
+              </Button>
+            )}
+            {reservation.fulfillmentStatus === "cancelled" && (
+              <Button variant="destructive" size="sm"
+                onClick={() => { setDeletePassword(""); setDeletePasswordError(""); setDeletePasswordOpen(true); }}>
+                <Trash2 className="h-4 w-4 mr-2" />Delete Permanently
+              </Button>
+            )}
           </div>
+
+          {/* Delete confirmation dialog */}
+          <Dialog open={deletePasswordOpen} onOpenChange={(v) => { if (!v) { setDeletePasswordOpen(false); setDeletePassword(""); setDeletePasswordError(""); } }}>
+            <DialogContent className="max-w-sm">
+              <DialogHeader>
+                <DialogTitle className="text-destructive flex items-center gap-2">
+                  <Trash2 className="h-4 w-4" />Delete Cancelled Reservation
+                </DialogTitle>
+                <DialogDescription>This action is permanent and cannot be undone. Enter your admin password to confirm deletion of <strong>{reservation.trackingNumber}</strong>.</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-2">
+                <input
+                  type="password"
+                  placeholder="Your admin password"
+                  value={deletePassword}
+                  onChange={(e) => { setDeletePassword(e.target.value); setDeletePasswordError(""); }}
+                  className="w-full border rounded-md px-3 py-2 text-sm"
+                  data-testid="input-delete-res-password"
+                />
+                {deletePasswordError && <p className="text-sm text-destructive">{deletePasswordError}</p>}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setDeletePasswordOpen(false); setDeletePassword(""); }}>Cancel</Button>
+                <Button variant="destructive" disabled={!deletePassword || deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate()} data-testid="button-confirm-delete-res">
+                  {deleteMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                  Delete
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </SheetContent>
     </Sheet>

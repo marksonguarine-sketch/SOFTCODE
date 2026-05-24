@@ -27,6 +27,7 @@ import { Tutorial } from "@/components/tutorial";
 import { Checkbox } from "@/components/ui/checkbox";
 import { GraduationCap } from "lucide-react";
 import { useSocketNotifications } from "@/hooks/use-socket-notifications";
+import { FloatingCalculator } from "@/components/floating-calculator";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -44,6 +45,7 @@ import SystemLogsPage from "@/pages/system-logs";
 import MaintenancePage from "@/pages/maintenance";
 import OffersPage from "@/pages/offers";
 import ReservationsPage from "@/pages/reservations";
+import PendingPaymentPage from "@/pages/pending-payment";
 
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAdmin } = useAuth();
@@ -79,6 +81,7 @@ function Router() {
       <Route path="/system-logs" component={SystemLogsPage} />
       <Route path="/maintenance" component={MaintenancePage} />
       <Route path="/reservations" component={ReservationsPage} />
+      <Route path="/pending-payment" component={PendingPaymentPage} />
       <Route component={NotFound} />
     </Switch>
   );
@@ -203,6 +206,7 @@ function AuthenticatedLayout() {
 
   // Global Socket.io listeners — TTS + toast for assignment events
   useSocketNotifications({ username: user?.username || "", enabled: !!user });
+  const calcUsername = user?.username || "";
   const [showTutorialPrompt, setShowTutorialPrompt] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -267,6 +271,9 @@ function AuthenticatedLayout() {
           </main>
         </div>
       </div>
+
+      {/* Floating Calculator */}
+      {calcUsername && <FloatingCalculator username={calcUsername} />}
 
       {/* TUTORIAL OVERHAUL: The Tutorial component needs to be overhauled.
           See task.txt for full instructions. Key changes:

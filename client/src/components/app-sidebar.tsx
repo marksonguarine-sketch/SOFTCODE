@@ -16,6 +16,8 @@ import {
   Hammer,
   Tag,
   CalendarCheck,
+  Clock,
+  UserCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -33,6 +35,8 @@ import {
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/lib/auth";
 import { useSettings, GRADIENT_OPTIONS } from "@/lib/settings-context";
+import { useQuery } from "@tanstack/react-query";
+import type { DashboardStats } from "@shared/schema";
 
 const mainNavItems = [
   { title: "Dashboard", url: "/", icon: LayoutDashboard },
@@ -64,6 +68,12 @@ export function AppSidebar() {
   const [location] = useLocation();
   const { isAdmin, user } = useAuth();
   const { settings } = useSettings();
+
+  const { data: statsData } = useQuery<{ success: boolean; data: DashboardStats }>({
+    queryKey: ["/api/dashboard/stats"],
+    staleTime: 30000,
+  });
+  const pendingPayments = statsData?.data?.pendingPayments ?? 0;
 
   const isActive = (url: string) => {
     if (url === "/") return location === "/";
@@ -116,6 +126,22 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+
+              {/* Pending Payment — visible to all */}
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={isActive("/pending-payment")} tooltip="Pending Payment">
+                  <Link href="/pending-payment" data-testid="nav-pending-payment">
+                    <Clock />
+                    <span>Pending Payment</span>
+                    {pendingPayments > 0 && (
+                      <Badge className="ml-auto text-[10px] h-4 px-1.5 bg-yellow-500 text-white border-transparent">
+                        {pendingPayments}
+                      </Badge>
+                    )}
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+
               {isAdmin && adminOnlyNavItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild isActive={isActive(item.url)} tooltip={item.title}>
@@ -126,6 +152,18 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+
+              {/* Settings — visible to employees too */}
+              {!isAdmin && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/settings")} tooltip="Settings">
+                    <Link href="/settings" data-testid="nav-settings">
+                      <Settings />
+                      <span>Settings</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

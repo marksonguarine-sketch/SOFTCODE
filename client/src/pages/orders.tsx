@@ -6,7 +6,7 @@ import { useLocation } from "wouter";
 import {
   Plus, Search, Loader2, ShoppingCart, Trash2, MapPin, UserCheck, Package,
   AlertCircle, ChevronRight, Sun, Moon, Sunset, Filter, ChevronLeft,
-  CheckSquare, Tag, Info, Play, CheckCheck, ArrowRightCircle,
+  CheckSquare, Tag, Info, Play, CheckCheck, ArrowRightCircle, Users, X,
 } from "lucide-react";
 import { speakTTS, formatAmountForTTS } from "@/lib/tts";
 import {
@@ -24,7 +24,6 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -34,36 +33,6 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
 type OrderItemLocal = { itemId: string; itemName: string; qty: number; originalUnitPrice: number; discountedUnitPrice: number; discountApplied: boolean; offerName: string; lineTotal: number };
-
-function OrderTableRow({ order, selected, onSelect, onNavigate, allUsers, onAssign }: {
-  order: IOrder; selected: boolean; onSelect: () => void; onNavigate: () => void;
-  allUsers: SimpleUser[]; onAssign: (username: string) => void;
-}) {
-  const [assignVal, setAssignVal] = useState(order.assignedTo || "");
-  return (
-    <TableRow className="group" data-testid={`row-order-${order._id}`}>
-      <TableCell onClick={(e) => e.stopPropagation()}>
-        <Checkbox checked={selected} onCheckedChange={onSelect} data-testid={`checkbox-order-${order._id}`} />
-      </TableCell>
-      <TableCell className="font-medium font-mono text-sm cursor-pointer" onClick={onNavigate}>{order.trackingNumber}</TableCell>
-      <TableCell className="cursor-pointer" onClick={onNavigate}>{order.customerName}</TableCell>
-      <TableCell className="text-xs text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
-      <TableCell><PaymentBadge status={order.paymentStatus} /></TableCell>
-      <TableCell><FulfillmentBadge status={order.fulfillmentStatus} /></TableCell>
-      <TableCell className="text-right cursor-pointer" onClick={onNavigate}>{formatCurrency(order.totalAmount)}</TableCell>
-      <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
-      <TableCell onClick={(e) => e.stopPropagation()}>
-        <Select value={assignVal} onValueChange={(v) => { setAssignVal(v); onAssign(v); }}>
-          <SelectTrigger className="h-7 text-xs w-[130px]" data-testid={`select-assign-order-${order._id}`}><SelectValue placeholder="Assign..." /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__unassign__">— Unassign —</SelectItem>
-            {allUsers.map((u) => <SelectItem key={u.username} value={u.username}>{u.username}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </TableCell>
-    </TableRow>
-  );
-}
 
 function PoolAdminRow({ order, allUsers, onAssign, onNavigate }: {
   order: IOrder; allUsers: SimpleUser[]; onAssign: (username: string) => void; onNavigate: () => void;
@@ -88,18 +57,6 @@ function PoolAdminRow({ order, allUsers, onAssign, onNavigate }: {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const colorMap: Record<string, string> = {
-    "Pending Payment": "bg-yellow-500 text-white border-transparent",
-    "Paid": "bg-blue-500 text-white border-transparent",
-    "Pending Release": "bg-orange-500 text-white border-transparent",
-    "Released": "bg-indigo-500 text-white border-transparent",
-    "In Transit": "bg-purple-500 text-white border-transparent",
-    "Completed": "bg-green-600 text-white border-transparent",
-  };
-  return <Badge className={colorMap[status] || "bg-gray-400 text-white border-transparent"}>{status}</Badge>;
-}
-
 function FulfillmentBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
     pending: "bg-slate-400 text-white border-transparent",
@@ -120,6 +77,18 @@ function PaymentBadge({ status }: { status: string }) {
     refunded: "bg-red-400 text-white border-transparent",
   };
   return <Badge className={`text-xs ${map[status] || "bg-gray-400 text-white border-transparent"}`}>{PAYMENT_STATUS_LABELS[status as keyof typeof PAYMENT_STATUS_LABELS] || status}</Badge>;
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const colorMap: Record<string, string> = {
+    "Pending Payment": "bg-yellow-500 text-white border-transparent",
+    "Paid": "bg-blue-500 text-white border-transparent",
+    "Pending Release": "bg-orange-500 text-white border-transparent",
+    "Released": "bg-indigo-500 text-white border-transparent",
+    "In Transit": "bg-purple-500 text-white border-transparent",
+    "Completed": "bg-green-600 text-white border-transparent",
+  };
+  return <Badge className={colorMap[status] || "bg-gray-400 text-white border-transparent"}>{status}</Badge>;
 }
 
 function getGreeting() {
@@ -145,14 +114,38 @@ interface SimpleUser { username: string; role: string; }
 
 const STEP_LABELS = ["Customer & Type", "Items", "Payment", "Fulfillment", "Review"];
 
+// ─── Duplicate Order Alert ────────────────────────────────────────────────────
+function DuplicateOrderAlert({ duplicate, onDismiss, onSeeOrder }: {
+  duplicate: IOrder | null;
+  onDismiss: () => void;
+  onSeeOrder: (id: string) => void;
+}) {
+  if (!duplicate) return null;
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-sm text-amber-900 dark:text-amber-200">
+      <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5 text-amber-500" />
+      <div className="flex-1 space-y-1">
+        <p className="font-medium">Possible duplicate order detected</p>
+        <p className="text-xs">An existing order <strong>{duplicate.trackingNumber}</strong> for <strong>{duplicate.customerName}</strong> has similar items.</p>
+      </div>
+      <div className="flex gap-2 flex-shrink-0">
+        <Button size="sm" variant="outline" className="h-7 text-xs border-amber-400 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-900" onClick={() => onSeeOrder(duplicate._id)}>See Order</Button>
+        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-amber-600" onClick={onDismiss}><X className="h-3.5 w-3.5" /></Button>
+      </div>
+    </div>
+  );
+}
+
 function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose: () => void; allItems: IItem[] }) {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [step, setStep] = useState(0);
   const [orderItems, setOrderItems] = useState<OrderItemLocal[]>([]);
   const [selectedItemId, setSelectedItemId] = useState("");
   const [itemQty, setItemQty] = useState(1);
   const [showAddress, setShowAddress] = useState(false);
   const [itemSearch, setItemSearch] = useState("");
+  const [duplicate, setDuplicate] = useState<IOrder | null>(null);
 
   const form = useForm<CreateOrderInput>({
     resolver: zodResolver(createOrderSchema),
@@ -181,6 +174,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
       const data = form.getValues();
       const itemsList = orderItems.map((i) => `${i.qty} ${i.itemName}`).join(", ");
       const total = orderItems.reduce((s, i) => s + i.lineTotal, 0) + (Number(data.deliveryFee) || 0);
@@ -195,10 +189,31 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       form.reset();
       setOrderItems([]);
       setStep(0);
+      setDuplicate(null);
       toast({ title: "Order created successfully" });
     },
     onError: (err: Error) => toast({ title: "Failed to create order", description: err.message, variant: "destructive" }),
   });
+
+  // Check duplicate when moving from step 1 → step 2
+  async function checkDuplicate(): Promise<boolean> {
+    const customerName = form.getValues("customerName");
+    if (!customerName || orderItems.length === 0) return false;
+    try {
+      const res = await apiRequest("POST", "/api/orders/check-duplicate", {
+        customerName,
+        itemIds: orderItems.map((i) => i.itemId),
+      });
+      const json = await res.json();
+      if (json?.data?.duplicate) {
+        setDuplicate(json.data.order);
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  }
 
   function addItem() {
     const item = allItems.find((i) => i._id === selectedItemId);
@@ -226,12 +241,13 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const deliveryFee = Number(form.watch("deliveryFee")) || 0;
   const estimatedTotal = subtotal + deliveryFee;
 
-  function handleNext() {
+  async function handleNext() {
     if (step === 0) {
       const fields = ["customerName", "orderType", "orderChannel"] as const;
       form.trigger(fields).then((ok) => { if (ok) setStep(1); });
     } else if (step === 1) {
       if (orderItems.length === 0) { toast({ title: "Add at least one item", variant: "destructive" }); return; }
+      await checkDuplicate();
       setStep(2);
     } else if (step === 2) {
       const fields = ["paymentMethod", "paymentStatus"] as const;
@@ -258,7 +274,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   );
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); } }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); setDuplicate(null); } }}>
       <DialogContent className="fixed inset-0 max-w-none !w-screen !h-screen !translate-x-0 !translate-y-0 !left-0 !top-0 !rounded-none m-0 flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="flex-shrink-0 px-6 py-4 border-b bg-background">
           <div className="flex items-center justify-between">
@@ -270,6 +286,17 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
+
+        {/* Duplicate warning */}
+        {duplicate && (
+          <div className="mb-4">
+            <DuplicateOrderAlert
+              duplicate={duplicate}
+              onDismiss={() => setDuplicate(null)}
+              onSeeOrder={(id) => { onClose(); navigate(`/orders/${id}`); }}
+            />
+          </div>
+        )}
 
         {/* Progress bar */}
         <div className="flex gap-1 mb-4">
@@ -594,9 +621,10 @@ export default function OrdersPage() {
   const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [viewUser, setViewUser] = useState("");
-  const [filterPaymentStatus, setFilterPaymentStatus] = useState("all");
-  const [filterFulfillment, setFilterFulfillment] = useState("all");
+  const [assignedSearch, setAssignedSearch] = useState("");
+  const [assignedEmployeeFilter, setAssignedEmployeeFilter] = useState("all");
+  const [assignedDoneFilter, setAssignedDoneFilter] = useState("not_yet"); // "all" | "done" | "not_yet"
+  const [poolSearch, setPoolSearch] = useState("");
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<string>("");
@@ -627,15 +655,6 @@ export default function OrdersPage() {
     enabled: !isAdmin,
   });
 
-  const { data: viewUserOrdersData } = useQuery<{ success: boolean; data: { orders: IOrder[] } }>({
-    queryKey: [`/api/orders?assignedTo=${viewUser}`],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/orders?assignedTo=${encodeURIComponent(viewUser)}&pageSize=100`);
-      return res.json();
-    },
-    enabled: isAdmin && !!viewUser,
-  });
-
   const { data: allItemsData } = useQuery<{ success: boolean; data: IItem[] }>({ queryKey: ["/api/items/all"] });
   const { data: usersData } = useQuery<{ success: boolean; data: SimpleUser[] }>({ queryKey: ["/api/users/simple"], enabled: isAdmin });
 
@@ -644,22 +663,12 @@ export default function OrdersPage() {
       const res = await apiRequest("POST", `/api/orders/${orderId}/assign`, { username, displayName });
       return res.json();
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/orders"] }); toast({ title: "Order assigned" }); },
-    onError: (err: Error) => toast({ title: "Assignment failed", description: err.message, variant: "destructive" }),
-  });
-
-  const bulkMutation = useMutation({
-    mutationFn: async ({ orderIds, fulfillmentStatus }: { orderIds: string[]; fulfillmentStatus: string }) => {
-      const res = await apiRequest("POST", "/api/orders/bulk-status", { orderIds, fulfillmentStatus, reason: "Bulk update" });
-      return res.json();
-    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      setSelectedOrderIds([]);
-      setBulkOpen(false);
-      toast({ title: `${selectedOrderIds.length} orders updated` });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
+      toast({ title: "Order assigned" });
     },
-    onError: (err: Error) => toast({ title: "Bulk update failed", description: err.message, variant: "destructive" }),
+    onError: (err: Error) => toast({ title: "Assignment failed", description: err.message, variant: "destructive" }),
   });
 
   const claimMutation = useMutation({
@@ -714,35 +723,48 @@ export default function OrdersPage() {
   const allItems = allItemsData?.data || [];
   const allUsers = usersData?.data || [];
   const myAssignedOrders = assignedData?.data?.orders || [];
-  const viewUserOrders = viewUserOrdersData?.data?.orders || [];
   const poolOrders = poolData?.data?.orders || [];
   const myBlockingOrder = myActiveData?.data?.order || null;
 
   const myPendingAssigned = myAssignedOrders.filter((o) => o.currentStatus !== "Completed");
-  const hasPendingAssigned = myPendingAssigned.length > 0;
-  // Employee is task-locked if they have an order where completedProcessingAt is null and not cancelled/completed
   const isTaskLocked = !isAdmin && !!myBlockingOrder;
   const employees = allUsers.filter((u) => u.role === "EMPLOYEE");
-  const admins = allUsers.filter((u) => u.role === "ADMIN");
-  const viewUserAssigned = viewUserOrders.filter((o) => o.currentStatus !== "Completed");
-  const viewUserCompleted = viewUserOrders.filter((o) => o.currentStatus === "Completed");
 
-  const filteredOrders = useMemo(() => {
-    let res = orders;
-    if (filterPaymentStatus !== "all") res = res.filter((o) => o.paymentStatus === filterPaymentStatus);
-    if (filterFulfillment !== "all") res = res.filter((o) => o.fulfillmentStatus === filterFulfillment);
-    if (search) res = res.filter((o) => o.trackingNumber.toLowerCase().includes(search.toLowerCase()) || o.customerName.toLowerCase().includes(search.toLowerCase()));
+  // ── Admin: Assigned Orders (all assigned orders from main list) ──────────────
+  const allAssignedOrders = orders.filter((o) => o.assignedTo && o.assignedTo !== "");
+
+  const filteredAssignedOrders = useMemo(() => {
+    let res = allAssignedOrders;
+    if (assignedEmployeeFilter !== "all") res = res.filter((o) => o.assignedTo === assignedEmployeeFilter);
+    if (assignedDoneFilter === "done") res = res.filter((o) => !!o.completedProcessingAt);
+    if (assignedDoneFilter === "not_yet") res = res.filter((o) => !o.completedProcessingAt);
+    if (assignedSearch) res = res.filter((o) =>
+      o.trackingNumber.toLowerCase().includes(assignedSearch.toLowerCase()) ||
+      o.customerName.toLowerCase().includes(assignedSearch.toLowerCase()) ||
+      (o.assignedTo || "").toLowerCase().includes(assignedSearch.toLowerCase())
+    );
     return res;
-  }, [orders, filterPaymentStatus, filterFulfillment, search]);
+  }, [allAssignedOrders, assignedEmployeeFilter, assignedDoneFilter, assignedSearch]);
 
-  const allSelected = filteredOrders.length > 0 && filteredOrders.every((o) => selectedOrderIds.includes(o._id));
-  function toggleAll() {
-    if (allSelected) setSelectedOrderIds([]);
-    else setSelectedOrderIds(filteredOrders.map((o) => o._id));
-  }
-  function toggleOne(id: string) {
-    setSelectedOrderIds((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]);
-  }
+  // Group by employee for display
+  const assignedByEmployee = useMemo(() => {
+    const map = new Map<string, IOrder[]>();
+    filteredAssignedOrders.forEach((o) => {
+      const emp = o.assignedTo || "—";
+      if (!map.has(emp)) map.set(emp, []);
+      map.get(emp)!.push(o);
+    });
+    return map;
+  }, [filteredAssignedOrders]);
+
+  // ── Admin: Pool ──────────────────────────────────────────────────────────────
+  const filteredPoolOrders = useMemo(() => {
+    if (!poolSearch) return poolOrders;
+    return poolOrders.filter((o) =>
+      o.trackingNumber.toLowerCase().includes(poolSearch.toLowerCase()) ||
+      o.customerName.toLowerCase().includes(poolSearch.toLowerCase())
+    );
+  }, [poolOrders, poolSearch]);
 
   if (isLoading) {
     return (
@@ -767,6 +789,9 @@ export default function OrdersPage() {
             </div>
             <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-orders-title">Orders</h1>
           </div>
+          <Button onClick={() => setCreateOpen(true)} data-testid="button-create-order">
+            <Plus className="mr-1 h-4 w-4" />Create Order
+          </Button>
         </div>
 
         <div className="space-y-3">
@@ -924,66 +949,148 @@ export default function OrdersPage() {
             </div>
           )}
         </div>
+
+        <CreateOrderDialog open={createOpen} onClose={() => setCreateOpen(false)} allItems={allItems} />
       </div>
     );
   }
 
   // ─── ADMIN VIEW ──────────────────────────────────────────────────
   return (
-    <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-6 overflow-auto h-full">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-orders-title">Orders</h1>
-        <div className="flex gap-2">
-          {selectedOrderIds.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} data-testid="button-bulk-update">
-              <CheckSquare className="h-4 w-4 mr-1" />{selectedOrderIds.length} selected
-            </Button>
-          )}
-          <Button onClick={() => setCreateOpen(true)} data-testid="button-create-order">
-            <Plus className="mr-1 h-4 w-4" />Create Order
-          </Button>
-        </div>
+        <Button onClick={() => setCreateOpen(true)} data-testid="button-create-order">
+          <Plus className="mr-1 h-4 w-4" />Create Order
+        </Button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2 flex-wrap items-center">
-        <div className="relative max-w-xs flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search orders..." className="pl-9 h-8" value={search} onChange={(e) => setSearch(e.target.value)} data-testid="input-search-orders" />
+      {/* ── Section 1: Assigned Orders ──────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <UserCheck className="h-5 w-5 text-primary" />
+          <h2 className="text-lg font-semibold">Assigned Orders</h2>
+          <Badge variant="outline">{allAssignedOrders.length} total</Badge>
         </div>
-        <Select value={filterPaymentStatus} onValueChange={setFilterPaymentStatus}>
-          <SelectTrigger className="w-[160px] h-8 text-xs" data-testid="select-filter-payment-status">
-            <SelectValue placeholder="Payment Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Payment</SelectItem>
-            {PAYMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{PAYMENT_STATUS_LABELS[s]}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Select value={filterFulfillment} onValueChange={setFilterFulfillment}>
-          <SelectTrigger className="w-[165px] h-8 text-xs" data-testid="select-filter-fulfillment">
-            <SelectValue placeholder="Fulfillment" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Fulfillment</SelectItem>
-            {FULFILLMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{FULFILLMENT_STATUS_LABELS[s]}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        {(filterPaymentStatus !== "all" || filterFulfillment !== "all" || search) && (
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setFilterPaymentStatus("all"); setFilterFulfillment("all"); setSearch(""); }}>
-            Clear
-          </Button>
+
+        {/* Filters row */}
+        <div className="flex gap-2 flex-wrap items-center">
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search assigned..." className="pl-9 h-8" value={assignedSearch} onChange={(e) => setAssignedSearch(e.target.value)} data-testid="input-search-assigned" />
+          </div>
+          <Select value={assignedEmployeeFilter} onValueChange={setAssignedEmployeeFilter}>
+            <SelectTrigger className="w-[175px] h-8 text-xs" data-testid="select-filter-employee">
+              <Users className="h-3.5 w-3.5 mr-1" />
+              <SelectValue placeholder="View employee" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {Array.from(new Set(allAssignedOrders.map((o) => o.assignedTo || ""))).filter(Boolean).map((emp) => (
+                <SelectItem key={emp} value={emp}>{emp}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={assignedDoneFilter} onValueChange={setAssignedDoneFilter}>
+            <SelectTrigger className="w-[145px] h-8 text-xs" data-testid="select-filter-done">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="not_yet">Not Yet Done</SelectItem>
+              <SelectItem value="done">Done</SelectItem>
+            </SelectContent>
+          </Select>
+          {(assignedSearch || assignedEmployeeFilter !== "all" || assignedDoneFilter !== "not_yet") && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setAssignedSearch(""); setAssignedEmployeeFilter("all"); setAssignedDoneFilter("not_yet"); }}>
+              Clear
+            </Button>
+          )}
+        </div>
+
+        {/* Grouped by employee */}
+        {filteredAssignedOrders.length === 0 ? (
+          <Card><CardContent className="py-6 text-center text-muted-foreground text-sm">No assigned orders match your filters.</CardContent></Card>
+        ) : (
+          <div className="space-y-4">
+            {Array.from(assignedByEmployee.entries()).map(([emp, empOrders]) => (
+              <div key={emp} className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Users className="h-3.5 w-3.5 text-primary" />
+                  </div>
+                  <span className="font-semibold text-sm">{emp}</span>
+                  <Badge variant="secondary" className="text-xs">{empOrders.length} order{empOrders.length !== 1 ? "s" : ""}</Badge>
+                </div>
+                <Card>
+                  <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Tracking #</TableHead>
+                            <TableHead>Customer</TableHead>
+                            <TableHead>Type</TableHead>
+                            <TableHead>Payment</TableHead>
+                            <TableHead>Fulfillment</TableHead>
+                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead>Assigned</TableHead>
+                            <TableHead>Processing</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {empOrders.map((order) => (
+                            <TableRow key={order._id} className="cursor-pointer" onClick={() => navigate(`/orders/${order._id}`)}>
+                              <TableCell className="font-mono text-sm font-medium">{order.trackingNumber}</TableCell>
+                              <TableCell>{order.customerName}</TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
+                              <TableCell><PaymentBadge status={order.paymentStatus} /></TableCell>
+                              <TableCell><FulfillmentBadge status={order.fulfillmentStatus} /></TableCell>
+                              <TableCell className="text-right">{formatCurrency(order.totalAmount)}</TableCell>
+                              <TableCell className="text-muted-foreground text-xs">{fmt12(order.assignedAt)}</TableCell>
+                              <TableCell>
+                                {order.completedProcessingAt ? (
+                                  <Badge className="text-xs bg-green-600 text-white border-transparent">Done</Badge>
+                                ) : order.startedAt ? (
+                                  <Badge className="text-xs bg-blue-500 text-white border-transparent">In Progress</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-xs">Not Started</Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Pending Pool — Admin assigns from here */}
-      {poolOrders.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Package className="h-5 w-5 text-amber-500" />
-            <h2 className="text-base font-semibold">Pending Pool</h2>
-            <Badge className="bg-amber-500 text-white border-transparent">{poolOrders.length} unassigned</Badge>
-          </div>
+      <Separator />
+
+      {/* ── Section 2: Pending Pool ──────────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Package className="h-5 w-5 text-amber-500" />
+          <h2 className="text-lg font-semibold">Pending Pool</h2>
+          <Badge className="bg-amber-500 text-white border-transparent">{poolOrders.length} unassigned</Badge>
+        </div>
+
+        {/* Pool search only — no dropdowns, no bulk */}
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Search pool..." className="pl-9 h-8" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} data-testid="input-search-pool" />
+        </div>
+
+        {filteredPoolOrders.length === 0 ? (
+          <Card><CardContent className="py-6 text-center text-muted-foreground text-sm">
+            {poolOrders.length === 0 ? "No orders in the pool right now." : "No pool orders match your search."}
+          </CardContent></Card>
+        ) : (
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -999,7 +1106,7 @@ export default function OrdersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {poolOrders.map((order) => (
+                    {filteredPoolOrders.map((order) => (
                       <PoolAdminRow
                         key={order._id}
                         order={order}
@@ -1016,184 +1123,11 @@ export default function OrdersPage() {
               </div>
             </CardContent>
           </Card>
-        </div>
-      )}
-
-      {/* Orders Table */}
-      <Card>
-        <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">
-                    <Checkbox checked={allSelected} onCheckedChange={toggleAll} data-testid="checkbox-select-all-orders" />
-                  </TableHead>
-                  <TableHead>Tracking #</TableHead>
-                  <TableHead>Customer</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Fulfillment</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Assign To</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredOrders.length === 0 ? (
-                  <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No orders found</TableCell></TableRow>
-                ) : filteredOrders.map((order) => (
-                  <OrderTableRow
-                    key={order._id}
-                    order={order}
-                    selected={selectedOrderIds.includes(order._id)}
-                    onSelect={() => toggleOne(order._id)}
-                    onNavigate={() => navigate(`/orders/${order._id}`)}
-                    allUsers={allUsers}
-                    onAssign={(username) => { const found = allUsers.find((u) => u.username === username); assignMutation.mutate({ orderId: order._id, username: username === "__unassign__" ? "" : username, displayName: found?.username || "" }); }}
-                  />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <div className="px-4 py-2 border-t text-xs text-muted-foreground">
-            Showing {filteredOrders.length} of {orders.length} orders
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* View by Staff Member */}
-      <Separator />
-      <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <UserCheck className="h-5 w-5 text-primary" />
-          <h2 className="text-lg font-semibold">View by Staff Member</h2>
-        </div>
-        <div className="flex gap-3 flex-wrap">
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground font-medium">Employee</p>
-            <Select value={viewUser && employees.find((u) => u.username === viewUser) ? viewUser : ""} onValueChange={setViewUser}>
-              <SelectTrigger className="w-[180px]" data-testid="select-view-employee"><SelectValue placeholder="Select employee" /></SelectTrigger>
-              <SelectContent>
-                {employees.length === 0 ? <div className="px-2 py-1.5 text-xs text-muted-foreground">No employees</div> : employees.map((u) => <SelectItem key={u.username} value={u.username}>{u.username}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground font-medium">Admin</p>
-            <Select value={viewUser && admins.find((u) => u.username === viewUser) ? viewUser : ""} onValueChange={setViewUser}>
-              <SelectTrigger className="w-[180px]" data-testid="select-view-admin"><SelectValue placeholder="Select admin" /></SelectTrigger>
-              <SelectContent>
-                {admins.map((u) => <SelectItem key={u.username} value={u.username}>{u.username} {u.username === user?.username ? "(you)" : ""}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          {viewUser && <div className="flex items-end"><Button variant="ghost" size="sm" onClick={() => setViewUser("")}>Clear</Button></div>}
-        </div>
-        {viewUser && (
-          <div className="space-y-4">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Assigned — Not Completed</span>
-                {viewUserAssigned.length > 0 && <Badge variant="outline">{viewUserAssigned.length}</Badge>}
-              </div>
-              {viewUserAssigned.length === 0 ? <p className="text-sm text-muted-foreground pl-1">No pending assigned orders.</p> : (
-                <div className="space-y-2">
-                  {viewUserAssigned.map((order) => (
-                    <Card key={order._id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate(`/orders/${order._id}`)}>
-                      <CardContent className="p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1.5 flex-1">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-mono font-semibold text-sm">{order.trackingNumber}</span>
-                              <PaymentBadge status={order.paymentStatus} />
-                              <FulfillmentBadge status={order.fulfillmentStatus} />
-                            </div>
-                            <p className="font-medium">{order.customerName}</p>
-                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                              <span>Total: <strong className="text-foreground">{formatCurrency(order.totalAmount)}</strong></span>
-                              <span>Type: <strong className="text-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</strong></span>
-                              <span>Created: <strong className="text-foreground">{fmt12(order.createdAt)}</strong></span>
-                              {order.assignedAt && <span>Assigned: <strong className="text-foreground">{fmt12(order.assignedAt)}</strong></span>}
-                            </div>
-                            <div className="flex flex-wrap gap-1">
-                              {order.items.slice(0, 3).map((item, i) => (
-                                <Badge key={i} variant="outline" className="text-xs">{item.itemName} ×{item.qty}</Badge>
-                              ))}
-                              {order.items.length > 3 && <Badge variant="outline" className="text-xs">+{order.items.length - 3} more</Badge>}
-                            </div>
-                          </div>
-                          <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-1" />
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Completed</span>
-                {viewUserCompleted.length > 0 && <Badge variant="outline">{viewUserCompleted.length}</Badge>}
-              </div>
-              {viewUserCompleted.length === 0 ? <p className="text-sm text-muted-foreground pl-1">No completed orders yet.</p> : (
-                <Card>
-                  <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Tracking #</TableHead>
-                          <TableHead>Customer</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead>Completed On</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {viewUserCompleted.map((order) => {
-                          const completedEntry = [...order.statusHistory].reverse().find((s) => s.status === "Completed");
-                          return (
-                            <TableRow key={order._id} className="cursor-pointer" onClick={() => navigate(`/orders/${order._id}`)}>
-                              <TableCell className="font-mono text-sm font-medium">{order.trackingNumber}</TableCell>
-                              <TableCell>{order.customerName}</TableCell>
-                              <TableCell className="text-right">{formatCurrency(order.totalAmount)}</TableCell>
-                              <TableCell className="text-muted-foreground text-sm">{completedEntry ? fmt12(completedEntry.timestamp) : fmt12(order.updatedAt)}</TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          </div>
         )}
       </div>
 
       {/* Dialogs */}
       <CreateOrderDialog open={createOpen} onClose={() => setCreateOpen(false)} allItems={allItems} />
-
-      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Bulk Update — {selectedOrderIds.length} Orders</DialogTitle>
-            <DialogDescription>Update fulfillment status for selected orders.</DialogDescription>
-          </DialogHeader>
-          <Select value={bulkStatus} onValueChange={setBulkStatus}>
-            <SelectTrigger data-testid="select-bulk-status"><SelectValue placeholder="Choose new fulfillment status" /></SelectTrigger>
-            <SelectContent>
-              {FULFILLMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{FULFILLMENT_STATUS_LABELS[s]}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBulkOpen(false)}>Cancel</Button>
-            <Button disabled={!bulkStatus || bulkMutation.isPending} onClick={() => bulkMutation.mutate({ orderIds: selectedOrderIds, fulfillmentStatus: bulkStatus })} data-testid="button-confirm-bulk-update">
-              {bulkMutation.isPending && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
-              Update
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

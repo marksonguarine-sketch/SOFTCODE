@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { useLocation } from "wouter";
 import {
   CreditCard,
   Clock,
@@ -10,7 +10,6 @@ import {
   Search,
   CalendarDays,
   Hash,
-  Phone,
   FileText,
   X,
   ChevronDown,
@@ -36,9 +35,10 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type SearchTab = "date" | "orderId" | "gcash" | "reference";
+type SearchTab = "date" | "orderId" | "reference";
 
 export default function BillingPage() {
+  const [, navigate] = useLocation();
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<SearchTab>("date");
   const [dateMode, setDateMode] = useState<"single" | "range">("single");
@@ -46,12 +46,10 @@ export default function BillingPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [orderIdSearch, setOrderIdSearch] = useState("");
-  const [gcashSearch, setGcashSearch] = useState("");
   const [referenceSearch, setReferenceSearch] = useState("");
   const [selectedPayment, setSelectedPayment] = useState<IBillingPayment | null>(null);
-  const [showSuggestions, setShowSuggestions] = useState<"gcash" | "reference" | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState<"reference" | null>(null);
 
-  const gcashRef = useRef<HTMLDivElement>(null);
   const referenceRef = useRef<HTMLDivElement>(null);
 
   const { data: billingData, isLoading } = useQuery<{
@@ -90,10 +88,9 @@ export default function BillingPage() {
     if (activeTab === "date" && dateMode === "single" && singleDate) return true;
     if (activeTab === "date" && dateMode === "range" && dateFrom && dateTo) return true;
     if (activeTab === "orderId" && orderIdSearch.trim()) return true;
-    if (activeTab === "gcash" && gcashSearch.trim()) return true;
     if (activeTab === "reference" && referenceSearch.trim()) return true;
     return false;
-  }, [activeTab, dateMode, singleDate, dateFrom, dateTo, orderIdSearch, gcashSearch, referenceSearch]);
+  }, [activeTab, dateMode, singleDate, dateFrom, dateTo, orderIdSearch, referenceSearch]);
 
   const filteredPayments = useMemo(() => {
     if (!hasActiveSearch) return payments;
@@ -119,21 +116,12 @@ export default function BillingPage() {
       if (activeTab === "orderId" && orderIdSearch.trim()) {
         return p.orderId.toLowerCase().includes(orderIdSearch.trim().toLowerCase());
       }
-      if (activeTab === "gcash" && gcashSearch.trim()) {
-        return p.gcashNumber.toLowerCase().includes(gcashSearch.trim().toLowerCase());
-      }
       if (activeTab === "reference" && referenceSearch.trim()) {
         return p.gcashReferenceNumber.toLowerCase().includes(referenceSearch.trim().toLowerCase());
       }
       return true;
     });
-  }, [payments, hasActiveSearch, activeTab, dateMode, singleDate, dateFrom, dateTo, orderIdSearch, gcashSearch, referenceSearch]);
-
-  const gcashSuggestions = useMemo(() => {
-    if (!gcashSearch.trim()) return [];
-    const unique = Array.from(new Set(payments.map((p) => p.gcashNumber).filter(Boolean)));
-    return unique.filter((n) => n.toLowerCase().includes(gcashSearch.toLowerCase())).slice(0, 5);
-  }, [payments, gcashSearch]);
+  }, [payments, hasActiveSearch, activeTab, dateMode, singleDate, dateFrom, dateTo, orderIdSearch, referenceSearch]);
 
   const referenceSuggestions = useMemo(() => {
     if (!referenceSearch.trim()) return [];
@@ -143,9 +131,6 @@ export default function BillingPage() {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (gcashRef.current && !gcashRef.current.contains(e.target as Node)) {
-        if (showSuggestions === "gcash") setShowSuggestions(null);
-      }
       if (referenceRef.current && !referenceRef.current.contains(e.target as Node)) {
         if (showSuggestions === "reference") setShowSuggestions(null);
       }
@@ -159,14 +144,12 @@ export default function BillingPage() {
     setDateFrom("");
     setDateTo("");
     setOrderIdSearch("");
-    setGcashSearch("");
     setReferenceSearch("");
   };
 
   const tabs: { key: SearchTab; label: string; icon: typeof CalendarDays }[] = [
     { key: "date", label: "Date", icon: CalendarDays },
     { key: "orderId", label: "Order ID", icon: Hash },
-    { key: "gcash", label: "GCash #", icon: Phone },
     { key: "reference", label: "Reference #", icon: FileText },
   ];
 
@@ -301,40 +284,6 @@ export default function BillingPage() {
               />
             )}
 
-            {activeTab === "gcash" && (
-              <div className="relative max-w-md" ref={gcashRef}>
-                <Input
-                  placeholder="Search by GCash number..."
-                  value={gcashSearch}
-                  onChange={(e) => {
-                    setGcashSearch(e.target.value);
-                    setShowSuggestions("gcash");
-                  }}
-                  onFocus={() => gcashSearch && setShowSuggestions("gcash")}
-                  data-testid="input-search-gcash"
-                />
-                {showSuggestions === "gcash" && gcashSuggestions.length > 0 && (
-                  <Card className="absolute z-50 top-full left-0 right-0 mt-1">
-                    <CardContent className="p-1">
-                      {gcashSuggestions.map((s) => (
-                        <button
-                          key={s}
-                          className="w-full text-left px-3 py-2 text-sm rounded-md hover-elevate"
-                          onClick={() => {
-                            setGcashSearch(s);
-                            setShowSuggestions(null);
-                          }}
-                          data-testid={`suggestion-gcash-${s}`}
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            )}
-
             {activeTab === "reference" && (
               <div className="relative max-w-md" ref={referenceRef}>
                 <Input
@@ -415,18 +364,16 @@ export default function BillingPage() {
       </div>
 
       {(stats?.pendingPayments ?? 0) > 0 && (
-        <Card>
+        <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50/50 dark:bg-yellow-950/20">
           <CardContent className="flex items-center justify-between gap-4 py-4">
             <div className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5 text-muted-foreground" />
-              <span className="text-sm">
-                {stats?.pendingPayments} order(s) awaiting payment
+              <Clock className="h-5 w-5 text-yellow-600" />
+              <span className="text-sm font-medium">
+                {stats?.pendingPayments} order{(stats?.pendingPayments ?? 0) !== 1 ? "s" : ""} awaiting payment
               </span>
             </div>
-            <Button variant="outline" asChild data-testid="link-pending-orders">
-              <Link href="/orders">
-                View Orders <ArrowRight className="ml-1 h-4 w-4" />
-              </Link>
+            <Button variant="outline" className="border-yellow-400 text-yellow-800 dark:text-yellow-200 hover:bg-yellow-100 dark:hover:bg-yellow-900" onClick={() => navigate("/pending-payment")} data-testid="link-pending-orders">
+              View Orders <ArrowRight className="ml-1 h-4 w-4" />
             </Button>
           </CardContent>
         </Card>
@@ -445,8 +392,7 @@ export default function BillingPage() {
                 <TableHead>Date</TableHead>
                 <TableHead>Order ID</TableHead>
                 <TableHead>Method</TableHead>
-                <TableHead>GCash #</TableHead>
-                <TableHead>Reference</TableHead>
+                <TableHead>Reference #</TableHead>
                 <TableHead className="text-right">Amount</TableHead>
                 <TableHead>Logged By</TableHead>
               </TableRow>
@@ -455,7 +401,7 @@ export default function BillingPage() {
               {filteredPayments.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={6}
                     className="text-center text-muted-foreground py-8"
                   >
                     {hasActiveSearch
@@ -478,9 +424,8 @@ export default function BillingPage() {
                       {payment.orderId}
                     </TableCell>
                     <TableCell>{payment.paymentMethod}</TableCell>
-                    <TableCell>{payment.gcashNumber}</TableCell>
                     <TableCell className="font-mono text-xs">
-                      {payment.gcashReferenceNumber}
+                      {payment.gcashReferenceNumber || "—"}
                     </TableCell>
                     <TableCell className="text-right font-medium">
                       {formatCurrency(payment.amountPaid)}

@@ -60,8 +60,6 @@ export async function seedDatabase() {
       await Settings.create({
         companyName: "JOAP Hardware Trading",
         theme: "light",
-        reorderThreshold: 10,
-        lowStockThreshold: 20,
         autoApplyOffers: true,
         showSavingsSummary: true,
       });

@@ -1,0 +1,22 @@
+[
+  {
+    "itemName": "Sample Item 1",
+    "sku": "SKU-001",
+    "category": "Hardware",
+    "unitPrice": 150.00,
+    "currentQuantity": 50,
+    "unit": "pcs",
+    "description": "A sample hardware item",
+    "supplier": "Sample Supplier"
+  },
+  {
+    "itemName": "Sample Item 2",
+    "sku": "SKU-002",
+    "category": "Tools",
+    "unitPrice": 350.00,
+    "currentQuantity": 20,
+    "unit": "pcs",
+    "description": "A sample tool item",
+    "supplier": "Another Supplier"
+  }
+]

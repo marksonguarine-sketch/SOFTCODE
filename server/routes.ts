@@ -260,6 +260,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Verify current admin's password (used for sensitive actions like reactivation)
+  app.post("/api/auth/verify-password", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { password } = req.body;
+      if (!password) return fail(res, 400, "Password required");
+      const user = await User.findById(req.user!._id);
+      if (!user) return fail(res, 404, "User not found");
+      const valid = await bcrypt.compare(password, user.password);
+      if (!valid) return fail(res, 401, "Incorrect password");
+      return ok(res, { verified: true });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   app.get("/api/config/maps-key", authMiddleware, async (_req: AuthRequest, res: Response) => {
     const key = process.env.GOOGLE_API_KEY || "";
     return ok(res, { key });
@@ -334,9 +349,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }),
       ]);
 
-      const settings = await Settings.findOne();
-      const reorderThreshold = settings?.reorderThreshold ?? 10;
-      const lowStockThreshold = settings?.lowStockThreshold ?? 20;
+      const reorderThreshold = 10;
+      const lowStockThreshold = 20;
 
       const criticalStock = items.filter((i) => i.currentQuantity <= reorderThreshold).length;
       const lowStock = items.filter((i) => i.currentQuantity > reorderThreshold && i.currentQuantity <= lowStockThreshold).length;
@@ -413,9 +427,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.get("/api/dashboard/inventory-status", authMiddleware, async (_req: AuthRequest, res: Response) => {
     try {
-      const settings = await Settings.findOne();
-      const reorderThreshold = settings?.reorderThreshold ?? 10;
-      const lowThreshold = settings?.lowStockThreshold ?? 20;
+      const reorderThreshold = 10;
+      const lowThreshold = 20;
       const items = await Item.find().lean();
       const critical = items.filter((i) => i.currentQuantity <= reorderThreshold).length;
       const low = items.filter((i) => i.currentQuantity > reorderThreshold && i.currentQuantity <= lowThreshold).length;
@@ -1120,6 +1133,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Delete a cancelled reservation (admin only, requires password confirmation on client)
+  app.delete("/api/reservations/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      if (req.user!.role !== "ADMIN") return fail(res, 403, "Admin only");
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Reservation not found");
+      if (order.fulfillmentStatus !== "cancelled") return fail(res, 400, "Only cancelled reservations can be deleted");
+      await Order.findByIdAndDelete(req.params.id);
+      await logAction("RESERVATION_DELETED", req.user!.username, order.trackingNumber);
+      return ok(res, { message: "Reservation deleted" });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   // ─── INVENTORY LOGS ─────────────────────────────────────
   app.get("/api/inventory-logs", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
@@ -1397,10 +1425,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // Employee self-claim from pool (task-locked for employees)
   app.post("/api/orders/:id/claim", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const order = await Order.findById(req.params.id);
-      if (!order) return fail(res, 404, "Order not found");
-      if (order.fulfillmentStatus !== "pending") return fail(res, 409, "Order is no longer pending");
-      if (order.assignedTo) return fail(res, 409, "Order is already claimed");
+      // Read first for validation
+      const existing = await Order.findById(req.params.id).lean();
+      if (!existing) return fail(res, 404, "Order not found");
+      if (existing.fulfillmentStatus !== "pending") return fail(res, 409, "Order is no longer pending");
+      if (existing.assignedTo) return fail(res, 409, "Order is already claimed by " + existing.assignedTo);
 
       const me = req.user!.username;
       const isAdmin = req.user!.role === "ADMIN";
@@ -1409,95 +1438,112 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!isAdmin) {
         const blocking = await Order.findOne({
           assignedTo: me,
-          completedProcessingAt: null,
-          fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+          $or: [{ completedProcessingAt: { $exists: false } }, { completedProcessingAt: null }],
+          fulfillmentStatus: { $nin: ["completed", "cancelled", "ready"] },
         }).select("trackingNumber").lean();
         if (blocking) {
-          return fail(res, 403, `You must complete your current assigned order (${blocking.trackingNumber}) before claiming a new one.`);
+          return fail(res, 403, `Complete your current order (${blocking.trackingNumber}) before claiming another.`);
         }
       }
 
-      order.assignedTo = me;
-      order.assignedToName = me;
-      order.assignedAt = new Date();
-      order.assignedBy = me;
-      (order as any).startedAt = undefined;
-      (order as any).completedProcessingAt = undefined;
-      order.statusHistory.push({
-        status: "claimed",
-        timestamp: new Date(),
-        actor: me,
-        note: `Claimed from pool by ${me}`,
-      });
-      await order.save();
-      await logAction("ORDER_CLAIMED", me, order.trackingNumber, { claimedBy: me });
+      const now = new Date();
+      const updated = await Order.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            assignedTo: me,
+            assignedToName: me,
+            assignedAt: now,
+            assignedBy: me,
+          },
+          $unset: { startedAt: "", completedProcessingAt: "" },
+          $push: {
+            statusHistory: {
+              status: "assigned",
+              timestamp: now,
+              actor: me,
+              note: `Claimed from pool by ${me}`,
+            },
+          },
+        },
+        { new: true }
+      );
+      if (!updated) return fail(res, 404, "Order not found after update");
+
+      await logAction("ORDER_CLAIMED", me, updated.trackingNumber, { claimedBy: me });
       emitEvent("order:assigned", {
-        orderId: order._id.toString(),
-        trackingNumber: order.trackingNumber,
+        orderId: updated._id.toString(),
+        trackingNumber: updated.trackingNumber,
         assignedTo: me,
         assignedBy: me,
-        customerName: order.customerName,
-        items: order.items.map((i) => ({ itemName: i.itemName, qty: i.qty })),
-        totalAmount: order.totalAmount,
-        paymentMethod: order.paymentMethod,
-        orderType: order.orderType,
-        notes: order.notes || "",
+        customerName: updated.customerName,
+        items: updated.items.map((i) => ({ itemName: i.itemName, qty: i.qty })),
+        totalAmount: updated.totalAmount,
+        paymentMethod: updated.paymentMethod,
+        orderType: updated.orderType,
+        notes: updated.notes || "",
         isReassignment: false,
         previousAssignedTo: "",
       });
-      return ok(res, order);
+      return ok(res, { order: updated });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
   });
 
-  // Start processing — only the assignee
+  // Start processing — only the assignee or admin
   app.post("/api/orders/:id/start-processing", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const order = await Order.findById(req.params.id);
-      if (!order) return fail(res, 404, "Order not found");
+      const existing = await Order.findById(req.params.id).lean();
+      if (!existing) return fail(res, 404, "Order not found");
       const me = req.user!.username;
-      if (order.assignedTo !== me && req.user!.role !== "ADMIN") {
-        return fail(res, 403, "Only the assigned user can start processing this order");
+      if (existing.assignedTo !== me && req.user!.role !== "ADMIN") {
+        return fail(res, 403, "Only the assigned user can start processing");
       }
-      (order as any).startedAt = new Date();
-      if (order.fulfillmentStatus === "pending") order.fulfillmentStatus = "processing";
-      order.statusHistory.push({
-        status: "processing",
-        timestamp: new Date(),
-        actor: me,
-        note: "Started processing",
-      });
-      await order.save();
-      await logAction("ORDER_PROCESSING_STARTED", me, order.trackingNumber, {});
-      emitEvent("order:status-changed", { orderId: order._id.toString(), fulfillmentStatus: order.fulfillmentStatus, assignedTo: order.assignedTo });
-      return ok(res, order);
+      const now = new Date();
+      const updated = await Order.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: {
+            startedAt: now,
+            fulfillmentStatus: existing.fulfillmentStatus === "pending" ? "processing" : existing.fulfillmentStatus,
+          },
+          $push: { statusHistory: { status: "processing", timestamp: now, actor: me, note: "Started processing" } },
+        },
+        { new: true }
+      );
+      if (!updated) return fail(res, 404, "Order not found after update");
+      await logAction("ORDER_PROCESSING_STARTED", me, updated.trackingNumber, {});
+      emitEvent("order:status-changed", { orderId: updated._id.toString(), fulfillmentStatus: updated.fulfillmentStatus, assignedTo: updated.assignedTo });
+      return ok(res, { order: updated });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
   });
 
-  // Complete processing — only the assignee; unlocks task lock
+  // Complete processing — only the assignee or admin; unlocks task lock
   app.post("/api/orders/:id/complete-processing", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const order = await Order.findById(req.params.id);
-      if (!order) return fail(res, 404, "Order not found");
+      const existing = await Order.findById(req.params.id).lean();
+      if (!existing) return fail(res, 404, "Order not found");
       const me = req.user!.username;
-      if (order.assignedTo !== me && req.user!.role !== "ADMIN") {
-        return fail(res, 403, "Only the assigned user can complete processing this order");
+      if (existing.assignedTo !== me && req.user!.role !== "ADMIN") {
+        return fail(res, 403, "Only the assigned user can complete processing");
       }
-      (order as any).completedProcessingAt = new Date();
-      if (["pending", "processing"].includes(order.fulfillmentStatus)) order.fulfillmentStatus = "ready";
-      order.statusHistory.push({
-        status: "ready",
-        timestamp: new Date(),
-        actor: me,
-        note: "Processing complete — order is ready",
-      });
-      await order.save();
-      await logAction("ORDER_PROCESSING_COMPLETED", me, order.trackingNumber, {});
-      emitEvent("order:status-changed", { orderId: order._id.toString(), fulfillmentStatus: order.fulfillmentStatus, assignedTo: order.assignedTo });
-      return ok(res, order);
+      const now = new Date();
+      const newFulfillment = ["pending", "processing"].includes(existing.fulfillmentStatus) ? "ready" : existing.fulfillmentStatus;
+      const updated = await Order.findByIdAndUpdate(
+        req.params.id,
+        {
+          $set: { completedProcessingAt: now, fulfillmentStatus: newFulfillment },
+          $push: { statusHistory: { status: "ready", timestamp: now, actor: me, note: "Processing complete — order is ready" } },
+        },
+        { new: true }
+      );
+      if (!updated) return fail(res, 404, "Order not found after update");
+      await logAction("ORDER_PROCESSING_COMPLETED", me, updated.trackingNumber, {});
+      emitEvent("order:status-changed", { orderId: updated._id.toString(), fulfillmentStatus: updated.fulfillmentStatus, assignedTo: updated.assignedTo });
+      return ok(res, { order: updated });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -1509,10 +1555,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const me = req.user!.username;
       const active = await Order.findOne({
         assignedTo: me,
-        completedProcessingAt: null,
-        fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+        $or: [{ completedProcessingAt: { $exists: false } }, { completedProcessingAt: null }],
+        fulfillmentStatus: { $nin: ["completed", "cancelled", "ready"] },
       }).lean();
       return ok(res, { order: active || null });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Check for duplicate order (same customer name + same items)
+  app.post("/api/orders/check-duplicate", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { customerName, itemIds } = req.body as { customerName: string; itemIds: string[] };
+      if (!customerName || !itemIds?.length) return ok(res, { duplicate: null });
+      // Find a pending or processing order with same customer + at least one of the same items
+      const existing = await Order.findOne({
+        customerName: { $regex: new RegExp(`^${customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") },
+        fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+        "items.itemId": { $in: itemIds },
+      }).select("trackingNumber customerName items fulfillmentStatus _id").lean();
+      return ok(res, { duplicate: existing || null });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -1995,6 +2058,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const parsed = createOfferSchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
+      // Duplicate check: same name (case-insensitive) + same type + overlapping dates
+      const existingOffer = await Offer.findOne({
+        name: { $regex: `^${parsed.data.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, $options: "i" },
+        isActive: true,
+      });
+      if (existingOffer) return fail(res, 409, `An active offer named "${existingOffer.name}" already exists.`);
       const offer = await Offer.create({ ...parsed.data, startDate: new Date(parsed.data.startDate), endDate: new Date(parsed.data.endDate), createdBy: req.user!._id });
       await logAction("OFFER_CREATED", req.user!.username, offer.name, { offerType: offer.offerType });
       emitEvent("OFFER_CREATED");

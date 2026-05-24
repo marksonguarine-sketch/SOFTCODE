@@ -256,15 +256,14 @@ export type InventoryLogInput = z.infer<typeof inventoryLogSchema>;
 export const settingsSchema = z.object({
   companyName: z.string().optional(),
   theme: z.enum(["light", "dark"]).optional(),
-  reorderThreshold: z.number().int().min(0).optional(),
-  lowStockThreshold: z.number().int().min(0).optional(),
   font: z.string().optional().default("Inter"),
+  fontSize: z.string().optional().default("medium"),
   colorTheme: z.string().optional().default("blue"),
   gradient: z.string().optional().default("none"),
-  gcashNumber: z.string().optional().default(""),
-  gcashQrImageUrl: z.string().optional().default(""),
   storeAddress: z.string().optional().default(""),
   storeContactNumber: z.string().optional().default(""),
+  storeEmail: z.string().optional().default(""),
+  storeName: z.string().optional().default(""),
   autoApplyOffers: z.boolean().optional(),
   showSavingsSummary: z.boolean().optional(),
   ttsVoice: z.string().optional().default("en-US-AriaNeural"),
@@ -485,15 +484,14 @@ export interface ISettings {
   _id: string;
   companyName: string;
   theme: string;
-  reorderThreshold: number;
-  lowStockThreshold: number;
   font: string;
+  fontSize: string;
   colorTheme: string;
   gradient: string;
-  gcashNumber: string;
-  gcashQrImageUrl: string;
   storeAddress: string;
   storeContactNumber: string;
+  storeEmail: string;
+  storeName: string;
   autoApplyOffers: boolean;
   showSavingsSummary: boolean;
   ttsVoice: string;
