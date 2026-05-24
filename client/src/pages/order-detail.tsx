@@ -212,11 +212,11 @@ function PaymentModal({ open, order, onClose, onSuccess }: PaymentModalProps) {
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
-            {isGcash ? <Smartphone className="h-5 w-5 text-blue-500" /> : <Banknote className="h-5 w-5 text-green-600" />}
-            Process Payment — {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod}
+            <FileText className="h-5 w-5 text-primary" />
+            Log Order Details — {order.trackingNumber}
           </DialogTitle>
           <DialogDescription>
-            Complete all required details to record payment for order {order.trackingNumber}
+            Fill in all required information before marking this order as done. Payment, proof, and delivery details are saved to the system.
           </DialogDescription>
         </DialogHeader>
 
@@ -1088,8 +1088,8 @@ export default function OrderDetailPage() {
                       onClick={() => setPaymentModalOpen(true)}
                       data-testid="button-complete-processing"
                     >
-                      <Receipt className="h-3 w-3 mr-1" />
-                      Mark Done & Collect Payment
+                      <FileText className="h-3 w-3 mr-1" />
+                      Log Details
                     </Button>
                   )}
                 </div>

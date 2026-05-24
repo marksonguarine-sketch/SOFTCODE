@@ -23,7 +23,12 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [liveStats, setLiveStats] = useState<{ ordersToday: number; totalItems: number; activeUsers: number } | null>(null);
+  const [liveStats, setLiveStats] = useState<{ ordersToday: number; totalItems: number; totalStaff: number }>({
+    ordersToday: 0,
+    totalItems: 0,
+    totalStaff: 0,
+  });
+  const [statsLoaded, setStatsLoaded] = useState(false);
 
   useEffect(() => {
     if (localStorage.getItem("session_expired") === "1") {
@@ -34,8 +39,16 @@ export default function LoginPage() {
     async function fetchStats() {
       try {
         const res = await fetch("/api/public/stats");
+        if (!res.ok) return;
         const json = await res.json();
-        if (json.success) setLiveStats(json.data);
+        if (json.success && json.data) {
+          setLiveStats({
+            ordersToday: json.data.ordersToday ?? 0,
+            totalItems: json.data.totalItems ?? 0,
+            totalStaff: json.data.totalStaff ?? 0,
+          });
+          setStatsLoaded(true);
+        }
       } catch { /* ignore */ }
     }
     fetchStats();
@@ -112,13 +125,13 @@ export default function LoginPage() {
           {/* Mini metrics — live from server */}
           <div className="grid grid-cols-3 gap-4 mt-8">
             {[
-              { label: "Orders today", value: liveStats ? liveStats.ordersToday.toLocaleString() : "—" },
-              { label: "Items tracked", value: liveStats ? liveStats.totalItems.toLocaleString() : "—" },
-              { label: "Active staff", value: liveStats ? liveStats.activeUsers.toLocaleString() : "—" },
+              { label: "Orders today", value: (liveStats?.ordersToday ?? 0).toLocaleString() },
+              { label: "Items tracked", value: (liveStats?.totalItems ?? 0).toLocaleString() },
+              { label: "Total staff", value: (liveStats?.totalStaff ?? 0).toLocaleString() },
             ].map((m) => (
               <div key={m.label}>
                 <div className="font-mono text-[22px] font-semibold tracking-tight text-amber-300 tabular-nums">
-                  {m.value}
+                  {statsLoaded ? m.value : <span className="inline-block w-6 h-5 bg-slate-700 rounded animate-pulse" />}
                 </div>
                 <div className="text-[11px] uppercase tracking-wider text-slate-500 mt-1">
                   {m.label}

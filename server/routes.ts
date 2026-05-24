@@ -312,14 +312,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
-      const [ordersToday, totalItems, activeUsers] = await Promise.all([
+      const [ordersToday, totalItems, totalStaff] = await Promise.all([
         Order.countDocuments({ createdAt: { $gte: todayStart } }),
         Item.countDocuments(),
-        UserSession.countDocuments({ isActive: true, lastActivity: { $gte: new Date(Date.now() - 3600000) } }),
+        User.countDocuments(),
       ]);
-      return res.json({ success: true, data: { ordersToday, totalItems, activeUsers } });
+      return res.json({ success: true, data: { ordersToday, totalItems, totalStaff } });
     } catch {
-      return res.json({ success: true, data: { ordersToday: 0, totalItems: 0, activeUsers: 0 } });
+      return res.json({ success: true, data: { ordersToday: 0, totalItems: 0, totalStaff: 0 } });
     }
   });
 
