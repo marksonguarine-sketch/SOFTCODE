@@ -245,6 +245,36 @@ export const logPaymentSchema = z.object({
 });
 export type LogPaymentInput = z.infer<typeof logPaymentSchema>;
 
+export const processPaymentSchema = z.object({
+  orderId: z.string().min(1),
+  paymentMethod: z.enum(PAYMENT_METHODS),
+  customerName: z.string().min(1, "Customer name is required"),
+  deliveryAddress: z.string().optional().default(""),
+  amountPaid: z.number().min(0.01, "Amount must be greater than 0"),
+  amountTendered: z.number().optional(),
+  transactionCode: z.string().optional().default(""),
+  gcashSenderNumber: z.string().optional().default(""),
+  gcashReferenceNumber: z.string().optional().default(""),
+  receiptImagePath: z.string().optional().default(""),
+  notes: z.string().optional().default(""),
+  paymentDate: z.string().optional(),
+}).superRefine((data, ctx) => {
+  if (data.paymentMethod === "gcash" || data.paymentMethod === "gcash_qr") {
+    if (!data.gcashSenderNumber || data.gcashSenderNumber.length < 11) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter a valid 11-digit GCash number", path: ["gcashSenderNumber"] });
+    }
+    if (!data.gcashReferenceNumber || data.gcashReferenceNumber.length < 8) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Reference number must be at least 8 characters", path: ["gcashReferenceNumber"] });
+    }
+  }
+  if ((data.paymentMethod === "cash" || data.paymentMethod === "cod") && data.amountTendered !== undefined) {
+    if (data.amountTendered < data.amountPaid) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Amount tendered must be at least the total amount", path: ["amountTendered"] });
+    }
+  }
+});
+export type ProcessPaymentInput = z.infer<typeof processPaymentSchema>;
+
 export const inventoryLogSchema = z.object({
   itemId: z.string().min(1),
   type: z.enum(["restock", "deduction", "adjustment"]),

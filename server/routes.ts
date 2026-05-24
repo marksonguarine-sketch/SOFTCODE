@@ -34,6 +34,7 @@ import {
   createCustomerSchema,
   createOrderSchema,
   logPaymentSchema,
+  processPaymentSchema,
   inventoryLogSchema,
   settingsSchema,
   ledgerEntrySchema,
@@ -87,6 +88,29 @@ const imageUpload = multer({
     else cb(new Error("Only image files are allowed"));
   },
 });
+
+const receiptUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, UPLOADS_DIR),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `receipt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = /\.(jpg|jpeg|png|gif|webp)$/i;
+    if (allowed.test(path.extname(file.originalname))) cb(null, true);
+    else cb(new Error("Only image files are allowed"));
+  },
+});
+
+function generateTransactionCode() {
+  const now = new Date();
+  const d = now.toISOString().slice(0, 10).replace(/-/g, "");
+  const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
+  return `TXN-${d}-${rand}`;
+}
 
 async function createBackupData() {
   const [items, customers, orders, payments, inventoryLogs, accounts, ledger, settings, systemLogs, users] =
@@ -281,6 +305,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/config/maps-key", authMiddleware, async (_req: AuthRequest, res: Response) => {
     const key = process.env.GOOGLE_API_KEY || "";
     return ok(res, { key });
+  });
+
+  // ─── PUBLIC STATS (no auth — for login page banner) ─────
+  app.get("/api/public/stats", async (_req: Request, res: Response) => {
+    try {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const [ordersToday, totalItems, activeUsers] = await Promise.all([
+        Order.countDocuments({ createdAt: { $gte: todayStart } }),
+        Item.countDocuments(),
+        UserSession.countDocuments({ isActive: true, lastActivity: { $gte: new Date(Date.now() - 3600000) } }),
+      ]);
+      return res.json({ success: true, data: { ordersToday, totalItems, activeUsers } });
+    } catch {
+      return res.json({ success: true, data: { ordersToday: 0, totalItems: 0, activeUsers: 0 } });
+    }
+  });
+
+  // ─── RECEIPT IMAGE UPLOAD ────────────────────────────────
+  app.post("/api/billing/upload-receipt", authMiddleware, receiptUpload.single("receipt"), (req: AuthRequest, res: Response) => {
+    if (!req.file) return fail(res, 400, "No file uploaded");
+    return ok(res, { filename: req.file.filename, path: `/api/uploads/${req.file.filename}` });
   });
 
   // ─── DASHBOARD ──────────────────────────────────────────
@@ -1880,41 +1926,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/billing/pay", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const parsed = logPaymentSchema.safeParse(req.body);
+      const parsed = processPaymentSchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
 
       const order = await Order.findById(parsed.data.orderId);
       if (!order) return fail(res, 404, "Order not found");
       if (order.currentStatus !== "Pending Payment") return fail(res, 400, "Order is not pending payment");
 
-      const existingRef = await BillingPayment.findOne({ gcashReferenceNumber: parsed.data.gcashReferenceNumber });
-      if (existingRef) return fail(res, 409, "Duplicate GCash reference number");
+      if (parsed.data.amountPaid < order.totalAmount) return fail(res, 400, `Payment must be at least ₱${order.totalAmount.toFixed(2)}`);
 
-      if (parsed.data.amountPaid < order.totalAmount) return fail(res, 400, `Payment must be at least ${order.totalAmount}`);
+      const isGcash = parsed.data.paymentMethod === "gcash" || parsed.data.paymentMethod === "gcash_qr";
+
+      if (isGcash && parsed.data.gcashReferenceNumber) {
+        const existingRef = await BillingPayment.findOne({ gcashReferenceNumber: parsed.data.gcashReferenceNumber });
+        if (existingRef) return fail(res, 409, "Duplicate GCash reference number — already recorded");
+      }
+
+      const transactionCode = parsed.data.transactionCode || generateTransactionCode();
 
       const payment = await BillingPayment.create({
-        ...parsed.data,
+        orderId: parsed.data.orderId,
+        paymentMethod: parsed.data.paymentMethod,
+        gcashNumber: parsed.data.gcashSenderNumber || "",
+        gcashReferenceNumber: isGcash ? parsed.data.gcashReferenceNumber : transactionCode,
+        amountPaid: parsed.data.amountPaid,
+        amountTendered: parsed.data.amountTendered,
+        transactionCode,
+        receiptImagePath: parsed.data.receiptImagePath || "",
+        deliveryAddress: parsed.data.deliveryAddress || "",
         paymentDate: parsed.data.paymentDate ? new Date(parsed.data.paymentDate) : new Date(),
+        proofNote: parsed.data.notes || "",
         loggedBy: req.user!.username,
       });
 
+      const methodLabel = isGcash ? `GCash (ref: ${parsed.data.gcashReferenceNumber})` : parsed.data.paymentMethod === "cod" ? "Cash on Delivery" : "Cash";
       order.currentStatus = "Pending Release";
+      order.paymentStatus = "paid";
       order.statusHistory.push(
-        { status: "Paid", timestamp: new Date(), actor: req.user!.username, note: `Payment of ${parsed.data.amountPaid} received via ${parsed.data.paymentMethod}` },
+        { status: "Paid", timestamp: new Date(), actor: req.user!.username, note: `₱${parsed.data.amountPaid.toFixed(2)} received via ${methodLabel} · Txn: ${transactionCode}` },
         { status: "Pending Release", timestamp: new Date(), actor: req.user!.username, note: "Payment confirmed, awaiting release" }
       );
       await order.save();
 
+      const accountName = isGcash ? "GCash Receivable" : "Cash on Hand";
       await GeneralLedgerEntry.create([
-        { date: new Date(), accountName: "Cash/GCash", debit: parsed.data.amountPaid, credit: 0, description: `Payment for order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+        { date: new Date(), accountName, debit: parsed.data.amountPaid, credit: 0, description: `Payment for order ${order.trackingNumber} via ${methodLabel}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
         { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: parsed.data.amountPaid, description: `Revenue from order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
       ]);
 
-      await logAction("PAYMENT_LOGGED", req.user!.username, order.trackingNumber, { amount: parsed.data.amountPaid });
-      emitEvent("PAYMENT_LOGGED", { orderId: order._id });
+      await logAction("PAYMENT_LOGGED", req.user!.username, order.trackingNumber, { amount: parsed.data.amountPaid, method: parsed.data.paymentMethod, transactionCode });
+      emitEvent("PAYMENT_LOGGED", { orderId: order._id, transactionCode });
       emitEvent("ORDER_STATUS_APPENDED", { orderId: order._id, status: "Pending Release" });
       emitEvent("LEDGER_POSTED");
-      return ok(res, { payment, order });
+      emitEvent("DASHBOARD_STATS_UPDATED");
+      return ok(res, { payment, order, transactionCode });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

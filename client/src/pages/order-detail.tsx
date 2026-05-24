@@ -4,25 +4,12 @@ import { useRoute, useLocation } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
-  ArrowLeft,
-  Loader2,
-  CreditCard,
-  Truck,
-  Clock,
-  CheckCircle,
-  MapPin,
-  Navigation,
-  Lock,
-  UserCheck,
-  AlertTriangle,
-  User,
-  RefreshCw,
-  Play,
-  CheckCheck,
-  UserX,
-  Circle,
+  ArrowLeft, Loader2, CreditCard, Truck, Clock, CheckCircle, MapPin,
+  Lock, UserCheck, AlertTriangle, User, RefreshCw, Play, CheckCheck,
+  UserX, Circle, Upload, X, Receipt, Banknote, Smartphone, Package,
+  FileText, Hash, DollarSign, ImageIcon,
 } from "lucide-react";
-import { logPaymentSchema, type LogPaymentInput, type IOrder } from "@shared/schema";
+import { processPaymentSchema, type ProcessPaymentInput, type IOrder, PAYMENT_METHOD_LABELS } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
@@ -36,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 function StatusBadge({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
@@ -64,6 +52,501 @@ interface LockInfo {
   lockLastSeen?: string;
 }
 
+function formatCurrency(v: number) {
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
+}
+
+// ─── Payment Processing Modal ─────────────────────────────────────────────────
+interface PaymentModalProps {
+  open: boolean;
+  order: IOrder;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function PaymentModal({ open, order, onClose, onSuccess }: PaymentModalProps) {
+  const { toast } = useToast();
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string>("");
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isGcash = order.paymentMethod === "gcash" || order.paymentMethod === "gcash_qr";
+  const isCash = order.paymentMethod === "cash";
+  const isCod = order.paymentMethod === "cod";
+  const isPickup = order.orderType?.includes("pickup") || order.orderType?.includes("walkin");
+
+  const form = useForm<ProcessPaymentInput>({
+    resolver: zodResolver(processPaymentSchema),
+    defaultValues: {
+      orderId: order._id,
+      paymentMethod: order.paymentMethod,
+      customerName: order.customerName,
+      deliveryAddress: [
+        order.address?.street,
+        order.address?.city,
+        order.address?.province,
+        order.address?.zipCode,
+      ].filter(Boolean).join(", "),
+      amountPaid: order.totalAmount,
+      amountTendered: order.totalAmount,
+      transactionCode: "",
+      gcashSenderNumber: "",
+      gcashReferenceNumber: "",
+      receiptImagePath: "",
+      notes: "",
+      paymentDate: new Date().toISOString().slice(0, 16),
+    },
+  });
+
+  const amountPaid = form.watch("amountPaid") || 0;
+  const amountTendered = form.watch("amountTendered") || 0;
+  const change = Math.max(0, amountTendered - amountPaid);
+
+  useEffect(() => {
+    if (open) {
+      form.reset({
+        orderId: order._id,
+        paymentMethod: order.paymentMethod,
+        customerName: order.customerName,
+        deliveryAddress: [
+          order.address?.street,
+          order.address?.city,
+          order.address?.province,
+          order.address?.zipCode,
+        ].filter(Boolean).join(", "),
+        amountPaid: order.totalAmount,
+        amountTendered: order.totalAmount,
+        transactionCode: "",
+        gcashSenderNumber: "",
+        gcashReferenceNumber: "",
+        receiptImagePath: "",
+        notes: "",
+        paymentDate: new Date().toISOString().slice(0, 16),
+      });
+      setReceiptFile(null);
+      setReceiptPreview("");
+    }
+  }, [open, order]);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setReceiptFile(file);
+    const reader = new FileReader();
+    reader.onload = (ev) => setReceiptPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/orders/${order._id}/complete-processing`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Failed to complete processing");
+      return json;
+    },
+  });
+
+  const payMutation = useMutation({
+    mutationFn: async (data: ProcessPaymentInput) => {
+      const res = await apiRequest("POST", "/api/billing/pay", data);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || json?.message || "Payment failed");
+      return json;
+    },
+  });
+
+  const handleSubmit = async (data: ProcessPaymentInput) => {
+    try {
+      setUploading(true);
+
+      // 1. Upload receipt image if selected
+      if (receiptFile) {
+        const formData = new FormData();
+        formData.append("receipt", receiptFile);
+        const uploadRes = await fetch("/api/billing/upload-receipt", {
+          method: "POST",
+          body: formData,
+          credentials: "include",
+        });
+        const uploadJson = await uploadRes.json();
+        if (uploadJson.success) {
+          data.receiptImagePath = uploadJson.data.path;
+        }
+      }
+
+      setUploading(false);
+
+      // 2. Log payment (this moves order to Pending Release)
+      const payResult = await payMutation.mutateAsync(data);
+
+      // 3. Mark processing complete (set fulfillmentStatus = ready)
+      if (!order.completedProcessingAt) {
+        await completeMutation.mutateAsync();
+      }
+
+      // 4. Invalidate all relevant queries
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", order._id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/ledger"] });
+
+      const txnCode = payResult?.data?.transactionCode || "";
+      toast({
+        title: "Payment recorded successfully!",
+        description: txnCode ? `Transaction Code: ${txnCode}` : "Order is now Pending Release.",
+      });
+      onSuccess();
+      onClose();
+    } catch (err: any) {
+      setUploading(false);
+      toast({ title: "Payment failed", description: err.message, variant: "destructive" });
+    }
+  };
+
+  const isSubmitting = uploading || payMutation.isPending || completeMutation.isPending;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v && !isSubmitting) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg">
+            {isGcash ? <Smartphone className="h-5 w-5 text-blue-500" /> : <Banknote className="h-5 w-5 text-green-600" />}
+            Process Payment — {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod}
+          </DialogTitle>
+          <DialogDescription>
+            Complete all required details to record payment for order {order.trackingNumber}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Order Summary Banner */}
+        <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Package className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold">{order.trackingNumber}</span>
+              <Badge variant="outline" className="text-xs capitalize">
+                {order.orderType?.replace(/_/g, " ") || ""}
+              </Badge>
+            </div>
+            <span className="text-xl font-bold text-primary">{formatCurrency(order.totalAmount)}</span>
+          </div>
+
+          {/* Items list */}
+          <div className="space-y-1">
+            {order.items.map((item, i) => (
+              <div key={i} className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{item.itemName} × {item.qty}</span>
+                <span className="font-medium">{formatCurrency(item.lineTotal)}</span>
+              </div>
+            ))}
+            {order.deliveryFee > 0 && (
+              <div className="flex justify-between text-sm pt-1 border-t">
+                <span className="text-muted-foreground">Delivery Fee</span>
+                <span className="font-medium">{formatCurrency(order.deliveryFee)}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Customer info */}
+          <div className="flex items-center gap-4 text-sm pt-1 border-t">
+            <div className="flex items-center gap-1.5">
+              <User className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="font-medium">{order.customerName}</span>
+            </div>
+            {order.address && (order.address.street || order.address.city) && (
+              <div className="flex items-center gap-1.5 text-muted-foreground">
+                <MapPin className="h-3.5 w-3.5" />
+                <span>{[order.address.street, order.address.city].filter(Boolean).join(", ")}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
+
+            {/* ── SECTION: Customer & Address ────────────────────── */}
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <User className="h-3.5 w-3.5" /> Customer Details
+              </h3>
+              <div className="grid grid-cols-1 gap-3">
+                <FormField control={form.control} name="customerName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Customer Name</FormLabel>
+                    <FormControl>
+                      <Input {...field} data-testid="input-customer-name" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                {isPickup && (
+                  <FormField control={form.control} name="deliveryAddress" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Pickup / Delivery Address</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Street, City, Province" data-testid="input-delivery-address" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                )}
+                {!isPickup && order.address && (
+                  <FormField control={form.control} name="deliveryAddress" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Delivery Address</FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="Full delivery address" data-testid="input-delivery-address" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                )}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ── SECTION: Payment Details (GCash) ─────────────────── */}
+            {isGcash && (
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <Smartphone className="h-3.5 w-3.5" /> GCash Details
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={form.control} name="gcashSenderNumber" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Sender's GCash Number <span className="text-destructive">*</span></FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="09XXXXXXXXX" maxLength={11} data-testid="input-gcash-sender" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="gcashReferenceNumber" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>GCash Reference Number <span className="text-destructive">*</span></FormLabel>
+                      <FormControl>
+                        <Input {...field} placeholder="e.g. 12345678901" data-testid="input-gcash-ref" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              </div>
+            )}
+
+            {/* ── SECTION: Payment Details (Cash / COD) ────────────── */}
+            {(isCash || isCod) && (
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <Banknote className="h-3.5 w-3.5" /> {isCod ? "Cash on Delivery Details" : "Cash Payment Details"}
+                </h3>
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={form.control} name="amountTendered" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Amount Tendered (₱) <span className="text-destructive">*</span></FormLabel>
+                      <FormControl>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min={order.totalAmount}
+                          {...field}
+                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                          data-testid="input-amount-tendered"
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <div className="flex flex-col justify-end pb-1">
+                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Change Due</p>
+                    <div className={`text-2xl font-bold tabular-nums ${change > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                      {formatCurrency(change)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <Separator />
+
+            {/* ── SECTION: Amount & Transaction Code ──────────────── */}
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <DollarSign className="h-3.5 w-3.5" /> Amount & Transaction
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={form.control} name="amountPaid" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Amount Paid (₱) <span className="text-destructive">*</span></FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        step="0.01"
+                        min={0.01}
+                        {...field}
+                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                        data-testid="input-amount-paid"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                    <Hash className="h-3 w-3" /> Transaction Code
+                  </p>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/40 h-9">
+                    <span className="font-mono text-sm text-muted-foreground select-all">
+                      Auto-generated on save
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">System-generated unique code</p>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <FormField control={form.control} name="paymentDate" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Date & Time of Payment</FormLabel>
+                    <FormControl>
+                      <Input type="datetime-local" {...field} data-testid="input-payment-date" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ── SECTION: Receipt / Proof Upload ─────────────────── */}
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <ImageIcon className="h-3.5 w-3.5" />
+                {isGcash ? "GCash Screenshot / Proof" : "Receipt Image"}
+                {isGcash && <span className="text-destructive ml-1">*</span>}
+              </h3>
+              <div
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                data-testid="upload-receipt-drop"
+              >
+                {receiptPreview ? (
+                  <div className="relative w-full">
+                    <img src={receiptPreview} alt="Receipt preview" className="max-h-48 mx-auto rounded-md object-contain" />
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      className="absolute top-1 right-1 h-6 w-6 p-0"
+                      onClick={(e) => { e.stopPropagation(); setReceiptFile(null); setReceiptPreview(""); }}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ) : (
+                  <>
+                    <Upload className="h-8 w-8 text-muted-foreground" />
+                    <p className="text-sm font-medium">
+                      {isGcash ? "Upload GCash screenshot" : "Upload receipt photo"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">JPG, PNG, WEBP up to 10MB</p>
+                  </>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              {isGcash && !receiptFile && (
+                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3" /> GCash screenshot is strongly recommended for verification
+                </p>
+              )}
+            </div>
+
+            <Separator />
+
+            {/* ── SECTION: Notes ───────────────────────────────────── */}
+            <div>
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5" /> Notes / Remarks
+              </h3>
+              <FormField control={form.control} name="notes" render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <Textarea
+                      {...field}
+                      placeholder="Any remarks, instructions, or verification notes..."
+                      rows={2}
+                      data-testid="input-payment-notes"
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )} />
+            </div>
+
+            {/* ── Summary Row ──────────────────────────────────────── */}
+            <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total to Collect</p>
+                <p className="text-2xl font-bold">{formatCurrency(order.totalAmount)}</p>
+              </div>
+              {(isCash || isCod) && amountTendered > 0 && (
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Change</p>
+                  <p className={`text-2xl font-bold ${change > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                    {formatCurrency(change)}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* ── Action Buttons ────────────────────────────────────── */}
+            <div className="flex gap-3 pt-1">
+              <Button
+                type="button"
+                variant="outline"
+                className="flex-1"
+                onClick={onClose}
+                disabled={isSubmitting}
+                data-testid="button-cancel-payment"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
+                disabled={isSubmitting}
+                data-testid="button-confirm-payment"
+              >
+                {isSubmitting ? (
+                  <><Loader2 className="animate-spin mr-2 h-4 w-4" />
+                    {uploading ? "Uploading..." : "Processing..."}
+                  </>
+                ) : (
+                  <><Receipt className="mr-2 h-4 w-4" /> Confirm & Record Payment</>
+                )}
+              </Button>
+            </div>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Main Order Detail Page ───────────────────────────────────────────────────
 export default function OrderDetailPage() {
   const { toast } = useToast();
   const { user, isAdmin } = useAuth();
@@ -73,12 +556,13 @@ export default function OrderDetailPage() {
 
   const [lockInfo, setLockInfo] = useState<LockInfo | null>(null);
   const [assignTarget, setAssignTarget] = useState("");
+  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const { data: orderData, isLoading } = useQuery<{ success: boolean; data: { order: IOrder; payments: any[] } }>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
-    refetchInterval: 15000,
+    refetchInterval: 8000,
   });
 
   const { data: usersData } = useQuery<{ success: boolean; data: { username: string; role: string }[] }>({
@@ -95,9 +579,7 @@ export default function OrderDetailPage() {
       const res = await apiRequest("POST", `/api/orders/${orderId}/lock`);
       const data = await res.json();
       if (data.success) setLockInfo(data.data);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, [orderId]);
 
   const releaseLock = useCallback(() => {
@@ -116,37 +598,22 @@ export default function OrderDetailPage() {
     };
   }, [orderId, acquireLock, releaseLock]);
 
-  const formatCurrency = (v: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
-  const formatDate = (d: string) => new Date(d).toLocaleString("en-PH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-
-  const paymentForm = useForm<LogPaymentInput>({
-    resolver: zodResolver(logPaymentSchema),
-    defaultValues: { orderId: orderId || "", paymentMethod: "GCash", gcashNumber: "", gcashReferenceNumber: "", amountPaid: 0, proofNote: "" },
-  });
-
-  const payMutation = useMutation({
-    mutationFn: async (data: LogPaymentInput) => {
-      const res = await apiRequest("POST", "/api/billing/pay", { ...data, orderId });
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      paymentForm.reset();
-      toast({ title: "Payment logged successfully" });
-    },
-    onError: (err: Error) => toast({ title: "Payment failed", description: err.message, variant: "destructive" }),
+  const formatDate = (d: string) => new Date(d).toLocaleString("en-PH", {
+    year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"
   });
 
   const releaseMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/orders/${orderId}/release`);
-      return res.json();
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Release failed");
+      return json;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Items released successfully" });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: "Items released — order is now Completed!" });
     },
     onError: (err: Error) => toast({ title: "Release failed", description: err.message, variant: "destructive" }),
   });
@@ -156,10 +623,7 @@ export default function OrderDetailPage() {
       const res = await apiRequest("POST", `/api/orders/${orderId}/takeover`);
       return res.json();
     },
-    onSuccess: () => {
-      setLockInfo(null);
-      toast({ title: "You have taken over this order" });
-    },
+    onSuccess: () => { setLockInfo(null); toast({ title: "You have taken over this order" }); },
     onError: (err: Error) => toast({ title: "Takeover failed", description: err.message, variant: "destructive" }),
   });
 
@@ -202,24 +666,9 @@ export default function OrderDetailPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Processing started" });
+      toast({ title: "Processing started — collect payment details when done" });
     },
     onError: (err: Error) => toast({ title: "Failed to start processing", description: err.message, variant: "destructive" }),
-  });
-
-  const completeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/orders/${orderId}/complete-processing`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.message || "Failed to complete");
-      return json;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      toast({ title: "Processing complete — order is ready!" });
-    },
-    onError: (err: Error) => toast({ title: "Failed to complete processing", description: err.message, variant: "destructive" }),
   });
 
   if (isLoading) {
@@ -246,6 +695,20 @@ export default function OrderDetailPage() {
 
   return (
     <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+
+      {/* Payment Processing Modal */}
+      {paymentModalOpen && (
+        <PaymentModal
+          open={paymentModalOpen}
+          order={order}
+          onClose={() => setPaymentModalOpen(false)}
+          onSuccess={() => {
+            queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+            queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+          }}
+        />
+      )}
 
       {/* Lock overlay dialog */}
       <Dialog open={!!isLockedByOther} onOpenChange={() => {}}>
@@ -374,7 +837,9 @@ export default function OrderDetailPage() {
                 </div>
                 <div>
                   <span className="text-muted-foreground">Payment Method</span>
-                  <p className="font-medium capitalize">{order.paymentMethod?.replace(/_/g, " ") || "—"}</p>
+                  <p className="font-medium capitalize">
+                    {PAYMENT_METHOD_LABELS[order.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] || order.paymentMethod || "—"}
+                  </p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Created</span>
@@ -447,7 +912,6 @@ export default function OrderDetailPage() {
             </CardContent>
           </Card>
 
-
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Items</CardTitle>
@@ -506,54 +970,28 @@ export default function OrderDetailPage() {
             </CardContent>
           </Card>
 
-          {order.currentStatus === "Pending Payment" && (
-            <Card>
+          {/* Log Payment — fallback card for orders already in Pending Payment but not through the modal flow */}
+          {order.currentStatus === "Pending Payment" && !order.startedAt && (
+            <Card className="border-amber-200 dark:border-amber-800">
               <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <CreditCard className="h-4 w-4" /> Log Payment
+                <CardTitle className="text-base flex items-center gap-2 text-amber-700 dark:text-amber-400">
+                  <CreditCard className="h-4 w-4" /> Payment Pending
                 </CardTitle>
-                <CardDescription>Record a payment for this order</CardDescription>
+                <CardDescription>
+                  This order is waiting for payment. Assign it to a staff member and start processing to collect payment.
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                <Form {...paymentForm}>
-                  <form onSubmit={paymentForm.handleSubmit((data) => payMutation.mutate(data))} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <FormField control={paymentForm.control} name="gcashNumber" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>GCash Number</FormLabel>
-                          <FormControl><Input {...field} data-testid="input-gcash-number" /></FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                      <FormField control={paymentForm.control} name="gcashReferenceNumber" render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Reference Number</FormLabel>
-                          <FormControl><Input {...field} data-testid="input-gcash-ref" /></FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )} />
-                    </div>
-                    <FormField control={paymentForm.control} name="amountPaid" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Amount Paid</FormLabel>
-                        <FormControl><Input type="number" step="0.01" {...field} onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-amount-paid" /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={paymentForm.control} name="proofNote" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Proof / Note</FormLabel>
-                        <FormControl><Input {...field} data-testid="input-proof-note" /></FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <Button type="submit" disabled={payMutation.isPending} data-testid="button-submit-payment">
-                      {payMutation.isPending && <Loader2 className="animate-spin mr-1" />}
-                      Log Payment
-                    </Button>
-                  </form>
-                </Form>
-              </CardContent>
+              {isAdmin && (
+                <CardContent>
+                  <Button
+                    onClick={() => setPaymentModalOpen(true)}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    data-testid="button-log-payment-admin"
+                  >
+                    <Receipt className="mr-2 h-4 w-4" /> Log Payment Now
+                  </Button>
+                </CardContent>
+              )}
             </Card>
           )}
 
@@ -563,12 +1001,17 @@ export default function OrderDetailPage() {
                 <CardTitle className="text-base flex items-center gap-2">
                   <Truck className="h-4 w-4" /> Release Items
                 </CardTitle>
-                <CardDescription>Release items for this order</CardDescription>
+                <CardDescription>Payment confirmed. Release items from inventory to complete this order.</CardDescription>
               </CardHeader>
               <CardContent>
-                <Button onClick={() => releaseMutation.mutate()} disabled={releaseMutation.isPending} data-testid="button-release-items">
+                <Button
+                  onClick={() => releaseMutation.mutate()}
+                  disabled={releaseMutation.isPending}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  data-testid="button-release-items"
+                >
                   {releaseMutation.isPending && <Loader2 className="animate-spin mr-1" />}
-                  Release Items
+                  <Truck className="mr-2 h-4 w-4" /> Release Items & Complete Order
                 </Button>
               </CardContent>
             </Card>
@@ -611,13 +1054,13 @@ export default function OrderDetailPage() {
                   </div>
                 </div>
 
-                {/* Step 3: Processing done */}
+                {/* Step 3: Payment collected */}
                 <div className={`flex items-start gap-3 rounded-md p-2.5 ${order.completedProcessingAt ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800" : "bg-muted/30 border border-transparent"}`}>
                   <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${order.completedProcessingAt ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
                     {order.completedProcessingAt ? <CheckCheck className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${order.completedProcessingAt ? "" : "text-muted-foreground"}`}>Processing Complete</p>
+                    <p className={`text-sm font-medium ${order.completedProcessingAt ? "" : "text-muted-foreground"}`}>Payment Collected</p>
                     {order.completedProcessingAt ? <p className="text-xs text-muted-foreground">{fmt12(order.completedProcessingAt)}</p> : <p className="text-xs text-muted-foreground">Not done yet</p>}
                   </div>
                 </div>
@@ -627,15 +1070,26 @@ export default function OrderDetailPage() {
               {order.assignedTo && order.assignedTo === user?.username && (
                 <div className="space-y-2 pt-1">
                   {!order.startedAt && (
-                    <Button size="sm" className="w-full" disabled={startMutation.isPending} onClick={() => startMutation.mutate()} data-testid="button-start-processing">
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      disabled={startMutation.isPending}
+                      onClick={() => startMutation.mutate()}
+                      data-testid="button-start-processing"
+                    >
                       {startMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
                       Start Processing
                     </Button>
                   )}
-                  {order.startedAt && !order.completedProcessingAt && (
-                    <Button size="sm" className="w-full bg-green-600 hover:bg-green-700" disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()} data-testid="button-complete-processing">
-                      {completeMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <CheckCheck className="h-3 w-3 mr-1" />}
-                      Mark Done
+                  {order.startedAt && !order.completedProcessingAt && order.currentStatus === "Pending Payment" && (
+                    <Button
+                      size="sm"
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
+                      onClick={() => setPaymentModalOpen(true)}
+                      data-testid="button-complete-processing"
+                    >
+                      <Receipt className="h-3 w-3 mr-1" />
+                      Mark Done & Collect Payment
                     </Button>
                   )}
                 </div>
@@ -684,6 +1138,18 @@ export default function OrderDetailPage() {
                       Unassign
                     </Button>
                   )}
+                  {/* Admin can also log payment directly */}
+                  {order.currentStatus === "Pending Payment" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full text-green-700 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-950/30"
+                      onClick={() => setPaymentModalOpen(true)}
+                      data-testid="button-admin-log-payment"
+                    >
+                      <Receipt className="h-3 w-3 mr-1" /> Log Payment
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -727,7 +1193,7 @@ export default function OrderDetailPage() {
                       <p className="text-sm font-medium">{entry.status}</p>
                       <p className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</p>
                       {entry.actor && <p className="text-xs text-muted-foreground">by {entry.actor}</p>}
-                      {entry.note && <p className="text-xs mt-1">{entry.note}</p>}
+                      {entry.note && <p className="text-xs mt-1 text-muted-foreground">{entry.note}</p>}
                     </div>
                   </div>
                 ))}

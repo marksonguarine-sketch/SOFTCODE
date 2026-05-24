@@ -144,7 +144,8 @@ export default function DashboardPage() {
     data: DashboardStats;
   }>({
     queryKey: ["/api/dashboard/stats"],
-    staleTime: 15_000,
+    staleTime: 5_000,
+    refetchInterval: 30_000,
   });
   const stats = statsRes?.data;
 
@@ -157,7 +158,8 @@ export default function DashboardPage() {
       const res = await apiRequest("GET", `/api/dashboard/advanced?period=${trendPeriod}`);
       return res.json();
     },
-    staleTime: 15_000,
+    staleTime: 5_000,
+    refetchInterval: 30_000,
   });
   const adv = advRes?.data;
 

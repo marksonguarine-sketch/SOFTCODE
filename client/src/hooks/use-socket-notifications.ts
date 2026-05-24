@@ -93,6 +93,40 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
       queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
     });
 
+    // ── Payment logged (from /api/billing/pay) ────────────────────────────────
+    socket.on("PAYMENT_LOGGED", () => {
+      invalidateOrderQueries();
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/advanced"] });
+    });
+
+    // ── Order released (revenue finalized) ────────────────────────────────────
+    socket.on("ORDER_RELEASED", () => {
+      invalidateOrderQueries();
+      queryClient.invalidateQueries({ queryKey: ["/api/billing"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/advanced"] });
+    });
+
+    // ── Ledger posted ─────────────────────────────────────────────────────────
+    socket.on("LEDGER_POSTED", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/accounts"] });
+    });
+
+    // ── Dashboard stats updated (generic trigger) ─────────────────────────────
+    socket.on("DASHBOARD_STATS_UPDATED", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/advanced"] });
+    });
+
+    // ── Inventory log created ─────────────────────────────────────────────────
+    socket.on("INVENTORY_LOG_CREATED", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;

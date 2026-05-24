@@ -23,12 +23,24 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [liveStats, setLiveStats] = useState<{ ordersToday: number; totalItems: number; activeUsers: number } | null>(null);
 
   useEffect(() => {
     if (localStorage.getItem("session_expired") === "1") {
       setSessionExpired(true);
       localStorage.removeItem("session_expired");
     }
+
+    async function fetchStats() {
+      try {
+        const res = await fetch("/api/public/stats");
+        const json = await res.json();
+        if (json.success) setLiveStats(json.data);
+      } catch { /* ignore */ }
+    }
+    fetchStats();
+    const interval = setInterval(fetchStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const form = useForm<LoginInput>({
@@ -97,12 +109,12 @@ export default function LoginPage() {
             all in one place, designed for the way Philippine hardware stores actually work.
           </p>
 
-          {/* Mini metrics */}
+          {/* Mini metrics — live from server */}
           <div className="grid grid-cols-3 gap-4 mt-8">
             {[
-              { label: "Orders today", value: "36" },
-              { label: "Items tracked", value: "1,240" },
-              { label: "Active staff", value: "8" },
+              { label: "Orders today", value: liveStats ? liveStats.ordersToday.toLocaleString() : "—" },
+              { label: "Items tracked", value: liveStats ? liveStats.totalItems.toLocaleString() : "—" },
+              { label: "Active staff", value: liveStats ? liveStats.activeUsers.toLocaleString() : "—" },
             ].map((m) => (
               <div key={m.label}>
                 <div className="font-mono text-[22px] font-semibold tracking-tight text-amber-300 tabular-nums">
