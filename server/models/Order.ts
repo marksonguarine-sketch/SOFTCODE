@@ -59,6 +59,8 @@ export interface IOrderDoc extends Document {
   assignedToName: string;
   assignedAt?: Date;
   assignedBy: string;
+  startedAt?: Date;
+  completedProcessingAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -144,6 +146,8 @@ const orderSchema = new Schema<IOrderDoc>(
     assignedToName: { type: String, default: "" },
     assignedAt: { type: Date },
     assignedBy: { type: String, default: "" },
+    startedAt: { type: Date },
+    completedProcessingAt: { type: Date },
     notesHistory: {
       type: [{
         note: { type: String, required: true },

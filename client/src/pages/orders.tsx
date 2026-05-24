@@ -6,7 +6,7 @@ import { useLocation } from "wouter";
 import {
   Plus, Search, Loader2, ShoppingCart, Trash2, MapPin, UserCheck, Package,
   AlertCircle, ChevronRight, Sun, Moon, Sunset, Filter, ChevronLeft,
-  CheckSquare, Tag, Info,
+  CheckSquare, Tag, Info, Play, CheckCheck, ArrowRightCircle,
 } from "lucide-react";
 import { speakTTS, formatAmountForTTS } from "@/lib/tts";
 import {
@@ -57,6 +57,29 @@ function OrderTableRow({ order, selected, onSelect, onNavigate, allUsers, onAssi
           <SelectTrigger className="h-7 text-xs w-[130px]" data-testid={`select-assign-order-${order._id}`}><SelectValue placeholder="Assign..." /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__unassign__">— Unassign —</SelectItem>
+            {allUsers.map((u) => <SelectItem key={u.username} value={u.username}>{u.username}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+function PoolAdminRow({ order, allUsers, onAssign, onNavigate }: {
+  order: IOrder; allUsers: SimpleUser[]; onAssign: (username: string) => void; onNavigate: () => void;
+}) {
+  const [assignVal, setAssignVal] = useState("");
+  return (
+    <TableRow data-testid={`row-pool-admin-${order._id}`}>
+      <TableCell className="font-mono text-sm font-semibold cursor-pointer" onClick={onNavigate}>{order.trackingNumber}</TableCell>
+      <TableCell className="cursor-pointer" onClick={onNavigate}>{order.customerName}</TableCell>
+      <TableCell className="text-xs text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
+      <TableCell className="text-right cursor-pointer" onClick={onNavigate}>{formatCurrency(order.totalAmount)}</TableCell>
+      <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
+      <TableCell onClick={(e) => e.stopPropagation()}>
+        <Select value={assignVal} onValueChange={(v) => { setAssignVal(v); onAssign(v); }}>
+          <SelectTrigger className="h-7 text-xs w-[130px]" data-testid={`select-pool-assign-${order._id}`}><SelectValue placeholder="Assign..." /></SelectTrigger>
+          <SelectContent>
             {allUsers.map((u) => <SelectItem key={u.username} value={u.username}>{u.username}</SelectItem>)}
           </SelectContent>
         </Select>
@@ -591,6 +614,19 @@ export default function OrdersPage() {
     enabled: !isAdmin,
   });
 
+  const { data: poolData } = useQuery<{ success: boolean; data: { orders: IOrder[] } }>({
+    queryKey: ["/api/orders?pool=true"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/orders?pool=true");
+      return res.json();
+    },
+  });
+
+  const { data: myActiveData } = useQuery<{ success: boolean; data: { order: IOrder | null } }>({
+    queryKey: ["/api/orders/my-active"],
+    enabled: !isAdmin,
+  });
+
   const { data: viewUserOrdersData } = useQuery<{ success: boolean; data: { orders: IOrder[] } }>({
     queryKey: [`/api/orders?assignedTo=${viewUser}`],
     queryFn: async () => {
@@ -626,14 +662,66 @@ export default function OrdersPage() {
     onError: (err: Error) => toast({ title: "Bulk update failed", description: err.message, variant: "destructive" }),
   });
 
+  const claimMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/claim`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Cannot claim");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?assignedToMe=true"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders/my-active"] });
+      toast({ title: "Order claimed — it's now yours!" });
+    },
+    onError: (err: Error) => toast({ title: "Cannot claim order", description: err.message, variant: "destructive" }),
+  });
+
+  const startMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/start-processing`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Failed to start");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?assignedToMe=true"] });
+      toast({ title: "Processing started" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to start processing", description: err.message, variant: "destructive" }),
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/complete-processing`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Failed to complete");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?assignedToMe=true"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders/my-active"] });
+      toast({ title: "Processing complete — order is ready!" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to complete processing", description: err.message, variant: "destructive" }),
+  });
+
   const orders = ordersData?.data?.orders || [];
   const allItems = allItemsData?.data || [];
   const allUsers = usersData?.data || [];
   const myAssignedOrders = assignedData?.data?.orders || [];
   const viewUserOrders = viewUserOrdersData?.data?.orders || [];
+  const poolOrders = poolData?.data?.orders || [];
+  const myBlockingOrder = myActiveData?.data?.order || null;
 
   const myPendingAssigned = myAssignedOrders.filter((o) => o.currentStatus !== "Completed");
   const hasPendingAssigned = myPendingAssigned.length > 0;
+  // Employee is task-locked if they have an order where completedProcessingAt is null and not cancelled/completed
+  const isTaskLocked = !isAdmin && !!myBlockingOrder;
   const employees = allUsers.filter((u) => u.role === "EMPLOYEE");
   const admins = allUsers.filter((u) => u.role === "ADMIN");
   const viewUserAssigned = viewUserOrders.filter((o) => o.currentStatus !== "Completed");
@@ -691,11 +779,14 @@ export default function OrdersPage() {
             <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">No orders are currently assigned to you.</CardContent></Card>
           ) : (
             <div className="space-y-2">
-              {myPendingAssigned.map((order) => (
-                <Card key={order._id} className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate(`/orders/${order._id}`)}>
+              {myPendingAssigned.map((order) => {
+                const canStart = order.fulfillmentStatus === "pending" && !order.startedAt;
+                const canComplete = order.fulfillmentStatus === "processing" || (!!order.startedAt && !order.completedProcessingAt);
+                return (
+                <Card key={order._id} className="hover:border-primary/50 transition-colors">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1.5 flex-1">
+                      <div className="space-y-1.5 flex-1 cursor-pointer" onClick={() => navigate(`/orders/${order._id}`)}>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-mono font-semibold text-sm">{order.trackingNumber}</span>
                           <StatusBadge status={order.currentStatus} />
@@ -708,6 +799,7 @@ export default function OrdersPage() {
                           <span>Type: <strong className="text-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</strong></span>
                           <span>Created: <strong className="text-foreground">{fmt12(order.createdAt)}</strong></span>
                           {order.assignedAt && <span>Assigned: <strong className="text-foreground">{fmt12(order.assignedAt)}</strong></span>}
+                          {order.startedAt && <span>Started: <strong className="text-foreground">{fmt12(order.startedAt)}</strong></span>}
                         </div>
                         {order.notes && <p className="text-xs text-muted-foreground">Note: {order.notes}</p>}
                         <div className="flex flex-wrap gap-1">
@@ -717,11 +809,34 @@ export default function OrdersPage() {
                           {order.items.length > 3 && <Badge variant="outline" className="text-xs">+{order.items.length - 3} more</Badge>}
                         </div>
                       </div>
-                      <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0 mt-1" />
+                      <div className="flex flex-col gap-2 items-end flex-shrink-0">
+                        {canStart && (
+                          <Button size="sm" variant="default" className="h-8 text-xs"
+                            disabled={startMutation.isPending}
+                            onClick={(e) => { e.stopPropagation(); startMutation.mutate(order._id); }}
+                            data-testid={`button-start-processing-${order._id}`}
+                          >
+                            {startMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
+                            Start Processing
+                          </Button>
+                        )}
+                        {canComplete && (
+                          <Button size="sm" variant="default" className="h-8 text-xs bg-green-600 hover:bg-green-700"
+                            disabled={completeMutation.isPending}
+                            onClick={(e) => { e.stopPropagation(); completeMutation.mutate(order._id); }}
+                            data-testid={`button-complete-processing-${order._id}`}
+                          >
+                            {completeMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <CheckCheck className="h-3 w-3 mr-1" />}
+                            Mark Done
+                          </Button>
+                        )}
+                        <ChevronRight className="h-5 w-5 text-muted-foreground mt-1 cursor-pointer" onClick={() => navigate(`/orders/${order._id}`)} />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
-              ))}
+                );
+              })}
               {myAssignedOrders.filter((o) => o.currentStatus === "Completed").map((order) => (
                 <Card key={order._id} className="cursor-pointer opacity-75 hover:opacity-100 transition-opacity" onClick={() => navigate(`/orders/${order._id}`)}>
                   <CardContent className="p-3">
@@ -747,46 +862,67 @@ export default function OrdersPage() {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Package className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold text-muted-foreground">Order Pool</h2>
+            <h2 className="text-lg font-semibold text-muted-foreground">Pending Pool</h2>
+            {poolOrders.length > 0 && <Badge variant="outline">{poolOrders.length} available</Badge>}
           </div>
-          {hasPendingAssigned && (
+          {isTaskLocked && myBlockingOrder && (
             <div className="flex items-start gap-3 p-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300">
               <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-              <span>Complete your <strong>{myPendingAssigned.length} assigned order{myPendingAssigned.length > 1 ? "s" : ""}</strong> before picking up from the pool.</span>
+              <span>
+                You have an active order <strong>{myBlockingOrder.trackingNumber}</strong>. Mark it done before claiming a new one.
+              </span>
             </div>
           )}
           <div className="relative max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input placeholder="Search orders..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} data-testid="input-search-orders" />
+            <Input placeholder="Search pool..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} data-testid="input-search-orders" />
           </div>
-          <Card className={hasPendingAssigned ? "opacity-60 pointer-events-none select-none" : ""}>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tracking #</TableHead>
-                    <TableHead>Customer</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Date</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders.length === 0 ? (
-                    <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">No orders found</TableCell></TableRow>
-                  ) : filteredOrders.map((order) => (
-                    <TableRow key={order._id} className="cursor-pointer" onClick={() => !hasPendingAssigned && navigate(`/orders/${order._id}`)} data-testid={`row-pool-order-${order._id}`}>
-                      <TableCell className="font-medium font-mono text-sm">{order.trackingNumber}</TableCell>
-                      <TableCell>{order.customerName}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(order.totalAmount)}</TableCell>
-                      <TableCell><StatusBadge status={order.currentStatus} /></TableCell>
-                      <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+          {poolOrders.length === 0 ? (
+            <Card><CardContent className="py-8 text-center text-muted-foreground text-sm">No orders in the pool right now.</CardContent></Card>
+          ) : (
+            <div className="space-y-2">
+              {poolOrders
+                .filter((o) => !search || o.trackingNumber.toLowerCase().includes(search.toLowerCase()) || o.customerName.toLowerCase().includes(search.toLowerCase()))
+                .map((order) => (
+                <Card key={order._id} className="hover:border-primary/30 transition-colors">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1.5 flex-1 cursor-pointer" onClick={() => navigate(`/orders/${order._id}`)}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-semibold text-sm">{order.trackingNumber}</span>
+                          <FulfillmentBadge status={order.fulfillmentStatus} />
+                          <PaymentBadge status={order.paymentStatus} />
+                        </div>
+                        <p className="font-medium">{order.customerName}</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <span>Total: <strong className="text-foreground">{formatCurrency(order.totalAmount)}</strong></span>
+                          <span>Type: <strong className="text-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</strong></span>
+                          <span>Created: <strong className="text-foreground">{fmt12(order.createdAt)}</strong></span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {order.items.slice(0, 3).map((item, i) => (
+                            <Badge key={i} variant="outline" className="text-xs">{item.itemName} ×{item.qty}</Badge>
+                          ))}
+                          {order.items.length > 3 && <Badge variant="outline" className="text-xs">+{order.items.length - 3} more</Badge>}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="flex-shrink-0 h-9 text-xs border-primary text-primary hover:bg-primary hover:text-primary-foreground"
+                        disabled={isTaskLocked || claimMutation.isPending}
+                        onClick={(e) => { e.stopPropagation(); claimMutation.mutate(order._id); }}
+                        data-testid={`button-claim-order-${order._id}`}
+                      >
+                        {claimMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <ArrowRightCircle className="h-3 w-3 mr-1" />}
+                        Claim
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -839,6 +975,49 @@ export default function OrdersPage() {
           </Button>
         )}
       </div>
+
+      {/* Pending Pool — Admin assigns from here */}
+      {poolOrders.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Package className="h-5 w-5 text-amber-500" />
+            <h2 className="text-base font-semibold">Pending Pool</h2>
+            <Badge className="bg-amber-500 text-white border-transparent">{poolOrders.length} unassigned</Badge>
+          </div>
+          <Card>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Tracking #</TableHead>
+                      <TableHead>Customer</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Total</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Assign To</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {poolOrders.map((order) => (
+                      <PoolAdminRow
+                        key={order._id}
+                        order={order}
+                        allUsers={allUsers}
+                        onAssign={(username) => {
+                          const found = allUsers.find((u) => u.username === username);
+                          assignMutation.mutate({ orderId: order._id, username, displayName: found?.username || "" });
+                        }}
+                        onNavigate={() => navigate(`/orders/${order._id}`)}
+                      />
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Orders Table */}
       <Card>

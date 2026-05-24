@@ -397,8 +397,34 @@ export interface IOrder {
   assignedToName?: string;
   assignedAt?: string;
   assignedBy?: string;
+  startedAt?: string;
+  completedProcessingAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── Assignment event payloads (Socket.io) ────────────────────────────────────
+
+export interface IOrderAssignedEvent {
+  orderId: string;
+  trackingNumber: string;
+  assignedTo: string;
+  assignedBy: string;
+  customerName: string;
+  items: Array<{ itemName: string; qty: number }>;
+  totalAmount: number;
+  paymentMethod: string;
+  orderType: string;
+  notes?: string;
+  isReassignment: boolean;
+  previousAssignedTo?: string;
+}
+
+export interface IOrderUnassignedEvent {
+  orderId: string;
+  trackingNumber: string;
+  previousAssignedTo: string;
+  actor: string;
 }
 
 export interface IBillingPayment {

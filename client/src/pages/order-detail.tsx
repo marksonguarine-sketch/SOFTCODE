@@ -17,6 +17,10 @@ import {
   AlertTriangle,
   User,
   RefreshCw,
+  Play,
+  CheckCheck,
+  UserX,
+  Circle,
 } from "lucide-react";
 import { logPaymentSchema, type LogPaymentInput, type IOrder } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -170,6 +174,52 @@ export default function OrderDetailPage() {
       toast({ title: "Order assigned successfully" });
     },
     onError: (err: Error) => toast({ title: "Assign failed", description: err.message, variant: "destructive" }),
+  });
+
+  const unassignMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("DELETE", `/api/orders/${orderId}/assign`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Failed to unassign");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
+      toast({ title: "Order returned to pool" });
+    },
+    onError: (err: Error) => toast({ title: "Unassign failed", description: err.message, variant: "destructive" }),
+  });
+
+  const startMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/start-processing`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Failed to start");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Processing started" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to start processing", description: err.message, variant: "destructive" }),
+  });
+
+  const completeMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/complete-processing`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.message || "Failed to complete");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Processing complete — order is ready!" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to complete processing", description: err.message, variant: "destructive" }),
   });
 
   if (isLoading) {
@@ -533,31 +583,73 @@ export default function OrderDetailPage() {
                 <UserCheck className="h-4 w-4" /> Assignment
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {order.assignedTo ? (
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium">{order.assignedToName || order.assignedTo}</p>
-                  {order.assignedAt && (
-                    <p className="text-xs text-muted-foreground">Assigned {fmt12(order.assignedAt)}</p>
+            <CardContent className="space-y-4">
+              {/* Lifecycle steps */}
+              <div className="space-y-2">
+                {/* Step 1: Assigned */}
+                <div className={`flex items-start gap-3 rounded-md p-2.5 ${order.assignedTo ? "bg-primary/5 border border-primary/20" : "bg-muted/30 border border-transparent"}`}>
+                  <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${order.assignedTo ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                    {order.assignedTo ? <CheckCheck className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium ${order.assignedTo ? "" : "text-muted-foreground"}`}>
+                      {order.assignedTo ? (order.assignedToName || order.assignedTo) : "Unassigned"}
+                    </p>
+                    {order.assignedAt && <p className="text-xs text-muted-foreground">{fmt12(order.assignedAt)}{order.assignedBy ? ` · by ${order.assignedBy}` : ""}</p>}
+                    {!order.assignedTo && <p className="text-xs text-muted-foreground">Waiting in the pool</p>}
+                  </div>
+                </div>
+
+                {/* Step 2: Processing started */}
+                <div className={`flex items-start gap-3 rounded-md p-2.5 ${order.startedAt ? "bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800" : "bg-muted/30 border border-transparent"}`}>
+                  <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${order.startedAt ? "bg-blue-500 text-white" : "bg-muted text-muted-foreground"}`}>
+                    {order.startedAt ? <Play className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium ${order.startedAt ? "" : "text-muted-foreground"}`}>Processing Started</p>
+                    {order.startedAt ? <p className="text-xs text-muted-foreground">{fmt12(order.startedAt)}</p> : <p className="text-xs text-muted-foreground">Not started</p>}
+                  </div>
+                </div>
+
+                {/* Step 3: Processing done */}
+                <div className={`flex items-start gap-3 rounded-md p-2.5 ${order.completedProcessingAt ? "bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800" : "bg-muted/30 border border-transparent"}`}>
+                  <div className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full ${order.completedProcessingAt ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                    {order.completedProcessingAt ? <CheckCheck className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-medium ${order.completedProcessingAt ? "" : "text-muted-foreground"}`}>Processing Complete</p>
+                    {order.completedProcessingAt ? <p className="text-xs text-muted-foreground">{fmt12(order.completedProcessingAt)}</p> : <p className="text-xs text-muted-foreground">Not done yet</p>}
+                  </div>
+                </div>
+              </div>
+
+              {/* Assignee action buttons */}
+              {order.assignedTo && order.assignedTo === user?.username && (
+                <div className="space-y-2 pt-1">
+                  {!order.startedAt && (
+                    <Button size="sm" className="w-full" disabled={startMutation.isPending} onClick={() => startMutation.mutate()} data-testid="button-start-processing">
+                      {startMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Play className="h-3 w-3 mr-1" />}
+                      Start Processing
+                    </Button>
                   )}
-                  {order.assignedBy && (
-                    <p className="text-xs text-muted-foreground">by {order.assignedBy}</p>
+                  {order.startedAt && !order.completedProcessingAt && (
+                    <Button size="sm" className="w-full bg-green-600 hover:bg-green-700" disabled={completeMutation.isPending} onClick={() => completeMutation.mutate()} data-testid="button-complete-processing">
+                      {completeMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <CheckCheck className="h-3 w-3 mr-1" />}
+                      Mark Done
+                    </Button>
                   )}
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">Not assigned to anyone</p>
               )}
+
+              {/* Admin controls */}
               {isAdmin && (
-                <div className="space-y-2 pt-1">
-                  <Select
-                    value={assignTarget || order.assignedTo || ""}
-                    onValueChange={setAssignTarget}
-                  >
+                <div className="space-y-2 pt-1 border-t">
+                  <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide pt-1">Admin Controls</p>
+                  <Select value={assignTarget} onValueChange={setAssignTarget}>
                     <SelectTrigger className="w-full" data-testid="select-assign-user">
-                      <SelectValue placeholder="Assign to..." />
+                      <SelectValue placeholder={order.assignedTo ? "Reassign to..." : "Assign to..."} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__unassign__">— Unassign —</SelectItem>
                       {allUsers.map((u) => (
                         <SelectItem key={u.username} value={u.username}>
                           {u.username} <span className="text-muted-foreground text-xs">({u.role})</span>
@@ -570,16 +662,28 @@ export default function OrderDetailPage() {
                     className="w-full"
                     disabled={!assignTarget || assignMutation.isPending}
                     onClick={() => {
-                      const target = assignTarget === "__unassign__" ? "" : assignTarget;
-                      const found = allUsers.find((u) => u.username === target);
-                      assignMutation.mutate({ username: target, displayName: found?.username || target });
+                      const found = allUsers.find((u) => u.username === assignTarget);
+                      assignMutation.mutate({ username: assignTarget, displayName: found?.username || assignTarget });
                       setAssignTarget("");
                     }}
                     data-testid="button-save-assign"
                   >
-                    {assignMutation.isPending ? <Loader2 className="animate-spin mr-1 h-3 w-3" /> : null}
-                    Save Assignment
+                    {assignMutation.isPending ? <Loader2 className="animate-spin mr-1 h-3 w-3" /> : <UserCheck className="h-3 w-3 mr-1" />}
+                    {order.assignedTo ? "Reassign" : "Assign"}
                   </Button>
+                  {order.assignedTo && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full text-destructive border-destructive/30 hover:bg-destructive/10"
+                      disabled={unassignMutation.isPending}
+                      onClick={() => unassignMutation.mutate()}
+                      data-testid="button-unassign"
+                    >
+                      {unassignMutation.isPending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <UserX className="h-3 w-3 mr-1" />}
+                      Unassign
+                    </Button>
+                  )}
                 </div>
               )}
             </CardContent>

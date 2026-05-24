@@ -1199,7 +1199,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const {
         status, search, page = "1", pageSize = "20",
-        assignedTo, assignedToMe,
+        assignedTo, assignedToMe, pool,
         paymentStatus, orderType, orderChannel, fulfillmentStatus,
         dateFrom, dateTo,
       } = req.query as Record<string, string>;
@@ -1213,17 +1213,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         { trackingNumber: { $regex: search, $options: "i" } },
         { customerName: { $regex: search, $options: "i" } },
       ];
-      if (assignedToMe === "true") filter.assignedTo = req.user!.username;
-      else if (assignedTo) filter.assignedTo = assignedTo;
+      if (pool === "true") {
+        // Unassigned pending orders (claimable pool), FIFO oldest first
+        filter.$or = [{ assignedTo: "" }, { assignedTo: { $exists: false } }, { assignedTo: null }];
+        filter.fulfillmentStatus = "pending";
+        filter.orderType = { $nin: ["online_reservation", "walkin_reservation"] };
+      } else {
+        if (assignedToMe === "true") filter.assignedTo = req.user!.username;
+        else if (assignedTo) filter.assignedTo = assignedTo;
+      }
       if (dateFrom || dateTo) {
         filter.createdAt = {};
         if (dateFrom) filter.createdAt.$gte = new Date(dateFrom);
         if (dateTo) filter.createdAt.$lte = new Date(dateTo + "T23:59:59.999Z");
       }
 
+      const sortOrder = pool === "true" ? { createdAt: 1 as const } : { createdAt: -1 as const };
       const skip = (parseInt(page) - 1) * parseInt(pageSize);
       const [orders, total] = await Promise.all([
-        Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(parseInt(pageSize)),
+        Order.find(filter).sort(sortOrder).skip(skip).limit(parseInt(pageSize)),
         Order.countDocuments(filter),
       ]);
       return ok(res, { orders, total, page: parseInt(page), pageSize: parseInt(pageSize) });
@@ -1298,19 +1306,213 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── ORDER ASSIGNMENT ───────────────────────────────────
+  // Admin assigns or reassigns
   app.post("/api/orders/:id/assign", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
       const { username, displayName } = req.body;
       const order = await Order.findById(req.params.id);
       if (!order) return fail(res, 404, "Order not found");
+
+      const previousAssignedTo = order.assignedTo || "";
+      const isReassignment = !!previousAssignedTo && previousAssignedTo !== username;
+
       order.assignedTo = username || "";
       order.assignedToName = displayName || username || "";
       order.assignedAt = username ? new Date() : undefined;
       order.assignedBy = username ? req.user!.username : "";
+      if (username) {
+        (order as any).startedAt = undefined;
+        (order as any).completedProcessingAt = undefined;
+      }
+      order.statusHistory.push({
+        status: username ? "assigned" : "unassigned",
+        timestamp: new Date(),
+        actor: req.user!.username,
+        note: username
+          ? isReassignment
+            ? `Reassigned from ${previousAssignedTo} to ${username}`
+            : `Assigned to ${username}`
+          : "Unassigned — returned to pool",
+      });
       await order.save();
-      await logAction("ORDER_ASSIGNED", req.user!.username, order.trackingNumber, { assignedTo: username || "unassigned" });
-      emitEvent("ORDER_ASSIGNED", { orderId: order._id });
+
+      const actionKey = isReassignment ? "ORDER_REASSIGNED" : (username ? "ORDER_ASSIGNED" : "ORDER_UNASSIGNED");
+      await logAction(actionKey, req.user!.username, order.trackingNumber, {
+        assignedTo: username || "unassigned",
+        previousAssignedTo,
+      });
+
+      emitEvent("order:assigned", {
+        orderId: order._id.toString(),
+        trackingNumber: order.trackingNumber,
+        assignedTo: username || "",
+        assignedBy: req.user!.username,
+        customerName: order.customerName,
+        items: order.items.map((i) => ({ itemName: i.itemName, qty: i.qty })),
+        totalAmount: order.totalAmount,
+        paymentMethod: order.paymentMethod,
+        orderType: order.orderType,
+        notes: order.notes || "",
+        isReassignment,
+        previousAssignedTo,
+      });
       return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Admin unassigns — returns order to pool
+  app.delete("/api/orders/:id/assign", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      const previousAssignedTo = order.assignedTo || "";
+      order.assignedTo = "";
+      order.assignedToName = "";
+      order.assignedAt = undefined;
+      order.assignedBy = "";
+      (order as any).startedAt = undefined;
+      (order as any).completedProcessingAt = undefined;
+      order.statusHistory.push({
+        status: "unassigned",
+        timestamp: new Date(),
+        actor: req.user!.username,
+        note: `Returned to pool by ${req.user!.username}`,
+      });
+      await order.save();
+      await logAction("ORDER_UNASSIGNED", req.user!.username, order.trackingNumber, { previousAssignedTo });
+      emitEvent("order:unassigned", {
+        orderId: order._id.toString(),
+        trackingNumber: order.trackingNumber,
+        previousAssignedTo,
+        actor: req.user!.username,
+      });
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Employee self-claim from pool (task-locked for employees)
+  app.post("/api/orders/:id/claim", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      if (order.fulfillmentStatus !== "pending") return fail(res, 409, "Order is no longer pending");
+      if (order.assignedTo) return fail(res, 409, "Order is already claimed");
+
+      const me = req.user!.username;
+      const isAdmin = req.user!.role === "ADMIN";
+
+      // Task lock: employees can only hold one active order at a time
+      if (!isAdmin) {
+        const blocking = await Order.findOne({
+          assignedTo: me,
+          completedProcessingAt: null,
+          fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+        }).select("trackingNumber").lean();
+        if (blocking) {
+          return fail(res, 403, `You must complete your current assigned order (${blocking.trackingNumber}) before claiming a new one.`);
+        }
+      }
+
+      order.assignedTo = me;
+      order.assignedToName = me;
+      order.assignedAt = new Date();
+      order.assignedBy = me;
+      (order as any).startedAt = undefined;
+      (order as any).completedProcessingAt = undefined;
+      order.statusHistory.push({
+        status: "claimed",
+        timestamp: new Date(),
+        actor: me,
+        note: `Claimed from pool by ${me}`,
+      });
+      await order.save();
+      await logAction("ORDER_CLAIMED", me, order.trackingNumber, { claimedBy: me });
+      emitEvent("order:assigned", {
+        orderId: order._id.toString(),
+        trackingNumber: order.trackingNumber,
+        assignedTo: me,
+        assignedBy: me,
+        customerName: order.customerName,
+        items: order.items.map((i) => ({ itemName: i.itemName, qty: i.qty })),
+        totalAmount: order.totalAmount,
+        paymentMethod: order.paymentMethod,
+        orderType: order.orderType,
+        notes: order.notes || "",
+        isReassignment: false,
+        previousAssignedTo: "",
+      });
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Start processing — only the assignee
+  app.post("/api/orders/:id/start-processing", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      const me = req.user!.username;
+      if (order.assignedTo !== me && req.user!.role !== "ADMIN") {
+        return fail(res, 403, "Only the assigned user can start processing this order");
+      }
+      (order as any).startedAt = new Date();
+      if (order.fulfillmentStatus === "pending") order.fulfillmentStatus = "processing";
+      order.statusHistory.push({
+        status: "processing",
+        timestamp: new Date(),
+        actor: me,
+        note: "Started processing",
+      });
+      await order.save();
+      await logAction("ORDER_PROCESSING_STARTED", me, order.trackingNumber, {});
+      emitEvent("order:status-changed", { orderId: order._id.toString(), fulfillmentStatus: order.fulfillmentStatus, assignedTo: order.assignedTo });
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Complete processing — only the assignee; unlocks task lock
+  app.post("/api/orders/:id/complete-processing", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      const me = req.user!.username;
+      if (order.assignedTo !== me && req.user!.role !== "ADMIN") {
+        return fail(res, 403, "Only the assigned user can complete processing this order");
+      }
+      (order as any).completedProcessingAt = new Date();
+      if (["pending", "processing"].includes(order.fulfillmentStatus)) order.fulfillmentStatus = "ready";
+      order.statusHistory.push({
+        status: "ready",
+        timestamp: new Date(),
+        actor: me,
+        note: "Processing complete — order is ready",
+      });
+      await order.save();
+      await logAction("ORDER_PROCESSING_COMPLETED", me, order.trackingNumber, {});
+      emitEvent("order:status-changed", { orderId: order._id.toString(), fulfillmentStatus: order.fulfillmentStatus, assignedTo: order.assignedTo });
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // My active order (for task-lock check on the client)
+  app.get("/api/orders/my-active", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const me = req.user!.username;
+      const active = await Order.findOne({
+        assignedTo: me,
+        completedProcessingAt: null,
+        fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+      }).lean();
+      return ok(res, { order: active || null });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

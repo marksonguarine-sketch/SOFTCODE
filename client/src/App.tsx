@@ -26,6 +26,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Tutorial } from "@/components/tutorial";
 import { Checkbox } from "@/components/ui/checkbox";
 import { GraduationCap } from "lucide-react";
+import { useSocketNotifications } from "@/hooks/use-socket-notifications";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -199,6 +200,9 @@ function GlobalSearch() {
 function AuthenticatedLayout() {
   const { logout, user, isAdmin } = useAuth();
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+
+  // Global Socket.io listeners — TTS + toast for assignment events
+  useSocketNotifications({ username: user?.username || "", enabled: !!user });
   const [showTutorialPrompt, setShowTutorialPrompt] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);

@@ -839,6 +839,240 @@ Full overhaul of the Accounting page with:
 
 ---
 
+## Recent Updates — Order Assignment System (2026-05-24)
+
+This section documents the full Order Assignment System added in Session 2, Part A. It covers new model fields, all new API routes, the TTS notification system, Socket.io hook, and overhauled order-management UI.
+
+---
+
+### `server/models/Order.ts` (UPDATED)
+
+Two new optional timestamp fields added to the Order model:
+
+| Field | Type | Description |
+|---|---|---|
+| `startedAt` | `Date?` | Set when the assigned employee clicks "Start Processing". Triggers `fulfillmentStatus → processing`. |
+| `completedProcessingAt` | `Date?` | Set when the employee clicks "Mark Done". Triggers `fulfillmentStatus → ready`. **This also unlocks the task-lock** — the employee can then claim another order from the pool. |
+
+These join the existing assignment fields (`assignedTo`, `assignedToName`, `assignedAt`, `assignedBy`) to form a full lifecycle chain.
+
+---
+
+### `shared/schema.ts` (UPDATED)
+
+#### `IOrder` interface additions
+```typescript
+startedAt?: string;
+completedProcessingAt?: string;
+```
+
+#### New event interfaces
+
+**`IOrderAssignedEvent`** — emitted as Socket.io `order:assigned`:
+```typescript
+export interface IOrderAssignedEvent {
+  orderId: string;
+  trackingNumber: string;
+  assignedTo: string;
+  assignedBy: string;
+  customerName: string;
+  items: Array<{ itemName: string; qty: number }>;
+  totalAmount: number;
+  paymentMethod: string;
+  orderType: string;
+  notes?: string;
+  isReassignment: boolean;
+  previousAssignedTo?: string;
+}
+```
+
+**`IOrderUnassignedEvent`** — emitted as Socket.io `order:unassigned`:
+```typescript
+export interface IOrderUnassignedEvent {
+  orderId: string;
+  trackingNumber: string;
+  previousAssignedTo: string;
+  actor: string;
+}
+```
+
+---
+
+### `server/routes.ts` (UPDATED — new routes)
+
+#### `GET /api/orders?pool=true`
+Returns all unassigned, pending, non-reservation orders sorted FIFO (oldest first). Used by the employee pool view and admin pool section.
+
+Filter logic:
+```typescript
+filter.assignedTo = { $in: ["", null] };   // or field does not exist
+filter.fulfillmentStatus = "pending";
+filter.isReservation = { $ne: true };
+```
+Sort: `{ createdAt: 1 }` (FIFO).
+
+#### `POST /api/orders/:id/assign` (UPDATED)
+Now detects reassignment by checking if `order.assignedTo` is already set. On reassignment:
+- Saves `previousAssignedTo` into event payload
+- Clears `startedAt` and `completedProcessingAt` (resets processing state for the new assignee)
+- Appends a `statusHistory` entry noting the reassignment
+- Emits `order:assigned` with `isReassignment: true`
+
+#### `DELETE /api/orders/:id/assign` (NEW — admin only)
+Returns the order to the unassigned pool. Auth: admin only (403 otherwise).
+- Clears `assignedTo`, `assignedToName`, `assignedAt`, `assignedBy`, `startedAt`, `completedProcessingAt`
+- Appends statusHistory entry
+- Emits `order:unassigned` with `{ orderId, trackingNumber, previousAssignedTo, actor }`
+
+#### `POST /api/orders/:id/claim` (NEW)
+Self-assignment by an employee. Auth: any authenticated user.
+
+**Task-lock check** (employees only — admins bypass):
+```typescript
+const blockingOrder = await Order.findOne({
+  assignedTo: username,
+  completedProcessingAt: null,
+  fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+});
+if (blockingOrder) {
+  return res.status(403).json({ message: `Complete order ${blockingOrder.trackingNumber} first` });
+}
+```
+On success: sets `assignedTo`, `assignedToName`, `assignedAt`, `assignedBy` (self). Appends statusHistory. Emits `order:assigned` with `isReassignment: false`.
+
+#### `POST /api/orders/:id/start-processing` (NEW)
+Sets `startedAt = new Date()` and changes `fulfillmentStatus` to `"processing"`. Auth: assignee or admin. Appends statusHistory. No Socket.io emit (UI handles it via polling).
+
+#### `POST /api/orders/:id/complete-processing` (NEW)
+Sets `completedProcessingAt = new Date()` and changes `fulfillmentStatus` to `"ready"`. Auth: assignee or admin. **This unlocks the task-lock** — after this call, the employee can claim a new order from the pool. Appends statusHistory.
+
+#### `GET /api/orders/my-active` (NEW)
+Returns the single "blocking order" for the current user:
+```typescript
+const blockingOrder = await Order.findOne({
+  assignedTo: username,
+  completedProcessingAt: null,
+  fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+});
+```
+Response: `{ success: true, data: { order: blockingOrder | null } }`
+
+---
+
+### `client/src/lib/tts.ts` (UPDATED)
+
+#### New functions
+
+**`buildAssignmentTTSScript(event: IOrderAssignedEvent): string`**
+
+Generates a TTS announcement script for order assignment. Handles three cases:
+
+1. **Reassignment** (`event.isReassignment === true`): "Attention [assignee]. [assigner] has reassigned order [TN] to you. Previously assigned to [prev]. Customer: [name]. N items: [list]. Total: [amount] pesos. Payment: [method]. Order type: [type]. Please review..."
+
+2. **Self-claim** (`event.assignedBy === event.assignedTo`): "You have claimed order [TN]. Customer: [name]. N items totaling [amount] pesos. [Payment] payment. You may now start processing."
+
+3. **Normal assignment**: "Attention [assignee]. [assigner] has assigned you a new order. Tracking: [TN]. Customer: [name]. N items: [list]. Total: [amount]. Payment: [method]. Please start processing."
+
+Uses `buildItemsSummary()` to list up to 3 items and say "and N more" for overflow. Uses `formatAmountForTTS()` for currency.
+
+**`buildUnassignmentTTSScript(event: IOrderUnassignedEvent): string`**
+
+"Notice. [actor] has removed your assignment on order [TN]. This order has been returned to the pending pool."
+
+---
+
+### `client/src/hooks/use-socket-notifications.ts` (NEW)
+
+Global Socket.io event listener hook. Mounted once at the top level of `AuthenticatedLayout` so all pages receive real-time events without per-page setup.
+
+**Connection**: `io({ transports: ["websocket", "polling"] })` — falls back to polling if WebSocket is unavailable.
+
+**Events handled**:
+
+| Event | Cache invalidation | TTS + toast |
+|---|---|---|
+| `order:assigned` | `/api/orders` | Only if `data.assignedTo === username` |
+| `order:unassigned` | `/api/orders` | Only if `data.previousAssignedTo === username` |
+| `order:status-changed` | `/api/orders` | Never |
+| `order:created` | `/api/orders`, `/api/dashboard/stats` | Never |
+| `billing:payment` | `/api/orders`, `/api/dashboard/stats` | Never |
+
+The `username` and `enabled` parameters are passed from `AuthenticatedLayout` — the hook does nothing until a user is authenticated.
+
+---
+
+### `client/src/App.tsx` (UPDATED)
+
+`AuthenticatedLayout` now mounts `useSocketNotifications`:
+```typescript
+useSocketNotifications({ username: user?.username || "", enabled: !!user });
+```
+This is the single source of truth for Socket.io — it replaces all previous per-page socket connections.
+
+---
+
+### `client/src/pages/orders.tsx` (MAJOR UPDATE)
+
+#### New queries
+- `GET /api/orders?pool=true` → `poolData` — unassigned pending orders
+- `GET /api/orders/my-active` → `myActiveData` — blocking order (employee task-lock check)
+
+#### New mutations
+- **`claimMutation`** — `POST /api/orders/:id/claim`. Disabled if `isTaskLocked`. Invalidates assigned, pool, and my-active caches on success.
+- **`startMutation`** — `POST /api/orders/:id/start-processing`. Shown on assigned cards where `fulfillmentStatus === "pending"` and `startedAt` is null.
+- **`completeMutation`** — `POST /api/orders/:id/complete-processing`. Shown on assigned cards where `startedAt` is set but `completedProcessingAt` is null.
+
+#### New computed state
+```typescript
+const poolOrders = poolData?.data?.orders || [];
+const myBlockingOrder = myActiveData?.data?.order || null;
+const isTaskLocked = !isAdmin && !!myBlockingOrder;
+```
+
+#### Employee view changes
+**"Assigned to You" section**: Cards now show:
+- **Start Processing button** — visible when `fulfillmentStatus === "pending"` and `startedAt` is null. Calls `startMutation`.
+- **Mark Done button** (green) — visible when `startedAt` is set and `completedProcessingAt` is null. Calls `completeMutation`.
+- `startedAt` timestamp is shown if set.
+
+**"Pending Pool" section**: Now uses `poolOrders` (from `?pool=true` query) instead of the full orders list.
+- **Claim button** on each pool card — disabled when `isTaskLocked`. Calls `claimMutation`.
+- Task-lock warning banner shows the blocking order's tracking number.
+
+#### Admin view changes
+New **"Pending Pool"** section added above the main orders table. Shows all unassigned pending orders in a compact table with an **Assign To** dropdown per row. Uses the new `PoolAdminRow` sub-component.
+
+#### New sub-component: `PoolAdminRow`
+Renders one row in the admin pool table. Has its own `assignVal` state for the dropdown. Calls `onAssign(username)` from the parent's `assignMutation`.
+
+---
+
+### `client/src/pages/order-detail.tsx` (UPDATED)
+
+#### New mutations
+- **`unassignMutation`** — `DELETE /api/orders/:id/assign`. Admin-only. Returns order to pool and invalidates pool cache.
+- **`startMutation`** — `POST /api/orders/:id/start-processing`. Available to the assigned user.
+- **`completeMutation`** — `POST /api/orders/:id/complete-processing`. Available to the assigned user.
+
+#### Assignment Card overhaul
+The right-column "Assignment" card now shows a **3-step lifecycle tracker**:
+
+1. **Assigned step** — highlighted (blue border/background) if `order.assignedTo` is set. Shows assignee name, assign timestamp, and "by [assigner]". Shows "Unassigned / Waiting in the pool" when empty.
+
+2. **Processing Started step** — highlighted (blue) if `order.startedAt` is set. Shows timestamp.
+
+3. **Processing Complete step** — highlighted (green) if `order.completedProcessingAt` is set. Shows timestamp.
+
+**Assignee action buttons** (visible only when `order.assignedTo === user?.username`):
+- "Start Processing" button — shown when `startedAt` is null
+- "Mark Done" button (green) — shown when `startedAt` is set but `completedProcessingAt` is null
+
+**Admin controls** (shown to admins below a divider):
+- Assign/Reassign dropdown + button (re-uses `assignMutation`)
+- "Unassign" button (red-bordered, uses `unassignMutation`) — shown only when an assignee exists
+
+---
+
 ## Build Status (2026-05-24)
 
 - `npm run check` — **0 TypeScript errors** ✓
