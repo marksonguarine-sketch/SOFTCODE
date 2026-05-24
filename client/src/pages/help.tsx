@@ -150,7 +150,12 @@ export default function HelpPage() {
 
   const messageMutation = useMutation({
     mutationFn: async (data: MessageInput) => {
-      const res = await apiRequest("POST", "/api/messages", data);
+      // Send to admin role (server side picks an admin user); using "admin" as recipient
+      const res = await apiRequest("POST", "/api/messages", {
+        toUsername: "admin",
+        subject: data.subject,
+        body: data.message,
+      });
       return res.json();
     },
     onSuccess: () => {
@@ -258,6 +263,8 @@ export default function HelpPage() {
             </CardContent>
           </Card>
 
+          {isEmployee && <InboxFromAdmin />}
+
           {isEmployee && (
             <Card>
               <CardHeader>
@@ -353,5 +360,62 @@ export default function HelpPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// Employee inbox showing messages from admin
+function InboxFromAdmin() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { data, isLoading } = useQuery<{ success: boolean; data: any[] }>({
+    queryKey: ["/api/messages"],
+  });
+  const messages = (data?.data || []).filter((m: any) => m.direction === "ADMIN_TO_EMPLOYEE");
+
+  const markReadMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("PATCH", `/api/messages/${id}/read`);
+      return res.json();
+    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/messages"] }); },
+  });
+
+  if (isLoading) return null;
+  if (messages.length === 0) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base flex items-center gap-2">
+          <Mail className="h-4 w-4" />Messages from Admin
+          {messages.filter((m: any) => !m.isRead).length > 0 && (
+            <Badge className="bg-blue-500 text-white border-transparent text-xs">
+              {messages.filter((m: any) => !m.isRead).length} new
+            </Badge>
+          )}
+        </CardTitle>
+        <CardDescription>Internal messages sent to you by the admin team.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
+        {messages.map((msg: any) => (
+          <div
+            key={msg._id}
+            className={`border rounded-md p-3 space-y-1 ${msg.isRead ? "opacity-60" : "border-primary/40 bg-primary/5"}`}
+            data-testid={`msg-from-admin-${msg._id}`}
+            onClick={() => !msg.isRead && markReadMutation.mutate(msg._id)}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="text-xs">From: {msg.fromUsername}</Badge>
+                {msg.subject && <span className="text-xs font-medium">{msg.subject}</span>}
+              </div>
+              <span className="text-xs text-muted-foreground">{new Date(msg.createdAt).toLocaleString("en-PH")}</span>
+            </div>
+            <p className="text-sm">{msg.body}</p>
+            {!msg.isRead && <Badge className="text-[10px] bg-blue-500 text-white border-transparent">NEW</Badge>}
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }

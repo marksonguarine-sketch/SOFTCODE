@@ -1,0 +1,410 @@
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development ./node_modules/.bin/tsx server/index.ts
+
+[1G[0K7:18:01 AM [mongoose] Connected to MongoDB
+7:18:03 AM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 7 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+7:22:45 AM [express] POST /api/auth/login 200 in 576ms :: {"success":true,"data":{"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2OWVmMTQ0MTZiMWZhOTA5OTEzZWY1MzgiLCJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzc5NTIwOTY1LCJleHAiOjE3Nzk2MD
+7:22:49 AM [express] GET /api/auth/me 200 in 783ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+7:22:49 AM [express] GET /api/dashboard/stats 200 in 889ms :: {"success":true,"data":{"totalOrdersToday":3,"completedOrders":0,"pendingPayments":8,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowStoc
+7:22:49 AM [express] GET /api/dashboard/advanced 200 in 946ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,9,0,0,0,0,0,0,0]},"customers":{"total":9,"trend"
+7:22:49 AM [express] GET /api/dashboard/advanced 200 in 1287ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0,
+7:22:50 AM [express] GET /api/settings 200 in 375ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"_id":"69ef14426b1fa909913ef575","companyName":
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:24:13 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/dashboard.tsx, /src/index.css[22m
+7:24:19 AM [express] GET /api/auth/me 304 in 377ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+7:24:24 AM [express] GET /api/dashboard/stats 200 in 1299ms :: {"success":true,"data":{"totalOrdersToday":3,"completedOrders":0,"pendingPayments":8,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowStoc
+7:24:24 AM [express] GET /api/settings 304 in 476ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"_id":"69ef14426b1fa909913ef575","companyName":
+7:24:24 AM [express] GET /api/dashboard/advanced 200 in 703ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0,
+7:24:24 AM [express] GET /api/dashboard/advanced 304 in 1166ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,9,0,0,0,0,0,0,0]},"customers":{"total":9,"trend"
+7:27:45 AM [express] POST /api/auth/login 200 in 561ms :: {"success":true,"data":{"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2OWVmMTQ0MTZiMWZhOTA5OTEzZWY1MzgiLCJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzc5NTIxMjY1LCJleHAiOjE3Nzk2MD
+7:27:50 AM [express] GET /api/dashboard/advanced 200 in 594ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0,
+7:27:50 AM [express] GET /api/dashboard/advanced 200 in 676ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,9,0,0,0,0,0,0,0]},"customers":{"total":9,"trend"
+7:27:50 AM [express] GET /api/settings 200 in 415ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"_id":"69ef14426b1fa909913ef575","companyName":
+7:27:50 AM [express] GET /api/auth/me 200 in 408ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+7:27:51 AM [express] GET /api/dashboard/stats 200 in 1169ms :: {"success":true,"data":{"totalOrdersToday":3,"completedOrders":0,"pendingPayments":8,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowStoc
+7:27:54 AM [express] GET /api/dashboard/calendar-heatmap 200 in 369ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-23":{"orders":3,"orderValue":3185,"payments":0,"revenue":0},"2026-05-22":{"orders":2,"orderValue":6203,"payments":0,"revenue":0},"2026
+7:28:10 AM [express] GET /api/reservations 200 in 366ms :: {"success":true,"data":[{"_id":"6a11273ab293f4074bc7bf61","trackingNumber":"JOAP-MPHTQR42-WBXK","customerName":"juan","items":[{"itemId":"69ef14426b1fa909913ef553","itemName":"Paint Latex White 4L","q
+7:28:24 AM [express] GET /api/auth/me 401 in 91ms :: {"success":false,"error":"Session expired or invalid"}
+7:29:39 AM [express] GET /api/orders 200 in 370ms :: {"success":true,"data":{"orders":[{"_id":"6a112bf7b293f4074bc7c2a9","trackingNumber":"JOAP-MPHUGQUK-B3JX","customerName":"marwin ebonaz","items":[{"itemId":"69ef14426b1fa909913ef554","itemName":"PVC P
+7:29:39 AM [express] GET /api/items/all 200 in 364ms :: {"success":true,"data":[{"_id":"6a06644343e4c767bda085ae","itemName":"Aa","category":"Aa","supplierName":"Aa","unitPrice":290,"currentQuantity":50,"reorderLevel":5,"barcode":"","imageFilename":"","ima
+7:29:39 AM [express] GET /api/users/simple 200 in 361ms :: {"success":true,"data":[{"_id":"69ef14416b1fa909913ef538","username":"admin","role":"ADMIN"},{"_id":"69ef14416b1fa909913ef539","username":"employee","role":"ADMIN"},{"_id":"6a0fc51c9cec3251e2993f97","
+7:32:47 AM [express] GET /api/dashboard/calendar-heatmap 200 in 431ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-13":{"orders":2,"orderValue":1029,"payments":1,"revenue":1000},"2026-05-15":{"orders":1,"orderValue":10280,"payments":0,"revenue":0},"
+7:32:47 AM [express] GET /api/dashboard/stats 200 in 1308ms :: {"success":true,"data":{"totalOrdersToday":3,"completedOrders":0,"pendingPayments":8,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowStoc
+7:32:47 AM [express] GET /api/dashboard/advanced 200 in 553ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0,
+7:32:47 AM [express] GET /api/dashboard/advanced 200 in 1134ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":9,"trend":0,"sparkline":[0,0,0,0,9,0,0,0,0,0,0,0]},"customers":{"total":9,"trend"
+7:32:52 AM [express] GET /api/items/categories 200 in 368ms :: {"success":true,"data":["Aa","Aggregates","Cement","Masonry","Nails","Paint","Plumbing","Steel","Tubes","Wire","Wood","nails","sample","tools","unhinged home design"]}
+7:32:52 AM [express] GET /api/items 200 in 370ms :: {"success":true,"data":{"items":[{"avgDailyUsage":0,"leadTimeDays":0,"safetyStock":0,"_id":"6a06644343e4c767bda085ae","itemName":"Aa","category":"Aa","supplierName":"Aa","unitPrice":290,"currentQuanti
+7:32:52 AM [express] GET /api/offers 200 in 364ms :: {"success":true,"data":{"offers":[],"total":0,"page":1,"pageSize":100}}
+7:32:52 AM [express] GET /api/image-approvals 200 in 457ms :: {"success":true,"data":[]}
+7:32:53 AM [express] GET /api/orders 304 in 370ms :: {"success":true,"data":{"orders":[{"_id":"6a112bf7b293f4074bc7c2a9","trackingNumber":"JOAP-MPHUGQUK-B3JX","customerName":"marwin ebonaz","items":[{"itemId":"69ef14426b1fa909913ef554","itemName":"PVC P
+7:32:57 AM [express] GET /api/items/all 304 in 370ms :: {"success":true,"data":[{"_id":"6a06644343e4c767bda085ae","itemName":"Aa","category":"Aa","supplierName":"Aa","unitPrice":290,"currentQuantity":50,"reorderLevel":5,"barcode":"","imageFilename":"","ima
+7:32:57 AM [express] GET /api/users/simple 304 in 370ms :: {"success":true,"data":[{"_id":"69ef14416b1fa909913ef538","username":"admin","role":"ADMIN"},{"_id":"69ef14416b1fa909913ef539","username":"employee","role":"ADMIN"},{"_id":"6a0fc51c9cec3251e2993f97","
+7:34:50 AM [express] GET /api/reservations 304 in 373ms :: {"success":true,"data":[{"_id":"6a11273ab293f4074bc7bf61","trackingNumber":"JOAP-MPHTQR42-WBXK","customerName":"juan","items":[{"itemId":"69ef14426b1fa909913ef553","itemName":"Paint Latex White 4L","q
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:45:40 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/login.tsx, /src/pages/inventory.tsx, /src/pages/order-detail.tsx, /src/pages/users.tsx, /src/pages/orders.tsx, /src/pages/settings.tsx, /src/pages/accounting.tsx, /src/pages/offers.tsx[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:45:40 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/login.tsx, /src/pages/inventory.tsx, /src/pages/order-detail.tsx, /src/pages/users.tsx, /src/pages/orders.tsx, /src/pages/settings.tsx, /src/pages/accounting.tsx, /src/pages/offers.tsx[22m [33m(x2)[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:15 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:26 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m [33m(x2)[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:32 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m [33m(x3)[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:44 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m [33m(x4)[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:47 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m [33m(x5)[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:49 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m [33m(x6)[39m
+[replit-cartographer] Error processing /home/runner/workspace/client/src/pages/orders.tsx: SyntaxError: Expected corresponding JSX closing tag for <DialogContent>. (558:8)
+    at toParseError [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parse-error.ts:95:45[90m)[39m
+    at raise [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/tokenizer/index.ts:1503:19[90m)[39m
+    at jsxParseElementAt [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/jsx/index.ts:519:16[90m)[39m
+    at jsxParseElementAt [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/jsx/index.ts:483:34[90m)[39m
+    at jsxParseElement [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/jsx/index.ts:559:19[90m)[39m
+    at parseExprAtom [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/jsx/index.ts:573:21[90m)[39m
+    at parseExprSubscripts [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:734:23[90m)[39m
+    at parseUpdate [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:713:21[90m)[39m
+    at parseMaybeUnary [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:675:23[90m)[39m
+    at parseMaybeUnary [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:3855:20[90m)[39m
+    at parseMaybeUnaryOrPrivate [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:409:14[90m)[39m
+    at parseExprOps [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:421:23[90m)[39m
+    at parseMaybeConditional [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:376:23[90m)[39m
+    at parseMaybeAssign [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:301:21[90m)[39m
+    at fn [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:3708:23[90m)[39m
+    at tryParse [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/util.ts:174:20[90m)[39m
+    at parseMaybeAssign [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:3707:20[90m)[39m
+    at callback [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:257:12[90m)[39m
+    at allowInAnd [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:3192:12[90m)[39m
+    at parseMaybeAssignAllowIn [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:256:17[90m)[39m
+    at parseMaybeAssignAllowInOrVoidPattern [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:3306:17[90m)[39m
+    at parseParenAndDistinguishExpression [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:1813:16[90m)[39m
+    at parseExprAtom [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:1162:21[90m)[39m
+    at parseExprAtom [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/jsx/index.ts:583:22[90m)[39m
+    at parseExprSubscripts [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:734:23[90m)[39m
+    at parseUpdate [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:713:21[90m)[39m
+    at parseMaybeUnary [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:675:23[90m)[39m
+    at parseMaybeUnary [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:3855:20[90m)[39m
+    at parseMaybeUnaryOrPrivate [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:409:14[90m)[39m
+    at parseExprOps [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:421:23[90m)[39m
+    at parseMaybeConditional [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:376:23[90m)[39m
+    at parseMaybeAssign [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:301:21[90m)[39m
+    at parseMaybeAssign [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:3727:22[90m)[39m
+    at parseExpressionBase [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:226:23[90m)[39m
+    at callback [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:217:39[90m)[39m
+    at allowInAnd [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:3187:16[90m)[39m
+    at parseExpression [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:217:17[90m)[39m
+    at parseReturnStatement [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:1110:28[90m)[39m
+    at parseStatementContent [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:538:21[90m)[39m
+    at parseStatementContent [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:3185:20[90m)[39m
+    at parseStatementLike [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:477:17[90m)[39m
+    at parseStatementListItem [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:426:17[90m)[39m
+    at parseBlockOrModuleBlockBody [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:1439:16[90m)[39m
+    at parseBlockBody [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:1412:10[90m)[39m
+    at parseBlock [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:1380:10[90m)[39m
+    at parseFunctionBody [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:2616:24[90m)[39m
+    at parseFunctionBodyAndFinish [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:2585:10[90m)[39m
+    at parseFunctionBodyAndFinish [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/plugins/typescript/index.ts:2646:20[90m)[39m
+    at callback [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/statement.ts:1690:12[90m)[39m
+    at withSmartMixTopicForbiddingContext [90m(/home/runner/workspace/[39mnode_modules/[4m@babel/parser[24m/src/parser/expression.ts:3166:14[90m)[39m {
+  code: [32m'BABEL_PARSER_SYNTAX_ERROR'[39m,
+  reasonCode: [32m'MissingClosingTagElement'[39m,
+  loc: Position { line: [33m558[39m, column: [33m8[39m, index: [33m31398[39m },
+  pos: [33m31398[39m,
+  syntaxPlugin: [32m'jsx'[39m
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m7:46:49 AM[22m [31m[1m[vite][22m[39m [31mInternal server error: /home/runner/workspace/client/src/pages/orders.tsx: Expected corresponding JSX closing tag for <DialogContent>. (558:8)
+
+[0m [90m 556 |[31m           [33m<[31m[33m/[31m[33mdiv[31m[33m>[31m
+ [90m 557 |[31m         [33m<[31m[33m/[31m[33mdiv[31m[33m>[31m
+[31m[1m>[22m[31m[90m 558 |[31m         [33m<[31m[33m/[31m[33m>[31m
+ [90m     |[31m         [31m[1m^[22m[31m
+ [90m 559 |[31m         )}
+ [90m 560 |[31m       [33m<[31m[33m/[31m[33mDialogContent[31m[33m>[31m
+ [90m 561 |[31m     [33m<[31m[33m/[31m[33mDialog[31m[33m>[31m[0m[39m
+  Plugin: [35mvite:react-babel[39m
+  File: [36m/home/runner/workspace/client/src/pages/orders.tsx[39m:558:8
+[33m  556 |            </div>
+  557 |          </div>
+  558 |          </>
+      |          ^
+  559 |          )}
+  560 |        </DialogContent>[39m
+      at toParseError (/home/runner/workspace/node_modules/@babel/parser/src/parse-error.ts:95:45)
+      at raise (/home/runner/workspace/node_modules/@babel/parser/src/tokenizer/index.ts:1503:19)
+      at jsxParseElementAt (/home/runner/workspace/node_modules/@babel/parser/src/plugins/jsx/index.ts:519:16)
+      at jsxParseElementAt (/home/runner/workspace/node_modules/@babel/parser/src/plugins/jsx/index.ts:483:34)
+      at jsxParseElement (/home/runner/workspace/node_modules/@babel/parser/src/plugins/jsx/index.ts:559:19)
+      at parseExprAtom (/home/runner/workspace/node_modules/@babel/parser/src/plugins/jsx/index.ts:573:21)
+      at parseExprSubscripts (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+      at parseUpdate (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+      at parseMaybeUnary (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+      at parseMaybeUnary (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+      at parseMaybeUnaryOrPrivate (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+      at parseExprOps (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+      at parseMaybeConditional (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+      at parseMaybeAssign (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at fn (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:3708:23)
+      at tryParse (/home/runner/workspace/node_modules/@babel/parser/src/parser/util.ts:174:20)
+      at parseMaybeAssign (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:3707:20)
+      at callback (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:257:12)
+      at allowInAnd (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:3192:12)
+      at parseMaybeAssignAllowIn (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:256:17)
+      at parseMaybeAssignAllowInOrVoidPattern (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:3306:17)
+      at parseParenAndDistinguishExpression (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:1813:16)
+      at parseExprAtom (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:1162:21)
+      at parseExprAtom (/home/runner/workspace/node_modules/@babel/parser/src/plugins/jsx/index.ts:583:22)
+      at parseExprSubscripts (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:734:23)
+      at parseUpdate (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:713:21)
+      at parseMaybeUnary (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:675:23)
+      at parseMaybeUnary (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:3855:20)
+      at parseMaybeUnaryOrPrivate (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:409:14)
+      at parseExprOps (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:421:23)
+      at parseMaybeConditional (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:376:23)
+      at parseMaybeAssign (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:301:21)
+      at parseMaybeAssign (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:3727:22)
+      at parseExpressionBase (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:226:23)
+      at callback (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:217:39)
+      at allowInAnd (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:3187:16)
+      at parseExpression (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:217:17)
+      at parseReturnStatement (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:1110:28)
+      at parseStatementContent (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:538:21)
+      at parseStatementContent (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:3185:20)
+      at parseStatementLike (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:477:17)
+      at parseStatementListItem (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:426:17)
+      at parseBlockOrModuleBlockBody (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:1439:16)
+      at parseBlockBody (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:1412:10)
+      at parseBlock (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:1380:10)
+      at parseFunctionBody (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:2616:24)
+      at parseFunctionBodyAndFinish (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:2585:10)
+      at parseFunctionBodyAndFinish (/home/runner/workspace/node_modules/@babel/parser/src/plugins/typescript/index.ts:2646:20)
+      at callback (/home/runner/workspace/node_modules/@babel/parser/src/parser/statement.ts:1690:12)
+      at withSmartMixTopicForbiddingContext (/home/runner/workspace/node_modules/@babel/parser/src/parser/expression.ts:3166:14)
+[1G[0K⠙[1G[0K

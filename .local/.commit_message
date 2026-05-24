@@ -1,0 +1,20 @@
+Push local codebase to GitHub (blocked by missing credentials)
+
+Task: Resolve git rebase conflict in favor of local files and push 7 commits to GitHub main branch.
+
+Findings:
+- Rebase was already completed before task execution; working tree was clean.
+- 7 local commits ahead of origin/main, all ready to push.
+- git push origin main --force-with-lease failed with HTTP 128:
+  "Invalid username or token. Password authentication is not supported."
+- GitHub removed password auth in 2021; a Personal Access Token (PAT) with
+  repo scope is required to push via HTTPS.
+
+No code changes were made. The push could not be completed automatically
+because credentials are a user-held secret and cannot be stored or injected
+by the agent.
+
+Resolution for user:
+1. Generate a PAT at github.com/settings/tokens (classic, repo scope)
+2. Run: git remote set-url origin https://<TOKEN>@github.com/marksonguarine-sketch/SOFTCODE.git
+3. Run: git push origin main --force-with-lease

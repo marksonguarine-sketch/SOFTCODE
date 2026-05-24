@@ -1,0 +1,397 @@
+[1G[0K⠙[1G[0K
+> rest-express@1.0.0 dev
+> NODE_ENV=development ./node_modules/.bin/tsx server/index.ts
+
+[1G[0K⠙[1G[0K2:33:29 AM [mongoose] Connected to MongoDB
+2:33:31 AM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 7 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+2:33:36 AM [express] GET /api/auth/me 304 in 201ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+2:33:37 AM [express] GET /api/settings 304 in 596ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"ttsVoice":"en-US-AriaNeural","_id":"69ef14426b
+2:33:37 AM [express] GET /api/dashboard/stats 200 in 607ms :: {"success":true,"data":{"totalOrdersToday":0,"completedOrders":0,"pendingPayments":12,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowSto
+2:33:37 AM [express] GET /api/dashboard/advanced 200 in 782ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,13,0,0,0,0,0,0,0]},"customers":{"total":13,"tre
+2:33:37 AM [express] GET /api/dashboard/advanced 200 in 977ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0
+2:33:37 AM [express] GET /api/dashboard/calendar-heatmap 200 in 94ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-15":{"orders":1,"orderValue":10280,"payments":0,"revenue":0},"2026-05-22":{"orders":2,"orderValue":6203,"payments":0,"revenue":0},"202
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/dashboard.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/reservations.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/settings.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/settings.tsx, /src/pages/accounting.tsx, /src/pages/users.tsx, /src/pages/orders.tsx, /src/pages/login.tsx, /src/pages/order-detail.tsx, /src/pages/offers.tsx, /src/pages/inventory.tsx[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/dashboard.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/pages/orders.tsx, /src/pages/reservations.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/reservations.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/settings.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/pages/orders.tsx, /src/pages/reservations.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:35:35 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/settings.tsx, /src/pages/accounting.tsx, /src/pages/users.tsx, /src/pages/orders.tsx, /src/pages/login.tsx, /src/pages/order-detail.tsx, /src/pages/offers.tsx, /src/pages/inventory.tsx[22m
+2:35:38 AM [express] GET /api/dashboard/calendar-heatmap 200 in 293ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-15":{"orders":1,"orderValue":10280,"payments":0,"revenue":0},"2026-05-13":{"orders":2,"orderValue":1029,"payments":1,"revenue":1000},"
+2:35:38 AM [express] GET /api/dashboard/stats 200 in 638ms :: {"success":true,"data":{"totalOrdersToday":0,"completedOrders":0,"pendingPayments":12,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowSto
+2:35:38 AM [express] GET /api/dashboard/advanced 200 in 798ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0
+2:35:39 AM [express] GET /api/dashboard/advanced 200 in 1004ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,13,0,0,0,0,0,0,0]},"customers":{"total":13,"tre
+2:36:37 AM [express] GET /api/auth/me 304 in 200ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+2:36:37 AM [express] GET /api/settings 304 in 100ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"ttsVoice":"en-US-AriaNeural","_id":"69ef14426b
+2:36:38 AM [express] GET /api/dashboard/advanced 200 in 486ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0
+2:36:38 AM [express] GET /api/dashboard/advanced 200 in 581ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,13,0,0,0,0,0,0,0]},"customers":{"total":13,"tre
+2:36:38 AM [express] GET /api/dashboard/calendar-heatmap 200 in 95ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-07":{"orders":1,"orderValue":144,"payments":0,"revenue":0},"2026-05-22":{"orders":2,"orderValue":6203,"payments":0,"revenue":0},"2026-
+2:36:38 AM [express] GET /api/dashboard/stats 304 in 789ms :: {"success":true,"data":{"totalOrdersToday":0,"completedOrders":0,"pendingPayments":12,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowSto
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:43:01 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.tsx, /src/index.css[22m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m2:43:01 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/orders.tsx, /src/pages/reservations.tsx, /src/index.css[22m
+2:43:03 AM [express] GET /api/dashboard/calendar-heatmap 200 in 196ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-15":{"orders":1,"orderValue":10280,"payments":0,"revenue":0},"2026-05-13":{"orders":2,"orderValue":1029,"payments":1,"revenue":1000},"
+2:43:04 AM [express] GET /api/dashboard/advanced 200 in 505ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,13,0,0,0,0,0,0,0]},"customers":{"total":13,"tre
+2:43:04 AM [express] GET /api/dashboard/stats 200 in 293ms :: {"success":true,"data":{"totalOrdersToday":0,"completedOrders":0,"pendingPayments":12,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowSto
+2:43:04 AM [express] GET /api/dashboard/advanced 200 in 1494ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0
+2:43:38 AM [express] GET /api/auth/me 304 in 192ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+2:43:39 AM [express] GET /api/settings 304 in 103ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"ttsVoice":"en-US-AriaNeural","_id":"69ef14426b
+2:43:39 AM [express] GET /api/dashboard/stats 200 in 414ms :: {"success":true,"data":{"totalOrdersToday":0,"completedOrders":0,"pendingPayments":12,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowSto
+2:43:39 AM [express] GET /api/dashboard/advanced 200 in 426ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0
+2:43:39 AM [express] GET /api/dashboard/calendar-heatmap 200 in 97ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-07":{"orders":1,"orderValue":144,"payments":0,"revenue":0},"2026-05-23":{"orders":7,"orderValue":4072,"payments":0,"revenue":0},"2026-
+2:43:40 AM [express] GET /api/dashboard/advanced 200 in 916ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":13,"trend":0,"sparkline":[0,0,0,0,13,0,0,0,0,0,0,0]},"customers":{"total":13,"tre

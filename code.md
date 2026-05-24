@@ -1,1080 +1,560 @@
-# JOAP Hardware Trading — Full Codebase Reference
+# JOAP Hardware Trading — Code Documentation
 
-This document covers every file in the project: what it does, how it works, and how it connects to the rest of the system. The app is a full-stack business management ERP for a hardware supply company called JOAP Hardware Trading. It handles inventory, orders, billing, accounting, user management, reports, and system administration.
+**Last Updated**: 2026-05-24 (Session 3 — Major Feature Expansion)
+**Build Status**: ✅ 0 TypeScript errors · ✅ Clean Vite + esbuild build
+**Repo**: https://github.com/marksonguarine-sketch/SOFTCODE
 
----
-
-## Project Structure Overview
-
-```
-/
-├── client/                  # React frontend (Vite)
-│   ├── index.html           # HTML entry point
-│   ├── public/
-│   │   └── favicon.png      # Browser tab icon
-│   └── src/
-│       ├── main.tsx         # React root mount
-│       ├── App.tsx          # Root component, routing, layout
-│       ├── index.css        # Global CSS + Tailwind directives
-│       ├── components/      # Shared/reusable components
-│       │   ├── app-sidebar.tsx
-│       │   ├── dev_button.tsx
-│       │   ├── tutorial.tsx
-│       │   └── ui/          # 40+ shadcn/radix UI primitives
-│       ├── hooks/           # Custom React hooks
-│       │   ├── use-mobile.tsx
-│       │   └── use-toast.ts
-│       ├── lib/             # Client-side utilities and contexts
-│       │   ├── auth.tsx
-│       │   ├── queryClient.ts
-│       │   ├── settings-context.tsx
-│       │   ├── tts.ts       # ← NEW: Edge TTS helper (speakTTS, formatAmountForTTS)
-│       │   └── utils.ts
-│       └── pages/           # One file per route/page
-│           ├── dashboard.tsx
-│           ├── inventory.tsx
-│           ├── orders.tsx
-│           ├── order-detail.tsx
-│           ├── reservations.tsx
-│           ├── billing.tsx
-│           ├── accounting.tsx
-│           ├── reports.tsx
-│           ├── users.tsx
-│           ├── settings.tsx
-│           ├── system-logs.tsx
-│           ├── maintenance.tsx
-│           ├── login.tsx
-│           ├── about.tsx
-│           ├── help.tsx
-│           └── not-found.tsx
-├── server/                  # Express backend (Node.js)
-│   ├── index.ts             # Server entry point
-│   ├── routes.ts            # All API route handlers
-│   ├── db.ts                # MongoDB connection
-│   ├── seed.ts              # Initial data seeding
-│   ├── static.ts            # Production static file serving
-│   ├── vite.ts              # Development Vite middleware
-│   ├── storage.ts           # Legacy MemStorage interface (unused in prod)
-│   ├── middleware/
-│   │   └── auth.ts          # JWT auth middleware + in-memory session cache
-│   └── models/              # Mongoose schemas (MongoDB collections)
-│       ├── User.ts
-│       ├── UserSession.ts
-│       ├── Item.ts
-│       ├── Customer.ts
-│       ├── Order.ts
-│       ├── BillingPayment.ts
-│       ├── InventoryLog.ts
-│       ├── AccountingAccount.ts
-│       ├── GeneralLedgerEntry.ts
-│       ├── SystemLog.ts
-│       ├── Settings.ts
-│       ├── BackupHistory.ts
-│       └── ImageApproval.ts
-├── shared/
-│   └── schema.ts            # Zod schemas + TypeScript interfaces shared by client and server
-├── script/
-│   └── build.ts             # Production build script (Vite + esbuild)
-├── package.json             # Dependencies and npm scripts
-├── tsconfig.json            # TypeScript config
-├── vite.config.ts           # Vite bundler config
-├── tailwind.config.ts       # Tailwind CSS config
-├── postcss.config.js        # PostCSS config
-├── components.json          # shadcn/ui component config
-├── drizzle.config.ts        # Drizzle ORM config (present but unused — app uses Mongoose)
-└── replit.nix               # Replit Nix environment config
-```
+A full-stack ERP for JOAP Hardware Trading built on React 18 + Vite + Express + MongoDB (Mongoose). This document is exhaustive — it explains every file that was touched, what it does, why it exists, and how the pieces wire together.
 
 ---
 
-## Tech Stack
+## Architecture overview
 
-| Layer | Technology |
+- **Frontend**: React 18, TypeScript, Vite, Tailwind CSS, shadcn/ui, TanStack Query v5, Wouter (router), Socket.io-client
+- **Backend**: Node.js, Express, MongoDB Atlas via Mongoose, Socket.io, edge-tts (text-to-speech via Microsoft Edge)
+- **Auth**: JWT in httpOnly cookies + Bearer header fallback; bcrypt password hashing
+- **Real-time**: Socket.io events + TanStack Query global polling (every 1 second)
+- **Build outputs**: `dist/public/` (Vite frontend) + `dist/index.cjs` (esbuild server bundle, CJS)
+
+The system is **bootable without an .env file** — MongoDB URI is hardcoded in `server/server_mongo.ts` with env override fallback.
+
+---
+
+## 1. Real-time synchronization (global 1-second polling)
+
+### `client/src/lib/queryClient.ts` — this code is the central TanStack Query configuration and the heart of the real-time sync
+
+**Key responsibilities:**
+- Configures the global `queryClient` singleton used by every page
+- Provides `apiRequest()` — a fetch wrapper that automatically attaches the auth token and **throws cleanly** on non-OK responses (with JSON message parsing — see the bug fix below)
+- Provides `getQueryFn` — the default query function that derives the URL from the query key
+- Exports `startGlobalRealtimeSync()` — kicks off a 1-second `setInterval` that invalidates the most important query keys (`/api/orders`, `/api/orders?pool=true`, `/api/requests`, `/api/messages`, `/api/billing`, `/api/items`, etc.) so admin and employee views stay in sync without requiring a page refresh.
+
+**Critical bug fix (the "unexpected token" error):**
+The previous `throwIfResNotOk` consumed the response body via `res.text()` before the caller could parse it as JSON. The new implementation uses `res.clone()` to read the body for the error message **without consuming the original stream**, and prefers JSON `message`/`error` fields over plain text. This fixes the "Cannot claim order: unexpected token" and "Failed to start processing: unexpected token" errors employees were seeing.
+
+```ts
+async function throwIfResNotOk(res: Response) {
+  if (!res.ok) {
+    let message = res.statusText || `HTTP ${res.status}`;
+    try {
+      const cloned = res.clone();
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const json = await cloned.json();
+        if (json?.message) message = json.message;
+      } else {
+        const text = await cloned.text();
+        if (text) message = text;
+      }
+    } catch {}
+    throw new Error(message);
+  }
+}
+```
+
+**Polling configuration:**
+- `refetchInterval: 1000` — every query refetches every 1 second
+- `staleTime: 500` — data considered fresh for half a second to avoid double-fetching
+- `refetchOnWindowFocus: true` — also refetches when the user returns to the tab
+- `refetchIntervalInBackground: false` — pauses polling when the tab is hidden
+
+In addition to the per-query polling, `startGlobalRealtimeSync()` runs a single global `setInterval` that calls `queryClient.invalidateQueries()` on the critical keys. This guarantees cross-page invalidation even when a page doesn't have its own query for a given key.
+
+### `client/src/App.tsx` — this code is the top-level React component
+
+Wires up `SettingsProvider`, `AuthProvider`, `QueryClientProvider`, and the `Router`. Now calls `startGlobalRealtimeSync()` on mount inside the `AuthenticatedLayout`.
+
+Routes added in this session:
+- `/pending-payment` → `PendingPaymentPage`
+- `/requests` → `RequestsPage` (admin only via `AdminRoute`)
+- `/employees` → `EmployeesPage` (admin only)
+- `/profile` → `ProfilePage` (any logged-in user, but useful for employees)
+
+The `<FloatingCalculator username={...} />` component is rendered globally so it's available on every page.
+
+---
+
+## 2. Order assignment & lifecycle
+
+### `server/routes.ts` — this code defines the order assignment system that is the backbone of employee workflow
+
+Key routes:
+
+**`POST /api/orders/:id/claim`** (employee)
+- Atomic `findByIdAndUpdate` with `$set` + `$unset` + `$push` operators (avoids document mutation issues)
+- Task-lock check: an employee can hold only one **non-completedProcessingAt** order at a time
+- Lock filter uses `$or: [{ completedProcessingAt: { $exists: false } }, { completedProcessingAt: null }]` plus `fulfillmentStatus: { $nin: ["completed", "cancelled", "ready"] }`
+- On success emits `order:assigned` socket event so all clients invalidate immediately
+
+**`POST /api/orders/:id/start-processing`**
+- Sets `startedAt`, advances `fulfillmentStatus` from `"pending"` → `"processing"`
+- Pushes a `statusHistory` entry; emits `order:status-changed`
+
+**`POST /api/orders/:id/complete-processing`**
+- Sets `completedProcessingAt`, advances `fulfillmentStatus` to `"ready"` (or `"completed"` if payment is already settled)
+- This is the unlock point — after this call the employee can claim a new order
+
+**`POST /api/orders/:id/assign`** (admin)
+- Admin force-assigns an order to a user (bypasses task-lock)
+- Resets `startedAt` and `completedProcessingAt` so the new assignee starts fresh
+
+**`POST /api/orders/:id/unassign`** (admin)
+- Returns the order to the pool by clearing `assignedTo`/`assignedAt`/`startedAt`/`completedProcessingAt`
+
+**`GET /api/orders/my-active`** (employee)
+- Returns ALL blocking orders for the current employee (the warning banner shows every active tracking number, not just one)
+- Returns `{ order: firstActiveOrder, orders: [allBlockingOrders] }` — `order` kept for backwards-compat
+
+**`POST /api/orders/check-duplicate`**
+- Body: `{ customerName, itemIds }`
+- Looks for a non-completed order with the same customer (case-insensitive) and at least one overlapping item
+- Returns `{ duplicate: orderDoc | null }` — front-end shows an amber banner with a "See Order" button that navigates directly to the existing order
+
+### `client/src/pages/orders.tsx` — this code is the unified Orders page for both admin and employee views
+
+**`CreateOrderDialog`** (full-screen modal, 5-step wizard)
+- Step 0: Customer name, order type, channel
+- Step 1: Items (search + add)
+- Step 2: Payment method + status
+- Step 3: Fulfillment + delivery address
+- Step 4: Review + submit
+- **Duplicate check**: when leaving step 1, POSTs to `/api/orders/check-duplicate` and renders a `DuplicateOrderAlert` (amber banner with "See Order" button) if a match is found
+
+**Employee view**
+- Greeting header ("Good morning/afternoon/evening, {username}")
+- **"Assigned to You"** section — only shows orders where `currentStatus !== "Completed"` AND `!completedProcessingAt` AND `fulfillmentStatus` is not `ready`/`completed`/`cancelled`. The Mark-as-Done bug is fixed here: once an employee marks an order done, it disappears entirely from this section.
+- **"Pending Pool"** section — claim button per row, disabled when `isTaskLocked`. Warning banner now lists **all** blocking order tracking numbers (clickable buttons that navigate to the order detail).
+- Employee can now create orders via the same `CreateOrderDialog` — new orders go straight to the pool.
+
+**Admin view**
+- **"Assigned Orders"** section at the top, grouped by employee. Filters: search input, view-employees dropdown, status filter (Not Yet / Done / All). Replaces the old "View by Staff Member" section.
+- **"Pending Pool"** section — search input only, no dropdowns, no bulk update. Each row has an inline assign dropdown.
+- **`AssignConfirmDialog`** — when admin picks an employee from the assign dropdown, this modal pops up showing the target employee's currently pending tasks (5 per page with index pagination). Admin can review workload before confirming.
+
+### `client/src/pages/order-detail.tsx` — this code is the per-order page
+
+Has the 3-step lifecycle tracker card (Assigned → Processing Started → Processing Complete), admin reassign/unassign controls, and the assignee's Start/Done buttons.
+
+---
+
+## 3. Requests system (Admin approval workflows)
+
+### `server/models/Request.ts` — this code defines a new Mongoose model
+
+One `Request` document represents an employee-initiated action that needs admin approval.
+
+**Request types:**
+- `ADD_ITEM` — employee requests to add a new inventory item (payload: `itemName`, `category`, `unitPrice`, `currentQuantity`, `supplier`, etc.)
+- `TRANSFER_ORDER` — employee requests to transfer one of their assigned orders to another employee (payload: `orderId`, `trackingNumber`, `targetUsername`)
+- `LEAVE` — employee requests time off (payload: `startDate`, `endDate`, `type`)
+
+**Status lifecycle:** `pending → accepted | declined | cancelled`. Every transition is logged in the `history` array with actor, timestamp, and optional note.
+
+### `server/routes.ts` — Request routes section
+
+- `GET /api/requests` — admin sees all; employees see only their own. Supports filtering by `status` and `requestType`.
+- `POST /api/requests` — create a new request
+- `POST /api/requests/:id/cancel` — employee cancels their own pending request
+- `POST /api/requests/:id/accept` — admin only. Performs the actual action:
+  - `ADD_ITEM`: creates an `Item` document
+  - `TRANSFER_ORDER`: reassigns the order to the target user via atomic update + emits `order:assigned` event
+  - `LEAVE`: increments `approvedLeaves` on the `EmployeeProfile`
+- `POST /api/requests/:id/decline` — admin only. For LEAVE, increments `rejectedLeaves`.
+
+All accept/decline events emit `request:updated` socket events and write to system logs.
+
+### `client/src/pages/requests.tsx` — this code is the admin-only Requests inbox page
+
+**Layout:**
+- Header with pending/decided counts
+- Tabs: `All` | `Add Item` | `Transfer Order` | `Leave Request`
+- Pending section (cards, click to open detail modal)
+- Decided section (compact cards, click to view history)
+
+**Detail modal:** shows type-specific payload (item details, transfer details, leave dates), reason, full history, and Accept/Decline buttons with optional note. Admin can compare workload before accepting transfer requests by seeing the recipient's pending tasks.
+
+---
+
+## 4. Messages system (Admin ↔ Employee)
+
+### `server/models/Message.ts` — this code is a new Mongoose model for internal messaging
+
+Fields: `direction` (`ADMIN_TO_EMPLOYEE` or `EMPLOYEE_TO_ADMIN`), `fromUsername`, `toUsername`, `subject`, `body`, `isRead`, `readAt`.
+
+### `server/routes.ts` — Message routes section
+
+- `GET /api/messages` — inbox for current user (or `?direction=sent` to see sent items)
+- `GET /api/messages/admin/all` — admin sees all messages in the system
+- `POST /api/messages` — send a message. Direction is auto-determined from sender's role.
+- `PATCH /api/messages/:id/read` — recipient marks as read
+- `DELETE /api/messages/:id` — single delete (admin can delete any; users can delete their own sent/received)
+- `POST /api/messages/bulk-delete` — admin only, accepts `{ ids: string[] }` or empty to delete all
+
+### `client/src/pages/help.tsx` — this code is the Help page with employee↔admin messaging
+
+- Adds `InboxFromAdmin` component for employees — shows messages where `direction === "ADMIN_TO_EMPLOYEE"` above the "Send Message to Admin" form
+- The send form now uses the new `/api/messages` route with `{ toUsername: "admin", subject, body }` shape
+- Auto-mark-as-read fires on click
+
+### `client/src/pages/employees.tsx` — message button
+
+Includes a "Message" button in the admin profile modal that opens a dialog to compose a message to that employee.
+
+### `client/src/components/app-sidebar.tsx` — unread badge
+
+Shows an unread-message badge next to the Help nav link (`{unreadMessages}` count badge).
+
+---
+
+## 5. Employee Profile system
+
+### `server/models/EmployeeProfile.ts` — this code is the extended profile model
+
+Separate from `User` to keep auth lean. Fields: `username`, `employeeId` (e.g. `JOAP-00001`), `photoDataUrl` (base64), `email`, `contactNumber`, `hireDate`, `lateCount`, `approvedLeaves`, `rejectedLeaves`, `adminRemarks` (admin-only).
+
+### `server/routes.ts` — Profile routes section
+
+- `GET /api/employee-profile/me` — current user's profile (auto-creates with a JOAP-XXXXX ID on first call)
+- `GET /api/employee-profile/:username` — admin only
+- `PATCH /api/employee-profile/:username` — update (self or admin). `adminRemarks` is admin-only.
+- `GET /api/employee-profile/:username/summary` — admin only. Returns full analytics package:
+  - Profile + user data (including derived `lastLogin` from latest `UserSession.lastActivity`)
+  - KPI: completed orders, reservations (30d), pending leaves, late count
+  - Recent orders (20), reservations, system logs (50)
+  - Per-day productivity chart data (last 7 days, count + revenue)
+- `GET /api/employees` — list all employees with profile data joined
+
+### `client/src/pages/employees.tsx` — this code is the admin-only Employees nav page
+
+Shows employee cards in a grid (photo, name, employee ID, email, online indicator). Click opens the `ProfileModal`:
+
+**ProfileModal content:**
+- Header: photo + name + role badge + status badge + employee ID + hire date
+- Admin actions: Upload Photo, Delete Photo, Message, Export PDF
+- Account Info card: email, contact, account created, last login
+- KPI cards: Completed Orders, Reservations (30d), Approved Leaves, Pending Leaves
+- **Productivity chart** (Recharts BarChart, last 7 days)
+- Tabs: Orders | Reservations | Activity Timeline — each paginated 5 per page with index buttons
+- **PDF export** uses jsPDF + jspdf-autotable to generate a multi-page employee report including profile, KPI summary, and order history
+
+### `client/src/pages/profile.tsx` — this code is the employee's My Profile page
+
+Accessible from the sidebar.
+
+**Sections:**
+- Header card: photo (upload/delete via base64 data URL), name, role, employee ID, hire date
+- Contact Information: email + contact number (editable, persists to MongoDB)
+- Leave Management: approved/rejected leave counters, "Request Leave" button that opens a dialog (type, from/to dates, reason) and POSTs to `/api/requests` with `requestType: "LEAVE"`
+
+---
+
+## 6. Floating Calculator
+
+### `client/src/components/floating-calculator.tsx` — this code is the Casio-style floating calculator
+
+**Bubble mode (default):** A small circular button (48px) with a calculator icon. Click it to expand.
+
+**Expanded mode:** A draggable 220px-wide panel with:
+- Display (with operator preview)
+- 20 buttons including AC, ±, %, ÷, ×, −, +, =, 0–9, .
+- 4 memory buttons (MC, MR, M+, M−)
+
+**Drag behavior:** Click + drag anywhere on the bubble or the title bar to reposition. A click without drag toggles expansion.
+
+**Persistence:** The on/off toggle is per-user via `localStorage.getItem('joap_calc_${username}')`. The settings page dispatches a `joap-calc-toggle` event when the user flips the switch; this component listens and updates immediately. The state persists across logouts.
+
+---
+
+## 7. System Logs — User Log calendar view
+
+### `client/src/pages/system-logs.tsx` — this code is the System Logs page with calendar view
+
+Two tabs:
+
+**All Logs tab** — the original log table, but `USER_LOGIN`/`USER_LOGOUT` are excluded from the action filter dropdown (they have their own tab now).
+
+**User Log tab** — calendar view:
+- Month navigation (prev / current label / next)
+- 7-column day grid with login/logout counts per day (green `LogIn` icon for logins, red `LogOut` icon for logouts)
+- Click a day to expand a detail card showing all login/logout events for that day, paginated 5 per page with `<` / `>` controls
+- Right side panel: scrollable "Recent Activity" list of the latest 50 events
+
+---
+
+## 8. Settings — color theme, font, font size, store details
+
+### `client/src/lib/settings-context.tsx` — this code is the global settings provider and the critical color-theme bug fix
+
+Previously `applySettings()` only set `--primary` and `--primary-foreground`. Now it sets all 8 CSS variables:
+- `--primary`, `--primary-foreground`
+- `--ring`
+- `--sidebar-primary`, `--sidebar-primary-foreground`, `--sidebar-ring`
+- `--accent`, `--accent-foreground`
+- `--sidebar-gradient` (when a gradient is selected)
+- `--font-sans` + `document.body.style.fontFamily`
+- `--font-size-base` + `root.style.fontSize`
+
+**Color themes:** 10 presets stored as `{ primary, primaryForeground, ring, sidebarPrimary, sidebarRing, accent }` HSL values.
+
+**Gradients:** 10 presets stored as `linear-gradient(135deg, ...)` strings, applied to `--sidebar-gradient`.
+
+**Font loading:** Google Fonts loaded dynamically via `<link>` injection on first use (memoized by ID).
+
+`applySettings()` is exported so the settings page can call it immediately on save for instant feedback.
+
+### `client/src/pages/settings.tsx` — this code is the Settings page
+
+**Removed:** Reorder Threshold, Low Stock Threshold, Payment Information (GCash number/QR).
+
+**Admin-only sections:** System Settings (theme, companyName, autoApplyOffers, showSavingsSummary), Store Details (storeName, storeAddress, storeContactNumber, storeEmail), TTS voice selector.
+
+**Employee-visible sections:** Color Theme, Gradient, Font, Font Size, TTS enable/disable toggle, Calculator enable/disable toggle.
+
+**Font Size selector:** small (13px) / medium (14px) / large (16px) / xl (18px). Applied via `--font-size-base` and `root.style.fontSize`.
+
+**Per-user toggles:**
+- TTS enable/disable: persisted via `localStorage.getItem('joap_tts_${username}')`
+- Calculator on/off: persisted via `localStorage.getItem('joap_calc_${username}')` — dispatches `joap-calc-toggle` event so the floating calculator hides/shows in real time
+
+### `server/models/Settings.ts` — this code is the Mongoose Settings schema
+
+Schema now has `fontSize`, `storeEmail`, `storeName`. Removed `reorderThreshold`, `lowStockThreshold`, `gcashNumber`, `gcashQrImageUrl`.
+
+### `shared/schema.ts` — this code is the shared TypeScript types and Zod validators
+
+`ISettings` interface mirrors the Mongoose schema. `settingsSchema` Zod validator updated accordingly.
+
+---
+
+## 9. Socket.io notifications & TTS
+
+### `client/src/hooks/use-socket-notifications.ts` — this code is the global Socket.io listener hook
+
+Connects to the Socket.io server on mount. Subscribes to:
+- `order:assigned` → invalidates all order queries, plays TTS announcement (if user is the assignee AND TTS is enabled in localStorage)
+- `order:unassigned` → same, with a "destructive" toast variant
+- `order:status-changed` → invalidates order queries
+- `order:created` → invalidates order + dashboard
+- `billing:payment` → invalidates billing + dashboard
+- `request:created` / `request:updated` → invalidates `/api/requests`
+- `message:new` → invalidates `/api/messages`
+
+**TTS gating:** `isTtsEnabled(username)` reads `localStorage.getItem('joap_tts_${username}')` — TTS only plays when the value is not `"false"`. This was the bug where employees weren't hearing the "admin has assigned you" announcement — the global TTS toggle is now respected.
+
+**Query invalidation:** `invalidateOrderQueries()` explicitly invalidates all 4 order query key variants because TanStack Query treats `["/api/orders"]` and `["/api/orders?pool=true"]` as separate cache entries.
+
+### `client/src/lib/tts.ts` — this code manages the Edge TTS audio queue
+
+Uses Microsoft Edge TTS via the server's `/api/tts/synthesize` route. `buildAssignmentTTSScript(data)` constructs a natural-sounding announcement like: "Admin {actor} has assigned you order {trackingNumber}. Customer: {customerName}."
+
+---
+
+## 10. Pending Payment dedicated page
+
+### `client/src/pages/pending-payment.tsx` — this code is the new Pending Payment page
+
+At `/pending-payment`, showing all orders where `paymentStatus === "pending_payment"`.
+
+**Columns:** Tracking #, Customer, Type, Payment Method, Amount Due, Date.
+
+**Behavior:**
+- Notification bar at the top when there are unpaid orders
+- Search by tracking # or customer name
+- Click row → navigate to order detail page
+- Auto-refreshes every 1 second via global polling; once payment is logged the order disappears immediately
+
+### `client/src/components/app-sidebar.tsx` — Pending Payment nav badge
+
+The "Pending Payment" nav item has a yellow count badge fed from `/api/dashboard/stats`.
+
+### `client/src/pages/billing.tsx` — this code is the Billing page
+
+- Removed the **GCash #** search tab and table column
+- Pending-payment notification bar now links to `/pending-payment` instead of `/orders`
+
+---
+
+## 11. Users page — Deactivated accounts + Reactivation
+
+### `client/src/pages/users.tsx` — this code is the User Management page
+
+**Active Users** section — table with username, role, last login, created, actions (Deactivate / Toggle Role / Reset Password).
+
+**Deactivated Accounts** section — appears only when there are deactivated users. Each row has a "Reactivate" button that opens a password-confirmation dialog.
+
+**Reactivation flow:**
+1. Click "Reactivate" → opens `ReactivateDialog`
+2. Admin types their own password
+3. Client POSTs to `/api/auth/verify-password` (returns 401 on bad password)
+4. On success, the existing `toggleMutation` flips `isActive: true` via `PATCH /api/admin/users/:id/status`
+5. Real-time polling immediately moves the row from Deactivated → Active without page refresh
+
+### `server/routes.ts` — verify-password route
+
+New route `POST /api/auth/verify-password` checks the current user's password without issuing a new token. Used by the reactivation flow and the reservation delete flow.
+
+---
+
+## 12. Reservations — Delete cancelled
+
+### `client/src/pages/reservations.tsx` — this code is the Reservations page
+
+In the reservation detail sheet:
+- "Cancel Reservation" button remains for non-cancelled reservations
+- New **"Delete Permanently"** button appears only when `fulfillmentStatus === "cancelled"`
+- Click → opens a password-confirmation dialog
+- On confirm, client POSTs to `/api/auth/verify-password`, then DELETE `/api/reservations/:id`
+
+### `server/routes.ts` — DELETE /api/reservations/:id
+
+Admin only. Refuses if the reservation isn't cancelled. Logs `RESERVATION_DELETED`.
+
+---
+
+## 13. Offers — Duplicate prevention
+
+### `server/routes.ts` — POST /api/offers update
+
+`POST /api/offers` now checks for an existing active offer with the same name (case-insensitive, regex-escaped) before creating. Returns `409` with a clear error if a duplicate is detected. Logged via `OFFER_CREATED` system action.
+
+---
+
+## 14. About page overhaul
+
+### `client/src/pages/about.tsx` — this code is the new About page
+
+- Hero with logo + version badges
+- Hero "About This System" card
+- Features grid (10 features)
+- **Development Team** section with 3 cards:
+  - Cabilao, Keane Andre B. — Full-Stack Developer
+  - Ebona, John Marwin R. — Backend & DB Architect
+  - Mirasol, Prince Marl Lizandrelle D. — Systems Developer
+- Tech Stack grid (6 cards)
+- Footer with copyright
+
+---
+
+## 15. Maintenance — JSON upload template
+
+### `itemupload.json` (project root) — this code is the template for batch inventory upload
+
+```json
+[
+  {
+    "itemName": "Sample Item 1",
+    "sku": "SKU-001",
+    "category": "Hardware",
+    "unitPrice": 150.00,
+    "currentQuantity": 50,
+    "unit": "pcs",
+    "description": "...",
+    "supplier": "..."
+  }
+]
+```
+
+The maintenance page UI (when dev mode is on) consumes this format and creates `Item` documents via the existing `POST /api/items` route.
+
+---
+
+## 16. Accounting (existing — improvements)
+
+The accounting page already had a chart + PDF export from the previous session. The chart is built with Recharts (`BarChart` of debits/credits per account + pie chart of account type distribution). The PDF export uses `html2canvas` to capture the chart as an image and embed it in the jsPDF document alongside the ledger table.
+
+`pdfCurrency(v)` is a helper that formats PHP currency without rendering the ₱ glyph (which jsPDF doesn't ship in its default fonts). It outputs `"PHP 1,234.56"` style strings.
+
+---
+
+## 17. Files added in this session
+
+| File | Purpose |
 |---|---|
-| Frontend framework | React 18 + TypeScript |
-| Frontend build | Vite 7 |
-| Styling | Tailwind CSS v3 + shadcn/ui (Radix UI) |
-| Routing (client) | Wouter |
-| Data fetching | TanStack Query (React Query) v5 |
-| Icons | Lucide React |
-| Charts | Recharts |
-| Backend | Express.js v5 + Node.js 20 |
-| Database | MongoDB via Mongoose |
-| Auth | Custom JWT with bcryptjs + in-memory session cache |
-| Real-time | Socket.io |
-| Scheduled jobs | node-cron |
-| File uploads | Multer |
-| Validation | Zod |
-| PDF export | jsPDF + jspdf-autotable |
-| Text-to-Speech | msedge-tts (Microsoft Edge Neural Voices) |
+| `server/models/Request.ts` | Universal request model (ADD_ITEM, TRANSFER_ORDER, LEAVE) |
+| `server/models/Message.ts` | Admin ↔ Employee messaging |
+| `server/models/EmployeeProfile.ts` | Extended employee data (photo, email, employee ID, leave counters) |
+| `client/src/pages/requests.tsx` | Admin-only requests inbox with Accept/Decline |
+| `client/src/pages/employees.tsx` | Admin-only employee list + full profile modal |
+| `client/src/pages/profile.tsx` | Employee profile page (photo, email, contact, leave request) |
+| `client/src/pages/pending-payment.tsx` | Dedicated pending-payment dashboard |
+| `client/src/components/floating-calculator.tsx` | Bubble-mode Casio calculator |
+| `itemupload.json` | Template for batch inventory JSON upload |
 
 ---
 
-## Entry Points
+## 18. Files modified in this session
 
-### `client/index.html`
-The HTML shell loaded by the browser. Contains a single `<div id="root">` where React mounts, and a `<script type="module" src="/src/main.tsx">` tag that Vite transforms.
-
-### `client/src/main.tsx`
-The absolute starting point for the React app. Calls `createRoot(document.getElementById("root")).render(<App />)` and imports `index.css` for global styles. Nothing else lives here.
-
-### `server/index.ts`
-The Express server entry point. Does five things in order:
-1. Creates the Express `app` and an `http.Server` wrapping it
-2. Attaches JSON body parsing (50 MB limit) and URL-encoded body parsing
-3. Sets up a request-logging middleware that prints every `/api/*` request with method, path, status code, and response time
-4. Calls `connectDB()` to establish MongoDB connection, then `seedDatabase()` to populate initial data if empty
-5. Calls `registerRoutes()` to attach all API routes, then either serves static production files or starts the Vite dev server depending on `NODE_ENV`
-6. Starts listening on port from `process.env.PORT` (defaults to 5000) on host `0.0.0.0`
-
----
-
-## Database Layer
-
-### `server/db.ts`
-Reads `MONGODB_URI` from environment variables. If it is missing or contains the word "placeholder", the process exits immediately with an error message. Otherwise connects to MongoDB using Mongoose and targets the `joap_hardware` database. The `connectDB()` function is awaited in `server/index.ts` before anything else starts.
-
-**Connects to:** `server/index.ts` (called during startup), all `server/models/*.ts` (Mongoose uses the same connection)
-
-### `server/seed.ts`
-Runs once on every startup, but is a no-op if the `admin` user already exists. If the database is empty it creates:
-- Two users: `admin` (password: `admin123`, role: ADMIN) and `employee` (password: `employee123`, role: EMPLOYEE)
-- Five sample customers (Filipino names/addresses appropriate for the business)
-- Ten sample hardware inventory items (cement, steel bars, hollow blocks, paint, PVC pipe, etc.)
-- Eight standard accounting chart-of-accounts entries (Cash, AR, Inventory, AP, Equity, Revenue, COGS, OpEx)
-- One Settings document with company defaults
-
-All passwords are bcrypt-hashed with salt rounds of 10. Logs success/failure to console using the shared `log()` function from `server/index.ts`.
+| File | What changed |
+|---|---|
+| `client/src/lib/queryClient.ts` | Fixed "unexpected token" bug, added 1-second global polling via `startGlobalRealtimeSync()` |
+| `client/src/App.tsx` | Wires up `startGlobalRealtimeSync`, routes for new pages, mounts `FloatingCalculator` |
+| `client/src/components/app-sidebar.tsx` | Added Pending Payment, Requests, Employees, Profile (employee), Settings (employee) nav items; pending request + unread message badges |
+| `client/src/hooks/use-socket-notifications.ts` | TTS now gated on `joap_tts_${username}`; invalidates all 4 order query variants; listens for request/message events |
+| `client/src/lib/settings-context.tsx` | Complete rewrite — applies all 8 CSS variables for color themes, sets `--font-sans`, `--font-size-base`, `body.fontFamily`, `root.style.fontSize` |
+| `client/src/pages/about.tsx` | Full UI overhaul with 3 developers and tech stack grid |
+| `client/src/pages/billing.tsx` | Removed GCash search tab + column; pending-payment notification links to new page |
+| `client/src/pages/orders.tsx` | Admin: Assigned Orders grouped by employee + AssignConfirmDialog; Employee: Create Order button + duplicate check + show all blocking orders in pool warning + filter out completed-processing orders from pending list |
+| `client/src/pages/reservations.tsx` | Delete cancelled reservations with password confirmation |
+| `client/src/pages/settings.tsx` | Font Size picker, Store Details (admin), per-user TTS + Calculator toggles, removed Reorder/LowStock/GCash |
+| `client/src/pages/system-logs.tsx` | Two tabs: All Logs + User Log (calendar view); USER_LOGIN/LOGOUT removed from action filter |
+| `client/src/pages/users.tsx` | Deactivated accounts section + Reactivate dialog with admin password confirmation |
+| `client/src/pages/help.tsx` | InboxFromAdmin component for employees; message form posts to new /api/messages route |
+| `server/models/Settings.ts` | Removed reorder/lowStock/gcash fields; added fontSize, storeEmail, storeName |
+| `server/routes.ts` | Added: verify-password, requests routes, messages routes, employee-profile routes, employees list, reservation DELETE, check-duplicate, my-active now returns array, offer duplicate check, payment-status filter in /api/orders |
+| `server/seed.ts` | Removed obsolete settings fields from seed |
+| `shared/schema.ts` | Settings schema/interface synced |
 
 ---
 
-## MongoDB Models (`server/models/`)
-
-Each file defines a Mongoose schema and exports a compiled Model. The model name determines the MongoDB collection name (pluralised automatically by Mongoose).
-
-### `server/models/User.ts`
-**Collection:** `users`
-
-Stores employee accounts.
-
-| Field | Type | Notes |
-|---|---|---|
-| `username` | String | Required, unique, trimmed, lowercased |
-| `password` | String | bcrypt hash, required |
-| `role` | String | enum: `ADMIN` or `EMPLOYEE`, default `EMPLOYEE` |
-| `isActive` | Boolean | Soft-disable accounts without deleting, default `true` |
-| `resetToken` | String | Optional, used for password reset flow |
-| `resetTokenExpiry` | Date | When the reset token expires |
-| `createdAt` / `updatedAt` | Date | Auto-managed by Mongoose timestamps |
-
-**Used by:** auth routes, user management routes, auth middleware, seed.ts
-
-### `server/models/UserSession.ts`
-**Collection:** `usersessions`
-
-Tracks active login sessions. When a user logs in, a session record is created with the JWT token. The auth middleware validates every request by checking that the token exists in this collection with `isActive: true`. Logging out sets `isActive: false`.
-
-| Field | Type | Notes |
-|---|---|---|
-| `userId` | ObjectId | Ref to User |
-| `token` | String | JWT string, unique |
-| `isActive` | Boolean | Whether the session is still valid |
-| `lastActivity` | Date | Updated on every authenticated request (throttled to once per 60 s via in-memory map) |
-
-**Index:** on `userId`
-
-**Used by:** auth middleware, login route, logout route, dashboard active-users count
-
-### `server/models/Item.ts`
-**Collection:** `items`
-
-Inventory items — the core product catalog.
-
-| Field | Type | Notes |
-|---|---|---|
-| `itemName` | String | Required, trimmed |
-| `category` | String | Required, e.g. "Cement", "Steel", "Paint" |
-| `supplierName` | String | Supplier who provides this item |
-| `unitPrice` | Number | Price per unit in Philippine Pesos |
-| `currentQuantity` | Number | Current stock count |
-| `avgDailyUsage` | Number | Used for reorder point calculation |
-| `leadTimeDays` | Number | Days from order to delivery |
-| `safetyStock` | Number | Minimum buffer stock |
-| `reorderLevel` | Number | Trigger point to reorder |
-| `barcode` | String | Optional barcode string |
-| `imageFilename` | String | Approved image file name in `/uploads/` |
-| `imagePending` | Boolean | Whether an employee has uploaded an unapproved image |
-| `pendingImageFilename` | String | Waiting for admin approval |
-| `pendingImageUploadedBy` | String | Who uploaded the pending image |
-
-**Indexes:** text index on `itemName` + `category` (for search), on `category`
-
-**Used by:** inventory routes, order creation (stock deduction), dashboard stats, reports, global search
-
-### `server/models/Customer.ts`
-**Collection:** `customers`
-
-Customer records linked to orders.
-
-| Field | Type | Notes |
-|---|---|---|
-| `name` | String | Required, trimmed |
-| `email` | String | Optional |
-| `phone` | String | Optional |
-| `address` | String | Optional |
-
-**Index:** text index on `name`
-
-**Used by:** order creation, order listing, global search
-
-### `server/models/Order.ts`
-**Collection:** `orders`
-
-The most complex model. Each order has embedded line items, a full status history, an optional delivery address, and collaborative locking fields. Also handles reservations — `orderType` values of `walkin_reservation` and `online_reservation` are shown in the Reservations page.
-
-**Sub-schemas:**
-- `orderItemSchema` — `{ itemId, itemName, qty, originalUnitPrice, discountedUnitPrice, discountApplied, offerName, lineTotal }` — no `_id`
-- `statusEntrySchema` — `{ status, timestamp, actor, note }` — no `_id`
-
-| Field | Type | Notes |
-|---|---|---|
-| `trackingNumber` | String | Unique auto-generated (e.g. `JH-0042`), has unique index |
-| `customerName` | String | Denormalized for display |
-| `customerPhone` | String | Optional phone number |
-| `orderType` | String | `walkin`, `delivery`, `walkin_reservation`, `online_reservation`, etc. |
-| `orderChannel` | String | `walkin`, `email`, `sms`, `messenger`, `phone` |
-| `paymentMethod` | String | `cash`, `gcash_qr`, `cod` |
-| `paymentStatus` | String | `pending_payment`, `partial`, `paid` |
-| `fulfillmentStatus` | String | `pending`, `processing`, `ready`, `completed`, `cancelled` |
-| `items` | Array | Embedded order items |
-| `totalAmount` | Number | Sum of all line totals + delivery fee |
-| `subtotal` | Number | Sum of line totals before delivery fee |
-| `deliveryFee` | Number | Extra delivery charge |
-| `notes` | String | Free-text notes |
-| `scheduledDate` | Date | For reservations — the appointment date/time |
-| `statusHistory` | Array | Full audit trail of status changes |
-| `address` | Object | Optional delivery address |
-| `assignedTo` | String | Username of the assigned employee |
-
-**Indexes:** `fulfillmentStatus`, `paymentStatus`, `orderType`, `orderChannel`, `createdAt` (desc), `assignedTo`, `customerName` (text), `scheduledDate`, `updatedAt` (desc). `trackingNumber` is unique (implicit index).
-
-**Used by:** order routes, reservations routes, billing routes, dashboard stats, reports, global search
-
-### `server/models/BillingPayment.ts`
-**Collection:** `billingpayments`
-
-Records each payment made against an order. Supports partial payments (multiple payments per order).
-
-| Field | Type | Notes |
-|---|---|---|
-| `orderId` | ObjectId | Ref to Order |
-| `paymentMethod` | String | Default `GCash` |
-| `gcashNumber` | String | GCash wallet number used |
-| `gcashReferenceNumber` | String | Unique transaction reference |
-| `amountPaid` | Number | Amount in Philippine Pesos |
-| `paymentDate` | Date | When payment was made |
-| `proofNote` | String | Additional notes |
-| `loggedBy` | String | Username of staff who logged the payment |
-
-**Index:** on `orderId`
-
-**Used by:** billing routes, dashboard revenue stats, revenue chart, reports
-
-### `server/models/InventoryLog.ts`
-**Collection:** `inventorylogs`
-
-An append-only audit trail of every stock change.
-
-| Field | Type | Notes |
-|---|---|---|
-| `itemId` | ObjectId | Ref to Item |
-| `itemName` | String | Denormalized |
-| `type` | String | `restock`, `deduction`, or `adjustment` |
-| `quantity` | Number | Change amount (positive or negative) |
-| `reason` | String | Free-text explanation |
-| `actor` | String | Username who made the change |
-
-**Indexes:** on `itemId`, on `createdAt` (descending)
-
-**Used by:** inventory routes, reports
-
-### `server/models/AccountingAccount.ts`
-**Collection:** `accountingaccounts`
-
-Chart of accounts — the five account types used in double-entry bookkeeping.
-
-| Field | Type | Notes |
-|---|---|---|
-| `accountCode` | String | Unique code, e.g. `1000`, `4000` |
-| `accountName` | String | e.g. `Cash/GCash`, `Sales Revenue` |
-| `accountType` | String | enum: Asset, Liability, Equity, Revenue, Expense |
-| `balance` | Number | Current balance (updated via ledger entries) |
-
-**Used by:** accounting routes, ledger entry creation
-
-### `server/models/GeneralLedgerEntry.ts`
-**Collection:** `generalledgerentries`
-
-Individual double-entry bookkeeping transactions. Each payment automatically creates a ledger entry debiting Cash and crediting Sales Revenue. Entries can be manually reversed.
-
-| Field | Type | Notes |
-|---|---|---|
-| `date` | Date | Transaction date |
-| `accountName` | String | Which account is affected |
-| `debit` | Number | Debit amount |
-| `credit` | Number | Credit amount |
-| `description` | String | Description of the transaction |
-| `referenceType` | String | e.g. `payment`, `manual` |
-| `referenceId` | String | ID of the source document |
-| `isReversing` | Boolean | Whether this is a reversal entry |
-| `actor` | String | Who created the entry |
-
-**Indexes:** on `date` (descending), on `accountName`
-
-**Used by:** accounting routes, billing payment route (auto-creates entries)
-
-### `server/models/SystemLog.ts`
-**Collection:** `systemlogs`
-
-Immutable audit log for every significant user action in the system (logins, logouts, item creation, order updates, payments, settings changes, etc.).
-
-| Field | Type | Notes |
-|---|---|---|
-| `action` | String | Action name, e.g. `USER_LOGIN`, `ITEM_CREATED`, `ORDER_STATUS_CHANGED` |
-| `actor` | String | Username who performed the action |
-| `target` | String | What was acted upon |
-| `metadata` | Mixed | Additional context (order status, old values, etc.) |
-
-**Indexes:** on `action`, on `createdAt` (descending)
-
-**Used by:** all route handlers (via `logAction()` helper), system-logs page
-
-### `server/models/Settings.ts`
-**Collection:** `settings`
-
-Single-document collection. Only one settings document exists at a time.
-
-| Field | Type | Notes |
-|---|---|---|
-| `companyName` | String | Displayed in the UI |
-| `theme` | String | `light` or `dark` |
-| `reorderThreshold` | Number | Items below this are "critical stock" |
-| `lowStockThreshold` | Number | Items below this are "low stock" |
-| `font` | String | Google Font name |
-| `colorTheme` | String | Color accent: blue, emerald, purple, etc. |
-| `gradient` | String | Sidebar gradient key |
-| `autoBackupEnabled` | Boolean | Whether scheduled backups run |
-| `autoBackupIntervalValue` | Number | Number of hours/days/weeks between backups |
-| `autoBackupIntervalUnit` | String | `hours`, `days`, or `weeks` |
-| `gcashNumber` | String | Store GCash wallet number shown on receipts |
-| `gcashQrImageUrl` | String | URL of QR code image for GCash payments |
-| `storeAddress` | String | Physical store address shown on PDFs |
-| `storeContactNumber` | String | Store phone/contact shown on PDFs |
-| `autoApplyOffers` | Boolean | Auto-apply active offers when creating orders |
-| `showSavingsSummary` | Boolean | Show total savings when offers are applied |
-| `ttsVoice` | String | Microsoft Edge Neural Voice ID for announcements (default: `en-US-AriaNeural`) |
-
-**Used by:** settings routes, settings-context.tsx (client reads and applies theme/font/colors), dashboard stats (reads reorder thresholds), auto-backup scheduler, `/api/tts` route (reads voice)
-
-### `server/models/BackupHistory.ts`
-**Collection:** `backuphistories`
-
-Records of every backup file created, both manual and automatic.
-
-| Field | Type | Notes |
-|---|---|---|
-| `filename` | String | e.g. `auto-backup-2026-02-23T05-39-22-300Z.json` |
-| `size` | Number | File size in bytes |
-| `source` | String | `manual` or `auto` |
-| `createdBy` | String | Username or `system` |
-
-**Index:** on `createdAt` (descending)
-
-**Used by:** maintenance routes (list, download, delete backups), auto-backup cron job
-
-### `server/models/ImageApproval.ts`
-**Collection:** `imageapprovals`
-
-Tracks employee-submitted product images that are waiting for admin review. Employees can upload a photo for an inventory item, but it doesn't go live until an admin approves it.
-
-| Field | Type | Notes |
-|---|---|---|
-| `itemId` | ObjectId | Ref to Item |
-| `filename` | String | The uploaded file name in `/uploads/` |
-| `uploadedBy` | String | Employee username |
-| `status` | String | `pending`, `approved`, or `rejected` |
-| `reviewedBy` | String | Admin who reviewed it |
-
-**Indexes:** on `status`, on `itemId`
-
-**Used by:** inventory image upload routes, maintenance/admin approval routes
-
----
-
-## Backend (`server/`)
-
-### `server/middleware/auth.ts`
-JWT authentication middleware used to protect API routes.
-
-**Exports:**
-
-1. **`generateToken(payload)`** — Creates a JWT signed with `SESSION_SECRET` (or fallback `"joap-hardware-secret-key"`) that expires in 24 hours. The payload contains `_id`, `username`, and `role`.
-
-2. **`authMiddleware`** — Applied to all protected routes. Uses a **30-second in-memory session cache** (a `Map<token, { user, expiresAt }>`) so repeated requests from the same session skip MongoDB entirely. Cache miss: verifies JWT, then runs `UserSession.findOne` and `User.findById` **in parallel** using `Promise.all` with `.lean()` for minimum overhead. On success, populates the cache and fires a non-blocking `lastActivity` update (throttled to at most once per 60 s per token). Returns `401` if no token, invalid token, inactive session, or inactive user.
-
-3. **`adminOnly`** — Middleware that checks `req.user.role === "ADMIN"`. Returns 403 if not.
-
-4. **`clearSessionCache(token)`** — Removes a specific token from the in-memory cache. Called by the logout route immediately after deactivating the session.
-
-5. **`clearAllSessionsForUser(userId)`** — Removes all cached tokens for a given user ID. Called by the login route when it deactivates all previous sessions for a user (concurrent login enforcement).
-
-**Performance impact:** Reduces auth overhead from ~3 sequential DB round trips per request to ~0 DB hits for cached tokens. The dashboard page fires 6+ API calls simultaneously — this alone saves ~15 MongoDB round trips on every dashboard load.
-
-**Connects to:** `UserSession` model, `User` model, all route handlers in `routes.ts`
-
-### `server/routes.ts`
-The largest file in the project. Registers all API endpoints on the Express app and sets up Socket.io. Every route returns JSON in the format `{ success: true, data: ... }` on success, or `{ success: false, error: "..." }` on failure, via the `ok()` and `fail()` helper functions.
-
-**Setup:**
-- Attaches `cookieParser` middleware
-- Creates Socket.io server attached to the HTTP server with CORS origin `*`
-- Defines `emitEvent(event, data)` — broadcasts real-time events to all connected clients
-- Defines `logAction(action, actor, target, metadata)` — creates a SystemLog entry
-- Creates `/uploads` and `/backups` directories if they don't exist
-- Configures Multer for image uploads (max 5 MB, images only, stored as `item-<timestamp>.<ext>`)
-- Sets up auto-backup on startup by reading the Settings document
-
-**Route groups:**
-
-#### Auth Routes
-- `POST /api/auth/login` — Validates credentials, **deactivates all existing sessions + clears cache** for that user (concurrent login enforcement via `clearAllSessionsForUser`), creates a new `UserSession`, returns JWT in body and httpOnly cookie.
-- `POST /api/auth/logout` — Deactivates the session in DB, **calls `clearSessionCache(token)`** to evict the in-memory cache immediately, clears the cookie.
-- `GET /api/auth/me` — Returns current user profile. Returns `401` if session is invalidated.
-
-#### Dashboard Routes
-- `GET /api/dashboard/stats` — Today's order count, revenue, stock levels, active users.
-- `GET /api/dashboard/revenue-chart` — Revenue grouped by day for the last 30 days.
-- `GET /api/dashboard/orders-by-status` — Count of orders grouped by `fulfillmentStatus`.
-- `GET /api/dashboard/inventory-status` — Healthy / low / critical stock counts.
-- `GET /api/dashboard/recent-orders` — Last 10 orders, essential fields only.
-- `GET /api/dashboard/top-items` — Top 10 items by quantity sold (aggregation over embedded order items).
-- `GET /api/dashboard/advanced` — Extended stats: earnings trend, sparkline, top customers, recent activity feed.
-
-#### Item/Inventory Routes
-- `GET /api/items` — Paginated items list. Supports `?search=`, `?category=`, `?lowStock=true`.
-- `GET /api/items/all` — All items without pagination (used by Create Order and Create Reservation dropdowns).
-- `GET /api/items/categories` — Distinct category values.
-- `POST /api/items` — Creates item. Admin only. Emits `item:created`.
-- `PUT /api/items/:id` — Updates item. Admin only. Emits `item:updated`.
-- `DELETE /api/items/:id` — Soft-check for order references before deleting. Admin only.
-- `POST /api/items/:id/inventory-log` — Adjusts stock with reason. Emits `inventory:updated`.
-- `GET /api/items/:id/inventory-logs` — All log entries for an item.
-- `POST /api/items/:id/image` — Employee uploads pending image via Multer.
-- `GET /api/items/:id/image` — Streams approved image from disk.
-
-#### Customer Routes
-- `GET /api/customers` — All customers. Supports `?search=`.
-- `POST /api/customers` — Creates customer.
-- `PUT /api/customers/:id` — Updates customer.
-- `DELETE /api/customers/:id` — Blocked if customer has orders.
-
-#### Order Routes
-- `GET /api/orders` — Paginated orders. Filters: `?search=`, `?status=`, `?orderType=`, `?paymentStatus=`, date range.
-- `POST /api/orders` — Creates an order. Generates tracking number. Deducts stock. Logs `ORDER_CREATED`. Emits `order:created`. Also used to create reservations (when `orderType` is `walkin_reservation` or `online_reservation`).
-- `GET /api/orders/:id` — Single order with full details.
-- `PATCH /api/orders/:id/status` — Updates fulfillment/payment status. Appends to `statusHistory`.
-- `PUT /api/orders/:id/assign` — Assigns to employee. Admin only.
-
-#### Reservation Routes
-- `GET /api/reservations` — All reservation-type orders (`walkin_reservation`, `online_reservation`), sorted by scheduled date.
-- `PATCH /api/reservations/:id/status` — Updates reservation status (fulfillment or payment).
-
-#### Billing/Payment Routes
-- `GET /api/billing/payments` — All payments, paginated.
-- `POST /api/billing/payments` — Logs a payment. Validates GCash reference uniqueness. Auto-creates General Ledger entry. Updates order payment status. Logs `PAYMENT_LOGGED`, emits `billing:payment`.
-
-#### Settings Routes
-- `GET /api/settings` — Returns the single settings document.
-- `PATCH /api/settings` — Updates settings fields. Triggers auto-backup scheduler reconfiguration if backup settings change.
-
-#### TTS Route
-- `POST /api/tts` — Text-to-speech synthesis. Reads `ttsVoice` from the Settings document, instantiates `MsEdgeTTS` from the `msedge-tts` npm package, streams MP3 audio back to the client. Text is capped at 500 characters. Returns `audio/mpeg` content type. Used by `client/src/lib/tts.ts`.
-
-#### Other Routes
-- `GET /api/offers` — Active and all offers. Supports `?search=`, `?active=true`.
-- `POST /api/offers` — Creates an offer. Admin only.
-- `PUT /api/offers/:id` — Updates an offer. Admin only.
-- `DELETE /api/offers/:id` — Deletes an offer. Admin only.
-- `GET /api/accounting/accounts` — All chart-of-accounts entries.
-- `POST /api/accounting/entries` — Manual ledger entry.
-- `GET /api/accounting/ledger` — Paginated ledger entries with filters.
-- `GET /api/users` — All users. Admin only.
-- `POST /api/users` — Creates a new user. Admin only.
-- `PUT /api/users/:id` — Updates user. Admin only. Deactivates all sessions if user is disabled.
-- `GET /api/system-logs` — Paginated system log with filters.
-- `GET /api/search` — Global search across orders, items, customers.
-- `POST /api/maintenance/backup` — Manual backup of all collections to JSON.
-- `GET /api/maintenance/backups` — List backup files.
-- `GET /api/maintenance/backups/:filename` — Download a backup file.
-- `DELETE /api/maintenance/backups/:filename` — Delete a backup file.
-- `POST /api/maintenance/restore` — Restore database from a backup file. Admin only.
-
----
-
-## Frontend (`client/src/`)
-
-### `client/src/lib/queryClient.ts`
-Sets up the global TanStack Query client.
-
-- **Default fetcher (`getQueryFn`)** — Uses `queryKey[0]` as the URL, sends JWT from cookie (via `credentials: "include"`), and throws on non-2xx responses.
-- **`apiRequest(method, url, data)`** — Used by all mutations. Sends JSON with cookie credentials.
-- **Default query options:**
-  - `staleTime: 30_000` — Data stays fresh for 30 s; no unnecessary refetches while navigating.
-  - `refetchOnWindowFocus: false` — Prevents data reload just from switching browser tabs.
-  - `refetchInterval: false` — No polling.
-  - `retry: false` — Fail fast instead of retrying on errors.
-
-### `client/src/lib/auth.tsx`
-React context providing `{ user, isAdmin, isLoading, login, logout }` to the whole app.
-- Calls `GET /api/auth/me` on mount to restore session.
-- On `401`, checks `localStorage.session_expired` flag and shows the concurrent-login warning banner on the login page.
-- `login(username, password)` calls `POST /api/auth/login`, stores token in `localStorage`, sets user state.
-- `logout()` calls `POST /api/auth/logout`, clears token, redirects to `/login`.
-
-### `client/src/lib/tts.ts` ← NEW
-Text-to-speech utility for voice announcements.
-
-- **`speakTTS(text: string)`** — POSTs `{ text }` to `/api/tts`, receives MP3 audio blob, creates an `<Audio>` element, and plays it. Revokes the object URL on end. Silent on any error (never crashes the UI).
-- **`formatAmountForTTS(v: number)`** — Formats a number as a decimal string (e.g. `1234.56`) suitable for TTS reading.
-
-**Used by:** `orders.tsx` (fired after successful order creation), `reservations.tsx` (fired after successful reservation creation).
-
-### `client/src/lib/settings-context.tsx`
-React context that fetches the Settings document from `/api/settings` and applies the active theme, font, color accent, and sidebar gradient globally by setting CSS variables and class names on `document.documentElement` and `document.body`. Every settings change in `settings.tsx` triggers a re-fetch here.
-
----
-
-## Pages (`client/src/pages/`)
-
-### `dashboard.tsx`
-The main landing page after login. Shows KPI summary cards, revenue chart, order status breakdown, inventory status, recent orders table, top-selling items, and upcoming reservations. Fires 6 parallel API requests on mount. All are cached by TanStack Query for 30 s.
-
-### `orders.tsx`
-Full order management page.
-
-**`CreateOrderDialog`** — Full-screen dialog (always maximized, no minimize/close buttons in header). 5-step wizard:
-1. **Items** — Search bar with instant-add on click. Qty column uses **− qty + stepper buttons** (no text input). Validates at least one item is selected before proceeding.
-2. **Customer** — Customer name (required), phone (optional), order type (walk-in, delivery, reservation types), order channel, optional delivery address.
-3. **Payment** — Payment method (filtered by order type), payment status, delivery fee.
-4. **Offers** — Auto-applied offers shown; can be removed per-item.
-5. **Review** — Full summary before final submission.
-
-On success: invalidates order cache, fires `speakTTS(...)` announcing order type, customer name, items, total, and payment method.
-
-**`OrdersPage`** — Lists all orders with search, status filter, date filter. Each row links to `order-detail.tsx`.
-
-### `reservations.tsx`
-Reservations management page with two tabs: Calendar view and List view.
-
-**`CreateReservationDialog`** — Modal dialog (not full-screen) for creating reservations directly from the Reservations page. Fields:
-- Customer name (required), phone (optional)
-- Reservation type: walk-in reservation or online reservation
-- Scheduled date & time (required, `datetime-local` input)
-- Order channel (walkin, email, sms, messenger, phone)
-- Payment method (cash/GCash for walk-in; GCash only for online)
-- Payment status, fulfillment status
-- Items (optional — searchable with − qty + stepper, same UX as order dialog)
-- Notes
-
-On success: invalidates reservations cache, fires `speakTTS(...)` announcing type, customer name, scheduled date, items, total, and payment method.
-
-**`generatePDF(reservation)`** — Generates a printable reservation slip PDF using jsPDF + autoTable. Currency is formatted via `pdfCurrency()` helper (outputs `PHP 1,234.56` — avoids the ± rendering bug in jsPDF Helvetica caused by the ₱ Unicode character).
-
-**`CalendarView`** — Month calendar grid showing reservations as color-coded dots. Clicking a day opens a side panel with reservation details.
-
-**`ReservationsListView`** — Filterable, paginated table of all reservations. Supports search, type, status, and payment filters. Bulk-confirm and bulk-ready actions. PDF export per reservation.
-
-### `billing.tsx`
-Payment management page. Shows all orders with outstanding balances. Click any order to open the payment logging sheet. Supports GCash reference number entry and validates for duplicates.
-
-### `accounting.tsx`
-General ledger and chart-of-accounts management. Shows all ledger entries with date, account, debit/credit, and description. Manual entry creation. Entry reversal.
-
-### `reports.tsx`
-Admin-only reports page with date-range filtering.
-
-- **Sales Report** — Revenue and order count by day. PDF export uses `pdfCurrency()` helper.
-- **Inventory Report** — Current stock levels, value at cost vs. sell price.
-- **Customer Report** — Orders and spend per customer.
-
-### `inventory.tsx`
-Full inventory management. Create, edit, restock, and adjust items. Image upload (pending admin approval). Stock movement log per item. Low/critical stock highlighted.
-
-### `settings.tsx`
-System configuration page.
-
-**Cards:**
-- Company Info — Name, store address, contact number.
-- Theme — Light/dark mode toggle.
-- Appearance — Font family (Google Fonts preview), color accent, sidebar gradient.
-- GCash Settings — Wallet number and QR image URL.
-- Offers — Auto-apply offers toggle, show savings summary toggle.
-- **Voice Announcements (TTS)** ← NEW — Dropdown to select from 6 Microsoft Edge Neural voices:
-  - `en-US-AriaNeural` — Aria, warm expressive (US English, default)
-  - `en-US-GuyNeural` — Guy, deep authoritative (US English)
-  - `en-GB-SoniaNeural` — Sonia, crisp literary (British)
-  - `en-GB-RyanNeural` — Ryan, dramatic clear (British)
-  - `en-AU-NatashaNeural` — Natasha, smooth natural (Australian)
-  - `en-IE-EmilyNeural` — Emily, gentle immersive (Irish)
-
-Selecting a voice and saving updates the `ttsVoice` field in the Settings document. The `/api/tts` route reads this value on every TTS request.
-
-### `users.tsx`
-User management. Admin only. Create, activate/deactivate, change password, change role. Deactivating a user immediately kills all their sessions.
-
-### `order-detail.tsx`
-Detailed view for a single order. Shows all fields, item list, payment history, status history timeline, and notes. Staff can update status, log payments, and add notes.
-
-### `system-logs.tsx`
-Read-only audit log viewer. All system actions with filters by action type, actor, and date range. Admin only.
-
-### `maintenance.tsx`
-Database backup and restore. Manual backup, list of backup files, download, delete. Admin image approval queue for pending item photos. Admin only.
-
-### `login.tsx`
-Login form. On mount, checks `localStorage.session_expired` flag and displays an amber banner: "Your session was ended because the account was logged in elsewhere." Clears the flag after displaying.
-
-### `about.tsx` / `help.tsx`
-Static informational pages.
-
-### `not-found.tsx`
-404 page shown for unmatched routes.
-
----
-
-## Shared (`shared/schema.ts`)
-
-Single source of truth for all TypeScript types and Zod validation schemas shared between client and server.
-
-**Key schemas:**
-- `createOrderSchema` / `CreateOrderInput` — Used by both `POST /api/orders` route (server-side validation) and `CreateOrderDialog` / `CreateReservationDialog` (client-side form validation via `zodResolver`).
-- `settingsSchema` / `SettingsInput` — Used by `PATCH /api/settings` and `settings.tsx` form. Includes `ttsVoice: z.string().optional().default("en-US-AriaNeural")`.
-- `createItemSchema`, `createCustomerSchema`, `logPaymentSchema`, `inventoryLogSchema`, `ledgerEntrySchema`, `offerSchema` — Each used in corresponding route and page.
-
-**Key interfaces (not Zod, just TypeScript):**
-- `IOrder` — Full order object as returned by the API.
-- `IItem` — Inventory item.
-- `ICustomer`, `IUser`, `ISettings`, `IOffer`, `IBillingPayment`, `IInventoryLog`, `ILedgerEntry`.
-
-**Constants:**
-- `ORDER_TYPES`, `ORDER_TYPE_LABELS` — All valid order types with display labels.
-- `ORDER_CHANNELS`, `ORDER_CHANNEL_LABELS` — Channel options.
-- `PAYMENT_METHODS`, `PAYMENT_METHOD_LABELS` — Payment method options.
-- `PAYMENT_STATUSES`, `PAYMENT_STATUS_LABELS` — Payment status options.
-- `FULFILLMENT_STATUSES`, `FULFILLMENT_STATUS_LABELS` — Fulfillment status options.
-- `ALLOWED_PAYMENT_METHODS` — Per-order-type map of which payment methods are valid.
-
----
-
-## Key Flows
-
-### Authentication Flow
-1. User submits username + password on `login.tsx`
-2. `POST /api/auth/login` verifies bcrypt hash
-3. **All prior sessions for that user are deactivated in DB + evicted from the in-memory cache** (concurrent login enforcement)
-4. New `UserSession` created, JWT generated and returned in cookie + body
-5. `auth.tsx` stores token in `localStorage`, sets user context
-6. Every subsequent API call goes through `authMiddleware`:
-   - Token extracted from cookie
-   - Checked against **in-memory session cache** (30 s TTL) → fast path, no DB
-   - Cache miss: parallel `UserSession.findOne` + `User.findById` with `.lean()`
-   - Cache populated on success
-
-### Order Creation Flow
-1. Staff opens "Create New Order" (full-screen dialog, always maximized)
-2. Searches items — clicking an item immediately adds it with qty 1
-3. Qty adjusted via − / + stepper buttons (no text input)
-4. Staff fills in customer, payment details across 5 steps
-5. Validation enforced at each step transition (cannot proceed until required fields are filled)
-6. On submit: `POST /api/orders` → stock deducted, tracking number generated, status history initialized
-7. On success: TanStack Query cache invalidated, **`speakTTS()`** fires to announce the order aloud
-
-### Reservation Creation Flow (from Reservations page)
-1. Staff clicks "New Reservation" button in the Reservations page header
-2. `CreateReservationDialog` opens (modal, not full-screen)
-3. Fills: customer name, phone, reservation type, scheduled date/time, channel, payment method, optional items (with − / + stepper), notes
-4. Validation on submit: customer name + scheduled date required
-5. On submit: `POST /api/orders` with `orderType` = `walkin_reservation` or `online_reservation`
-6. On success: reservations cache invalidated, **`speakTTS()`** fires to announce the reservation
-
-### TTS Announcement Flow
-1. Order or reservation created successfully
-2. `speakTTS(text)` called from the frontend
-3. `POST /api/tts` with `{ text }` body
-4. Server reads `ttsVoice` from Settings document
-5. `MsEdgeTTS` connects to Microsoft Edge TTS WebSocket service
-6. MP3 audio streamed back as `audio/mpeg` response
-7. Client creates Blob URL, plays via `HTMLAudioElement`, revokes URL on end
-
-### PDF Export Flow (Reservations)
-1. Staff clicks PDF button on a reservation in the list
-2. `generatePDF(reservation)` runs entirely client-side (jsPDF + autoTable)
-3. All currency values formatted via `pdfCurrency()` → `PHP 1,234.56` (avoids ₱ → ± bug in Helvetica)
-4. PDF opened in a new browser tab
-
-### Settings → Theme/Font/Color Flow
-1. Admin changes a setting in `settings.tsx` and saves
-2. `PATCH /api/settings` updates the document
-3. `SettingsProvider` re-fetches and re-runs the `useEffect`
-4. CSS variables and class names on `<html>` and `document.body` are updated
-5. Theme, colors, font, and sidebar gradient change immediately without page reload
-
-### Auto-Backup
-1. Admin enables auto-backup in `settings.tsx` with an interval
-2. Server `PUT /api/settings` handler calls `setupAutoBackupScheduler()`
-3. The old `node-cron` job is stopped, a new one is started with the correct cron expression
-4. At each interval, `performAutoBackup()` runs: dumps all collections to JSON, saves to `/backups/`, records in `BackupHistory`
-5. Admin can see, download, or delete backups from `maintenance.tsx`
-
----
-
-## Performance Notes
-
-### Auth Middleware Cache
-The biggest single performance gain. Without the cache, every authenticated API request costs 3 sequential MongoDB round trips: `UserSession.findOne`, `User.findById`, `session.save`. The dashboard fires 6+ requests simultaneously — that was 18+ DB hits just for auth checks.
-
-With the in-memory cache:
-- Cache hit (within 30 s of last validation): **0 DB hits**
-- Cache miss: **2 parallel DB hits** (instead of 3 sequential) using `Promise.all` + `.lean()`
-- `lastActivity` update throttled to once per 60 s per token
-
-### MongoDB Indexes on Order
-Orders collection has indexes on `fulfillmentStatus`, `paymentStatus`, `orderType`, `orderChannel`, `createdAt`, `assignedTo`, `customerName` (text), `scheduledDate`, and `updatedAt`. `trackingNumber` is unique (automatic unique index). These cover all common query patterns in the orders, reservations, and reports routes.
-
-### TanStack Query Caching
-`staleTime: 30_000` means data fetched in the last 30 s is served from memory without a network round trip. `refetchOnWindowFocus: false` prevents unnecessary refetches when the user switches tabs.
-
----
-
-## npm Scripts
-
-| Script | Command | What it does |
-|---|---|---|
-| `npm run dev` | `NODE_ENV=development ./node_modules/.bin/tsx server/index.ts` | Starts the development server (Express + Vite middleware) |
-| `npm run build` | `tsx script/build.ts` | Builds frontend to `dist/public/` and server to `dist/index.cjs` |
-| `npm start` | `NODE_ENV=production node dist/index.cjs` | Starts the production server |
-| `npm run check` | `tsc` | TypeScript type-checking only, no emit |
-| `npm run db:push` | `drizzle-kit push` | Pushes Drizzle schema (legacy, not used — app uses Mongoose) |
-
----
-
-## Default Credentials (after first run / seed)
-
-| Username | Password | Role |
-|---|---|---|
-| `admin` | `admin123` | ADMIN |
-| `employee` | `employee123` | EMPLOYEE |
-
-**These are created automatically on first startup if the database is empty. Change them immediately in production via the Users page.**
-
----
-
-## Recent Updates (2026-05-24)
-
-### `server_mongo.ts` (NEW — project root)
-Centralized, hardcoded MongoDB connection module. Created per project owner directive.
-
-- Exports `connectMongo(): Promise<mongoose>` — idempotent singleton connection.
-- Exports `disconnectMongo()` — for graceful shutdown.
-- Exports `MONGODB_URI` (hardcoded Atlas string) and `DB_NAME = "joap_hardware"`.
-- `process.env.MONGODB_URI` overrides the hardcoded value if present (useful for CI/staging).
-- Configures `strictQuery: true`, `serverSelectionTimeoutMS: 10_000`, `socketTimeoutMS: 45_000`, `maxPoolSize: 20`.
-- Logs `[mongo] connected to joap_hardware` on first connect, `[mongo] disconnected` on loss.
-
-**Connection string:** `mongodb+srv://qjmrebona_db_user:Gal5TOLmAQQNizKx@cluster0.cvabo7n.mongodb.net/`
-
-### `server/db.ts` (UPDATED)
-Now a thin re-export shim on top of `server_mongo.ts`. `connectDB()` calls `connectMongo()` internally and logs the result. All existing code that imports `connectDB` from `server/db.ts` continues to work unchanged. The old "exit if placeholder" check is gone — the app boots cleanly with no `.env` file.
-
-### `server/middleware/auth.ts` (FIXED)
-Fixed TypeScript error TS2802: `MapIterator` iteration in `clearAllSessionsForUser` and the periodic GC `setInterval` now uses `Array.from(sessionCache.entries()).forEach(...)` instead of `for...of` to satisfy the TypeScript target. This was the only TS error in the project.
-
-### `script/build.ts` (FIXED)
-Removed corrupted/garbage code that was injected between lines 52–60 (invalid `----`, `await allDeps = [...]`, `...objects.keys(...)`, `...Blob(...)`, `...queryObjects(...)` etc.). The build script now compiles and runs cleanly, producing `dist/public/` (Vite frontend bundle) and `dist/index.cjs` (esbuild server bundle).
-
-### `client/src/pages/accounting.tsx` (MAJOR UPDATE)
-Full overhaul of the Accounting page with:
-
-#### New Features
-- **PDF Export button** (top-right, next to "Add Entry"): exports a multi-page, well-designed PDF report including:
-  - Branded header with company name, report title, and date.
-  - **KPI Summary row** — Total Debits, Total Credits, Net Balance, Account Count — with colour-coded values.
-  - **Financial Position Summary** table — Assets, Liabilities, Revenue, Expenses totals.
-  - **Debits vs Credits Bar Chart** — drawn using jsPDF primitive rectangles (no canvas dependency). Shows top 8 accounts side-by-side in blue (debit) and green (credit). Includes axis lines and a colour legend.
-  - **Account Type Distribution table** — pie-style legend with colour swatches, balance, and percentage of total for each account type.
-  - **Chart of Accounts table** — all accounts with code, name, type, and balance. Alternating row colours.
-  - **General Ledger Entries table** (second page) — date, account, debit, credit, running balance, description, with a footer row showing totals. Filtered by the active date filter if one is set.
-  - Professional footer on every page with generation date and page count.
-
-- **Recharts charts** (in-page, not PDF):
-  - **Debits vs Credits Bar Chart** — grouped bars per account name, top 8, using Recharts `BarChart`. Responsive, with currency tooltip.
-  - **Account Type Distribution Donut Chart** — `PieChart` with `innerRadius=55`, colour legend, percentage labels.
-
-- **Financial Position mini-cards** — 4 cards showing Assets / Liabilities / Revenue / Expenses totals from the Chart of Accounts, always visible above the tabs.
-
-- **Enhanced KPI cards** — now show coloured backgrounds and icons (TrendingDown for Debits, TrendingUp for Credits, Calculator for Balance, BookOpen for Accounts). Colour-coded: blue, emerald, red/green by sign, violet.
-
-- **Ledger totals footer** — below the ledger table a compact row shows running totals for Debits, Credits, and Net Balance.
-
-- **Account Name autocomplete** — the "Add Entry" form's Account Name input now has a `<datalist>` driven by existing accounts for fast entry.
-
-- **Entry count badge** — in the filter bar, shows "N entries" for the active filter.
-
-#### Technical notes
-- `pdfCurrency()` helper avoids the ₱ → ± rendering bug in jsPDF Helvetica (outputs `PHP X,XXX.XX`).
-- `drawBarChart()` is a pure jsPDF-drawing function — no DOM canvas, no screenshot, works in all environments.
-- `drawPieChart()` helper is present for future pie rendering but the PDF currently uses a colour-legend table for maximum reliability across all PDF viewers.
-- Date filter applied before PDF generation — the PDF reflects exactly what is shown on screen.
-- `exportingPdf` loading state disables the button and shows a spinner during generation.
-
----
-
-## Recent Updates — Order Assignment System (2026-05-24)
-
-This section documents the full Order Assignment System added in Session 2, Part A. It covers new model fields, all new API routes, the TTS notification system, Socket.io hook, and overhauled order-management UI.
-
----
-
-### `server/models/Order.ts` (UPDATED)
-
-Two new optional timestamp fields added to the Order model:
-
-| Field | Type | Description |
-|---|---|---|
-| `startedAt` | `Date?` | Set when the assigned employee clicks "Start Processing". Triggers `fulfillmentStatus → processing`. |
-| `completedProcessingAt` | `Date?` | Set when the employee clicks "Mark Done". Triggers `fulfillmentStatus → ready`. **This also unlocks the task-lock** — the employee can then claim another order from the pool. |
-
-These join the existing assignment fields (`assignedTo`, `assignedToName`, `assignedAt`, `assignedBy`) to form a full lifecycle chain.
-
----
-
-### `shared/schema.ts` (UPDATED)
-
-#### `IOrder` interface additions
-```typescript
-startedAt?: string;
-completedProcessingAt?: string;
+## 19. How to verify the build
+
+```bash
+cd C:\Users\LENOVO\Downloads\PYTHON\SOFTCODE\SOFTCODE
+npx tsc --noEmit              # should output nothing (0 errors)
+npm run build                 # produces dist/public + dist/index.cjs
 ```
 
-#### New event interfaces
-
-**`IOrderAssignedEvent`** — emitted as Socket.io `order:assigned`:
-```typescript
-export interface IOrderAssignedEvent {
-  orderId: string;
-  trackingNumber: string;
-  assignedTo: string;
-  assignedBy: string;
-  customerName: string;
-  items: Array<{ itemName: string; qty: number }>;
-  totalAmount: number;
-  paymentMethod: string;
-  orderType: string;
-  notes?: string;
-  isReassignment: boolean;
-  previousAssignedTo?: string;
-}
-```
-
-**`IOrderUnassignedEvent`** — emitted as Socket.io `order:unassigned`:
-```typescript
-export interface IOrderUnassignedEvent {
-  orderId: string;
-  trackingNumber: string;
-  previousAssignedTo: string;
-  actor: string;
-}
-```
+The current build produces:
+- `dist/public/index.html` — 2.01 kB
+- `dist/public/assets/index-*.js` — ~2 MB (gzipped ~607 kB)
+- `dist/public/assets/index-*.css` — ~113 kB
+- `dist/index.cjs` — 1.2 MB
 
 ---
 
-### `server/routes.ts` (UPDATED — new routes)
+## 20. Real-time guarantees (every 1 second)
 
-#### `GET /api/orders?pool=true`
-Returns all unassigned, pending, non-reservation orders sorted FIFO (oldest first). Used by the employee pool view and admin pool section.
+The combination of two mechanisms ensures the UI never requires a manual refresh:
 
-Filter logic:
-```typescript
-filter.assignedTo = { $in: ["", null] };   // or field does not exist
-filter.fulfillmentStatus = "pending";
-filter.isReservation = { $ne: true };
-```
-Sort: `{ createdAt: 1 }` (FIFO).
+1. **Per-query polling** — every TanStack Query has `refetchInterval: 1000`, so the data behind any currently-mounted page refetches automatically.
+2. **Global polling loop** — `startGlobalRealtimeSync()` runs a `setInterval` that explicitly invalidates the most important query keys every second. This catches cross-page invalidation cases where a page might not have its own query for `/api/orders?pool=true` but still needs to be aware of changes.
+3. **Socket.io events** — for immediate (sub-second) updates, events like `order:assigned`, `request:updated`, `message:new` trigger explicit invalidations through `use-socket-notifications.ts`.
 
-#### `POST /api/orders/:id/assign` (UPDATED)
-Now detects reassignment by checking if `order.assignedTo` is already set. On reassignment:
-- Saves `previousAssignedTo` into event payload
-- Clears `startedAt` and `completedProcessingAt` (resets processing state for the new assignee)
-- Appends a `statusHistory` entry noting the reassignment
-- Emits `order:assigned` with `isReassignment: true`
+Browser tabs that go to the background pause polling (`refetchIntervalInBackground: false`) to save battery, but resume on focus.
 
-#### `DELETE /api/orders/:id/assign` (NEW — admin only)
-Returns the order to the unassigned pool. Auth: admin only (403 otherwise).
-- Clears `assignedTo`, `assignedToName`, `assignedAt`, `assignedBy`, `startedAt`, `completedProcessingAt`
-- Appends statusHistory entry
-- Emits `order:unassigned` with `{ orderId, trackingNumber, previousAssignedTo, actor }`
-
-#### `POST /api/orders/:id/claim` (NEW)
-Self-assignment by an employee. Auth: any authenticated user.
-
-**Task-lock check** (employees only — admins bypass):
-```typescript
-const blockingOrder = await Order.findOne({
-  assignedTo: username,
-  completedProcessingAt: null,
-  fulfillmentStatus: { $nin: ["completed", "cancelled"] },
-});
-if (blockingOrder) {
-  return res.status(403).json({ message: `Complete order ${blockingOrder.trackingNumber} first` });
-}
-```
-On success: sets `assignedTo`, `assignedToName`, `assignedAt`, `assignedBy` (self). Appends statusHistory. Emits `order:assigned` with `isReassignment: false`.
-
-#### `POST /api/orders/:id/start-processing` (NEW)
-Sets `startedAt = new Date()` and changes `fulfillmentStatus` to `"processing"`. Auth: assignee or admin. Appends statusHistory. No Socket.io emit (UI handles it via polling).
-
-#### `POST /api/orders/:id/complete-processing` (NEW)
-Sets `completedProcessingAt = new Date()` and changes `fulfillmentStatus` to `"ready"`. Auth: assignee or admin. **This unlocks the task-lock** — after this call, the employee can claim a new order from the pool. Appends statusHistory.
-
-#### `GET /api/orders/my-active` (NEW)
-Returns the single "blocking order" for the current user:
-```typescript
-const blockingOrder = await Order.findOne({
-  assignedTo: username,
-  completedProcessingAt: null,
-  fulfillmentStatus: { $nin: ["completed", "cancelled"] },
-});
-```
-Response: `{ success: true, data: { order: blockingOrder | null } }`
+Scroll positions and component states are preserved because we use `invalidateQueries` rather than reloading routes.
 
 ---
 
-### `client/src/lib/tts.ts` (UPDATED)
+## 21. Known limitations / future work
 
-#### New functions
-
-**`buildAssignmentTTSScript(event: IOrderAssignedEvent): string`**
-
-Generates a TTS announcement script for order assignment. Handles three cases:
-
-1. **Reassignment** (`event.isReassignment === true`): "Attention [assignee]. [assigner] has reassigned order [TN] to you. Previously assigned to [prev]. Customer: [name]. N items: [list]. Total: [amount] pesos. Payment: [method]. Order type: [type]. Please review..."
-
-2. **Self-claim** (`event.assignedBy === event.assignedTo`): "You have claimed order [TN]. Customer: [name]. N items totaling [amount] pesos. [Payment] payment. You may now start processing."
-
-3. **Normal assignment**: "Attention [assignee]. [assigner] has assigned you a new order. Tracking: [TN]. Customer: [name]. N items: [list]. Total: [amount]. Payment: [method]. Please start processing."
-
-Uses `buildItemsSummary()` to list up to 3 items and say "and N more" for overflow. Uses `formatAmountForTTS()` for currency.
-
-**`buildUnassignmentTTSScript(event: IOrderUnassignedEvent): string`**
-
-"Notice. [actor] has removed your assignment on order [TN]. This order has been returned to the pending pool."
+- The Payment Logging mandatory upload dialog (receipt photo + reference number gates Mark-as-Done) is **not yet wired into the order-detail page**. The schema supports it (`BillingPayment` already accepts `proofNote`), but the UI dialog enforcing photo upload before `complete-processing` will be a follow-up.
+- The Add Item request flow from the **employee inventory page** (with the "Waiting for Admin Approval" status div + Cancel Request button) needs to be wired into `inventory.tsx`. The backend routes (`POST /api/requests` with `requestType: ADD_ITEM`) already exist.
+- The admin "Order Process" calendar drill-down inside the User Log day-detail still needs the order-list-by-day endpoint wired (currently shows login/logout events only).
+- Image-based proof of payment upload uses base64 data URLs; for large-scale deployments this should move to disk or object storage.
 
 ---
 
-### `client/src/hooks/use-socket-notifications.ts` (NEW)
+## 22. Mongoose schema integrity
 
-Global Socket.io event listener hook. Mounted once at the top level of `AuthenticatedLayout` so all pages receive real-time events without per-page setup.
+All new models inherit `{ timestamps: true }` for `createdAt`/`updatedAt`. Indexes have been added for:
+- `Request`: `(status, createdAt -1)`, `(requester, status)`
+- `Message`: `(toUsername, isRead, createdAt -1)`
+- `EmployeeProfile`: `username` (unique), `employeeId` (unique)
 
-**Connection**: `io({ transports: ["websocket", "polling"] })` — falls back to polling if WebSocket is unavailable.
-
-**Events handled**:
-
-| Event | Cache invalidation | TTS + toast |
-|---|---|---|
-| `order:assigned` | `/api/orders` | Only if `data.assignedTo === username` |
-| `order:unassigned` | `/api/orders` | Only if `data.previousAssignedTo === username` |
-| `order:status-changed` | `/api/orders` | Never |
-| `order:created` | `/api/orders`, `/api/dashboard/stats` | Never |
-| `billing:payment` | `/api/orders`, `/api/dashboard/stats` | Never |
-
-The `username` and `enabled` parameters are passed from `AuthenticatedLayout` — the hook does nothing until a user is authenticated.
+All accept/decline/cancel operations are atomic (`findByIdAndUpdate` or document-level save with history push). System log entries are written for every state change so the audit trail is complete.
 
 ---
 
-### `client/src/App.tsx` (UPDATED)
-
-`AuthenticatedLayout` now mounts `useSocketNotifications`:
-```typescript
-useSocketNotifications({ username: user?.username || "", enabled: !!user });
-```
-This is the single source of truth for Socket.io — it replaces all previous per-page socket connections.
-
----
-
-### `client/src/pages/orders.tsx` (MAJOR UPDATE)
-
-#### New queries
-- `GET /api/orders?pool=true` → `poolData` — unassigned pending orders
-- `GET /api/orders/my-active` → `myActiveData` — blocking order (employee task-lock check)
-
-#### New mutations
-- **`claimMutation`** — `POST /api/orders/:id/claim`. Disabled if `isTaskLocked`. Invalidates assigned, pool, and my-active caches on success.
-- **`startMutation`** — `POST /api/orders/:id/start-processing`. Shown on assigned cards where `fulfillmentStatus === "pending"` and `startedAt` is null.
-- **`completeMutation`** — `POST /api/orders/:id/complete-processing`. Shown on assigned cards where `startedAt` is set but `completedProcessingAt` is null.
-
-#### New computed state
-```typescript
-const poolOrders = poolData?.data?.orders || [];
-const myBlockingOrder = myActiveData?.data?.order || null;
-const isTaskLocked = !isAdmin && !!myBlockingOrder;
-```
-
-#### Employee view changes
-**"Assigned to You" section**: Cards now show:
-- **Start Processing button** — visible when `fulfillmentStatus === "pending"` and `startedAt` is null. Calls `startMutation`.
-- **Mark Done button** (green) — visible when `startedAt` is set and `completedProcessingAt` is null. Calls `completeMutation`.
-- `startedAt` timestamp is shown if set.
-
-**"Pending Pool" section**: Now uses `poolOrders` (from `?pool=true` query) instead of the full orders list.
-- **Claim button** on each pool card — disabled when `isTaskLocked`. Calls `claimMutation`.
-- Task-lock warning banner shows the blocking order's tracking number.
-
-#### Admin view changes
-New **"Pending Pool"** section added above the main orders table. Shows all unassigned pending orders in a compact table with an **Assign To** dropdown per row. Uses the new `PoolAdminRow` sub-component.
-
-#### New sub-component: `PoolAdminRow`
-Renders one row in the admin pool table. Has its own `assignVal` state for the dropdown. Calls `onAssign(username)` from the parent's `assignMutation`.
-
----
-
-### `client/src/pages/order-detail.tsx` (UPDATED)
-
-#### New mutations
-- **`unassignMutation`** — `DELETE /api/orders/:id/assign`. Admin-only. Returns order to pool and invalidates pool cache.
-- **`startMutation`** — `POST /api/orders/:id/start-processing`. Available to the assigned user.
-- **`completeMutation`** — `POST /api/orders/:id/complete-processing`. Available to the assigned user.
-
-#### Assignment Card overhaul
-The right-column "Assignment" card now shows a **3-step lifecycle tracker**:
-
-1. **Assigned step** — highlighted (blue border/background) if `order.assignedTo` is set. Shows assignee name, assign timestamp, and "by [assigner]". Shows "Unassigned / Waiting in the pool" when empty.
-
-2. **Processing Started step** — highlighted (blue) if `order.startedAt` is set. Shows timestamp.
-
-3. **Processing Complete step** — highlighted (green) if `order.completedProcessingAt` is set. Shows timestamp.
-
-**Assignee action buttons** (visible only when `order.assignedTo === user?.username`):
-- "Start Processing" button — shown when `startedAt` is null
-- "Mark Done" button (green) — shown when `startedAt` is set but `completedProcessingAt` is null
-
-**Admin controls** (shown to admins below a divider):
-- Assign/Reassign dropdown + button (re-uses `assignMutation`)
-- "Unassign" button (red-bordered, uses `unassignMutation`) — shown only when an assignee exists
-
----
-
-## Build Status (2026-05-24)
-
-- `npm run check` — **0 TypeScript errors** ✓
-- `npm run build` — **clean build** ✓ (Vite frontend + esbuild server, no errors)
-- Server boots without any `.env` file — uses hardcoded MongoDB Atlas URI from `server_mongo.ts`
+End of code.md.

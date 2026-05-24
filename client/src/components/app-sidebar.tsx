@@ -18,6 +18,8 @@ import {
   CalendarCheck,
   Clock,
   UserCircle,
+  Inbox,
+  UserSquare2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -50,6 +52,8 @@ const mainNavItems = [
 
 const adminOnlyNavItems = [
   { title: "Offers", url: "/offers", icon: Tag },
+  { title: "Requests", url: "/requests", icon: Inbox },
+  { title: "Employees", url: "/employees", icon: UserSquare2 },
 ];
 
 const adminNavItems = [
@@ -74,6 +78,28 @@ export function AppSidebar() {
     staleTime: 30000,
   });
   const pendingPayments = statsData?.data?.pendingPayments ?? 0;
+
+  // Pending requests count (admin only)
+  const { data: requestsData } = useQuery<{ success: boolean; data: any[] }>({
+    queryKey: ["/api/requests?status=pending"],
+    queryFn: async () => {
+      const res = await fetch("/api/requests?status=pending", {
+        credentials: "include",
+        headers: localStorage.getItem("token") ? { Authorization: `Bearer ${localStorage.getItem("token")}` } : {},
+      });
+      return res.json();
+    },
+    enabled: isAdmin,
+    staleTime: 30000,
+  });
+  const pendingRequests = requestsData?.data?.length ?? 0;
+
+  // Unread messages count
+  const { data: messagesData } = useQuery<{ success: boolean; data: any[] }>({
+    queryKey: ["/api/messages"],
+    staleTime: 30000,
+  });
+  const unreadMessages = (messagesData?.data || []).filter((m: any) => !m.isRead).length;
 
   const isActive = (url: string) => {
     if (url === "/") return location === "/";
@@ -148,10 +174,27 @@ export function AppSidebar() {
                     <Link href={item.url} data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, "-")}`}>
                       <item.icon />
                       <span>{item.title}</span>
+                      {item.title === "Requests" && pendingRequests > 0 && (
+                        <Badge className="ml-auto text-[10px] h-4 px-1.5 bg-amber-500 text-white border-transparent">
+                          {pendingRequests}
+                        </Badge>
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+
+              {/* Profile — employees only */}
+              {!isAdmin && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={isActive("/profile")} tooltip="Profile">
+                    <Link href="/profile" data-testid="nav-profile">
+                      <UserCircle />
+                      <span>My Profile</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
 
               {/* Settings — visible to employees too */}
               {!isAdmin && (
@@ -197,6 +240,11 @@ export function AppSidebar() {
                 <Link href={item.url} data-testid={`nav-${item.title.toLowerCase()}`}>
                   <item.icon />
                   <span>{item.title}</span>
+                  {item.title === "Help" && unreadMessages > 0 && (
+                    <Badge className="ml-auto text-[10px] h-4 px-1.5 bg-blue-500 text-white border-transparent">
+                      {unreadMessages}
+                    </Badge>
+                  )}
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>

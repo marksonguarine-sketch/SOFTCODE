@@ -1,0 +1,158 @@
+Dashboard
+
+Live clock & date on dashboard header — Show current Philippine time and date, auto-updating every second. Small but makes the app feel alive.
+Shift summary widget — Show today's totals broken down by AM and PM shift: orders processed, revenue collected, new customers added.
+Daily sales goal / target bar — Admin sets a daily revenue target in settings; dashboard shows a progress bar and percentage toward that goal.
+Top 5 selling items today — Mini leaderboard card showing which items moved the most units today.
+Top 5 customers by revenue this month — Card showing highest-spending customers with avatar initials and total amount.
+Revenue vs last week sparkline — Tiny inline chart on the revenue card showing the 7-day trend so staff can see if sales are going up or down at a glance.
+Gross profit margin card — Calculate (revenue minus cost of goods) divided by revenue and show it as a percentage card. Requires cost price tracking on items.
+Overdue payments alert banner — If any order is unpaid and more than 3 days old, show a dismissible red banner at the top of the dashboard.
+Employee activity feed — Real-time list of recent actions across all users: order created, payment logged, item restocked, reservation confirmed.
+Weather widget — Show local weather pulled from a free API. Useful for delivery planning on rainy days.
+
+
+Orders
+
+Order aging indicator — Color-code orders by how long they have been pending: green for under 1 day, amber for 1 to 3 days, red for over 3 days.
+Duplicate order detection — Warn staff if the same customer placed a very similar order within the last 24 hours before confirming.
+Order templates — Save a common order (like a contractor's weekly supply list) as a named template for one-click re-ordering.
+Internal order comments thread — Staff can leave internal comments on any order. These are visible only to staff, never to customers.
+Order activity timeline — On the order detail page, a vertical timeline showing every status change with the timestamp and the name of the user who made it.
+Attach photos to orders — Staff can upload photos directly to an order: delivery proof, damaged goods documentation, etc.
+Customer signature capture — On walkin orders using a tablet or touch screen, capture a digital signature from the customer upon pickup.
+Estimated completion time (ETA) — Staff sets an ETA on an order; other staff can see it so they can manage customer expectations.
+Assign order to a specific staff member — Each order can be assigned to one employee who owns it and is responsible for its fulfillment.
+Reorder button on completed orders — One click creates a new draft order pre-filled with the same customer, items, and quantities from a past order.
+Order cancellation reason log — When cancelling an order, require the staff member to select a reason and optionally add a note. Stored and shown on the detail page.
+SMS or email notification on status change — When fulfillment status changes, automatically send the customer a message with the update.
+Print packing list — Generate a simple PDF with just item names and quantities, no prices, for the warehouse or bodega team to use when pulling stock.
+Partial delivery tracking — Mark individual items within one order as delivered while others are still being prepared or awaiting stock.
+Bulk CSV export of orders — Download all filtered orders as a CSV file for external analysis in Excel.
+
+
+Inventory
+
+Barcode scanner support — Allow staff to scan a product barcode to instantly look up or add an item during order creation without typing.
+Bulk CSV import for items — Upload a spreadsheet to add or update many inventory items in one shot instead of one by one.
+Item image upload — Attach a product photo to each inventory item. The image shows in the item search dropdown during order creation.
+Item variants and unit types — Support multiple unit types per item such as bag, sack, piece, meter, with conversion ratios between them.
+Reorder point alerts per item — Each item has a configurable reorder threshold. When stock drops below it, an alert fires automatically.
+Supplier management — Link each item to a supplier with name, contact number, and address. One click to start a purchase order for that supplier.
+Purchase order (PO) module — Full workflow: create a PO for a supplier, mark it as sent, receive goods against it, and have stock update automatically on receipt.
+Stock adjustment reason log — Every manual stock edit must have a reason selected from a dropdown: damaged goods, miscounted, theft, customer return, etc.
+Item location / bin tracking — Assign a physical shelf or bin code to each item like A3-Row2 so staff can find it quickly in the store.
+Expiry date tracking for perishable materials — For cement, paint, adhesives, and similar items, track batch expiry dates and warn staff when a batch is near expiry.
+Per-item stock movement chart — A chart on each item's detail page showing stock level over time: units received vs units sold over the last 30 or 90 days.
+Dead stock identification — Automatically flag items with zero sales in the last 60 days as dead stock with a suggested action like discounting or returning to supplier.
+Item cost price tracking — Track the purchase cost separately from the selling price. Auto-calculate gross margin per item and show it in the inventory table.
+Print item labels and barcodes — Generate a printable PDF sheet of barcodes or QR codes for physical shelf labeling.
+Multi-location or branch stock tracking — If the business opens a second branch, track stock separately per location.
+Stock value summary by category — Show the total peso value of stock per category so management knows where capital is tied up.
+Low stock auto-draft purchase order — When stock falls below reorder point, the system auto-creates a draft PO for the linked supplier that staff just review and approve.
+
+
+Customers
+
+Customer profile page — A dedicated page per customer showing full order history, total lifetime spend, payment reliability, and staff notes.
+Customer loyalty tiers — Bronze, Silver, and Gold tiers based on cumulative spend. Show the tier badge on the customer profile and in the order creation dropdown.
+Customer credit limit — Set a maximum outstanding balance per customer. Warn staff if a new order would push them over their credit limit.
+Customer tags and groups — Tag customers as Contractor, Walk-in Regular, Wholesaler, VIP, etc. Filter orders and reports by tag.
+Bulk customer import from CSV — Upload a spreadsheet to add many customers at once from an existing contact list.
+Duplicate customer detection — Warn when a new customer's phone number already exists in the system before saving.
+Customer accounts receivable (AR) tracking — Track the total balance owed per customer. Show a total AR summary on the billing page.
+Customer communication log — Log every contact with a customer: calls, emails, messages, with the date, staff member name, and a short summary.
+Blacklist or block a customer — Mark a customer as blacklisted due to non-payment or bad behavior. Warn staff with a red alert when they try to create an order for that customer.
+Customer birthday field — Store each customer's birthday. A dashboard widget shows customers with birthdays this week for relationship management.
+Customer notes pinning — Pin important notes on a customer profile so they always appear at the top regardless of when they were written.
+
+
+Billing & Payments
+
+Installment plan support — Split an order balance into a set number of installments with individual due dates. Track each installment payment separately.
+Payment receipt PDF — Generate a clean, branded payment receipt PDF for any recorded payment. Downloadable and printable.
+Formal invoice generation — Generate a proper VAT invoice or sales invoice PDF for any order, with company letterhead, line items, and payment terms.
+Overdue payment automated reminders — A cron job that sends internal notifications or SMS messages for all unpaid orders past their expected payment date.
+GCash reference number verification prompt — When a GCash payment is recorded, require the staff to enter the reference number and flag it as pending verification until confirmed.
+Daily cash drawer reconciliation — End-of-day form where staff enters the physical cash they counted. System compares it to recorded cash sales and flags any discrepancy.
+VAT calculation — Add a configurable VAT rate in settings. Auto-calculate VAT on all orders and show it as a separate line on invoices and receipts.
+Discount coupon / promo code entry at billing — Staff manually enters a coupon code at the time of payment. System validates it and applies the discount.
+Split payment support — Allow one order to be paid partly in cash and partly in GCash in a single transaction, both amounts recorded separately.
+Outstanding balance summary at top of billing page — A banner showing total unpaid balance across all customers, how many orders are overdue, and the oldest unpaid date.
+Payment method performance summary — How much of today's revenue came in via cash vs GCash vs COD. Shown as a small bar chart on the billing page.
+
+
+Reservations
+
+Export reservations to Google Calendar (.ics file) — Download all upcoming reservations as an .ics file that opens in Google Calendar, Apple Calendar, or Outlook.
+Reservation capacity limit per day — Admin sets a maximum number of reservations allowed per day. The system blocks new ones once the limit is hit.
+Reservation deposit tracking — Track whether the required upfront deposit has been received. Block confirming the reservation until the deposit is logged.
+Customer self-service reservation form — A public-facing link or form (no login required) where customers fill out their details. Staff review and confirm or reject it.
+Reservation no-show tracking — Mark a reservation as a no-show when the customer does not appear. Track the no-show rate per customer and flag repeat offenders.
+Automatic 24-hour reminder notifications — 24 hours and 2 hours before the scheduled reservation, auto-send a notification to the assigned staff member.
+Reservation rescheduling with history — Change the scheduled date of a reservation with one click. The original date is saved in the change history log.
+Walk-in queue number system — For walk-in customers, generate a queue number automatically. A separate TV-friendly display screen shows the current queue.
+Reservation color coding by status on calendar — Each status has a distinct color on the calendar: pending is amber, confirmed is blue, completed is green, cancelled is red.
+
+
+Offers & Discounts
+
+Offer usage cap — Set a maximum number of times an offer can be used in total, or a per-customer limit.
+Customer-specific or group-specific offers — Create offers that only apply to a specific customer or to a customer tag like VIP or Contractor.
+Minimum order value to trigger offer — Offer only activates if the order total exceeds a set threshold, like 20% off for orders above ₱2,000.
+Combo deal offers — Buy Item A and Item B together in the same order and get a discount on the combination.
+Flash sale countdown timer — For time-limited offers, show a live countdown timer on the offers page and inside the Create Order panel.
+Offer activation notification to staff on login — If a new offer was activated since a staff member last logged in, show them a brief banner about it.
+Full offer change history / audit log — Every edit to every offer is logged: who changed what field, what the old value was, and when.
+
+
+Reports & Analytics
+
+Profit and loss (P&L) statement — Monthly income statement: revenue minus cost of goods sold minus operating expenses equals net profit. Exportable to PDF and Excel.
+Peak hours heatmap report — A heatmap showing order volume by hour of the day and day of the week, so management can staff accordingly.
+Staff performance report — Orders processed, payments recorded, and revenue generated per employee over a selected period.
+Customer acquisition report — How many new customers were added per month. New vs returning customer split shown as a chart.
+Aged receivables report — Outstanding customer balances grouped by how old they are: 0 to 30 days, 31 to 60, 61 to 90, and over 90 days overdue.
+Inventory valuation report — Total inventory value at cost price vs at selling price. Shows potential revenue if all current stock is sold.
+Delivery performance report — Track on-time vs late deliveries and average fulfillment time per order type over a selected period.
+Scheduled auto-email reports — Admin configures daily or weekly reports to be automatically generated and emailed as PDF attachments.
+Side-by-side period comparison — Compare any two date ranges on the same chart, like January vs February or this year vs last year.
+Category sales breakdown report — Revenue and units sold grouped by item category. Useful for knowing which product lines drive the most business.
+
+
+Users & Access
+
+Role-based page permissions matrix — Admin configures which pages and which actions (create, edit, delete) each role can access from a visual grid.
+Employee shift / time log — Track login and logout times per user per day. Show a simple timesheet view in the users management page.
+Two-factor authentication (2FA) — Optional TOTP-based 2FA for admin accounts using Google Authenticator or any compatible app.
+User profile photos — Each user uploads a profile photo. Shown in activity feeds, order assignments, and system logs.
+Password strength enforcement — Enforce minimum password requirements (length, uppercase, special character) on account creation and password reset.
+Concurrent session limit — Prevent the same account from being logged in on more than one device at the same time.
+Full admin audit trail per user — A detailed log of every action any user performed: which page they visited, which record they created, edited, or deleted.
+
+
+Settings & System
+
+Company logo upload — Upload the company logo once in settings. It appears automatically on all generated PDFs: invoices, receipts, reservation confirmations.
+Business hours configuration — Set open and close times per day of the week. Show a "Closed today" banner when the system is accessed outside business hours.
+Notification preferences per user — Each user chooses which events they want notifications for: new orders, low stock, payment received, etc.
+Soft delete and recycle bin — Deleted orders, customers, and items are not permanently removed. They go to a recycle bin and can be restored within 30 days.
+System health dashboard — Show database connection status, last backup time, number of active sessions, server uptime, and disk usage.
+Maintenance mode toggle — Admin flips a switch in settings. All non-admin users immediately see a maintenance screen instead of the app.
+Custom field builder — Admin adds custom fields to orders or customers without touching code. For example, a Contractor License Number field or a Project Site Address field.
+Changelog / version history page — A page in the app listing what changed in each version update with dates and brief descriptions.
+
+
+UX & Mobile
+
+Progressive Web App (PWA) support — Make the app installable on Android and iOS home screens so staff can use it like a native app with offline basic viewing.
+Global command palette — Press Ctrl+K anywhere in the app to open a spotlight-style search. Search customers, orders, items, and pages all at once.
+Unsaved changes warning — If a user tries to navigate away from a half-filled form, show a confirmation dialog: "You have unsaved changes. Are you sure you want to leave?"
+Collapsible sidebar — The sidebar can be pinned open or collapsed down to icon-only mode to give more horizontal space on smaller screens.
+Table column visibility toggle — On any data table, users can show or hide individual columns. The preference is saved so it persists across sessions.
+Recently viewed quick access — A small popover on the sidebar showing the last 5 orders, items, or customers the user viewed for fast navigation.
+Inline help tooltips on complex fields — Small question mark icons next to fields like order type and payment method that explain the option when hovered.
+Keyboard shortcut reference sheet — Press "?" anywhere in the app to open a modal listing all available keyboard shortcuts.
+Breadcrumb navigation on all detail pages — Always show where the user is: Dashboard > Orders > Order #JH-0042 so they can backtrack quickly.
+Print-friendly CSS for all pages — Add proper print styles so any page can be printed cleanly from the browser without the sidebar and nav appearing.
+

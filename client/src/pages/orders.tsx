@@ -34,8 +34,8 @@ import { Textarea } from "@/components/ui/textarea";
 
 type OrderItemLocal = { itemId: string; itemName: string; qty: number; originalUnitPrice: number; discountedUnitPrice: number; discountApplied: boolean; offerName: string; lineTotal: number };
 
-function PoolAdminRow({ order, allUsers, onAssign, onNavigate }: {
-  order: IOrder; allUsers: SimpleUser[]; onAssign: (username: string) => void; onNavigate: () => void;
+function PoolAdminRow({ order, allUsers, onAssignClick, onNavigate }: {
+  order: IOrder; allUsers: SimpleUser[]; onAssignClick: (username: string) => void; onNavigate: () => void;
 }) {
   const [assignVal, setAssignVal] = useState("");
   return (
@@ -46,7 +46,7 @@ function PoolAdminRow({ order, allUsers, onAssign, onNavigate }: {
       <TableCell className="text-right cursor-pointer" onClick={onNavigate}>{formatCurrency(order.totalAmount)}</TableCell>
       <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
       <TableCell onClick={(e) => e.stopPropagation()}>
-        <Select value={assignVal} onValueChange={(v) => { setAssignVal(v); onAssign(v); }}>
+        <Select value={assignVal} onValueChange={(v) => { setAssignVal(v); onAssignClick(v); setAssignVal(""); }}>
           <SelectTrigger className="h-7 text-xs w-[130px]" data-testid={`select-pool-assign-${order._id}`}><SelectValue placeholder="Assign..." /></SelectTrigger>
           <SelectContent>
             {allUsers.map((u) => <SelectItem key={u.username} value={u.username}>{u.username}</SelectItem>)}
@@ -54,6 +54,90 @@ function PoolAdminRow({ order, allUsers, onAssign, onNavigate }: {
         </Select>
       </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Confirmation dialog shown when admin attempts to assign an order to a user.
+ * Displays the user's currently pending tasks (5 per page, index pagination)
+ * so the admin can make an informed decision about workload distribution.
+ */
+function AssignConfirmDialog({ open, onClose, targetUsername, orderTrackingNumber, allOrders, onConfirm, isPending }: {
+  open: boolean;
+  onClose: () => void;
+  targetUsername: string;
+  orderTrackingNumber: string;
+  allOrders: IOrder[];
+  onConfirm: () => void;
+  isPending: boolean;
+}) {
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 5;
+  const pendingTasks = allOrders.filter((o) =>
+    o.assignedTo === targetUsername &&
+    !o.completedProcessingAt &&
+    o.fulfillmentStatus !== "completed" &&
+    o.fulfillmentStatus !== "cancelled" &&
+    o.fulfillmentStatus !== "ready"
+  );
+  const totalPages = Math.ceil(pendingTasks.length / PAGE_SIZE);
+  const pagedTasks = pendingTasks.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setPage(1); } }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserCheck className="h-4 w-4 text-primary" />Confirm Assignment
+          </DialogTitle>
+          <DialogDescription>
+            Are you sure you want to assign order <span className="font-mono font-semibold">{orderTrackingNumber}</span> to <strong>{targetUsername}</strong>?
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Current pending tasks ({pendingTasks.length})</span>
+            {pendingTasks.length === 0 && <Badge variant="outline" className="text-xs">No active tasks</Badge>}
+          </div>
+          {pendingTasks.length > 0 && (
+            <div className="space-y-1.5 max-h-[260px] overflow-y-auto">
+              {pagedTasks.map((o) => (
+                <div key={o._id} className="text-xs p-2 rounded-md bg-muted/40 flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono font-semibold flex-shrink-0">{o.trackingNumber}</span>
+                    <span className="text-muted-foreground truncate">· {o.customerName}</span>
+                  </div>
+                  <FulfillmentBadge status={o.fulfillmentStatus} />
+                </div>
+              ))}
+            </div>
+          )}
+          {totalPages > 1 && (
+            <div className="flex justify-center gap-1">
+              {Array.from({ length: totalPages }).map((_, i) => (
+                <Button
+                  key={i}
+                  size="sm"
+                  variant={page === i + 1 ? "default" : "outline"}
+                  className="h-7 w-7 p-0 text-xs"
+                  onClick={() => setPage(i + 1)}
+                  data-testid={`page-${i + 1}`}
+                >
+                  {i + 1}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={onConfirm} disabled={isPending} data-testid="button-confirm-assign">
+            {isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+            Assign
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -628,6 +712,7 @@ export default function OrdersPage() {
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<string>("");
+  const [assignPending, setAssignPending] = useState<{ orderId: string; trackingNumber: string; username: string } | null>(null);
 
   const { data: ordersData, isLoading } = useQuery<{ success: boolean; data: { orders: IOrder[]; total: number } }>({
     queryKey: ["/api/orders"],
@@ -650,7 +735,7 @@ export default function OrdersPage() {
     },
   });
 
-  const { data: myActiveData } = useQuery<{ success: boolean; data: { order: IOrder | null } }>({
+  const { data: myActiveData } = useQuery<{ success: boolean; data: { order: IOrder | null; orders?: IOrder[] } }>({
     queryKey: ["/api/orders/my-active"],
     enabled: !isAdmin,
   });
@@ -725,9 +810,21 @@ export default function OrdersPage() {
   const myAssignedOrders = assignedData?.data?.orders || [];
   const poolOrders = poolData?.data?.orders || [];
   const myBlockingOrder = myActiveData?.data?.order || null;
+  const myBlockingOrders = myActiveData?.data?.orders || (myBlockingOrder ? [myBlockingOrder] : []);
 
-  const myPendingAssigned = myAssignedOrders.filter((o) => o.currentStatus !== "Completed");
-  const isTaskLocked = !isAdmin && !!myBlockingOrder;
+  // "Assigned to You" pending list excludes:
+  // - currentStatus === "Completed"
+  // - completedProcessingAt is set (Mark Done was clicked)
+  // - fulfillmentStatus is "ready", "completed", or "cancelled"
+  const myPendingAssigned = myAssignedOrders.filter(
+    (o) =>
+      o.currentStatus !== "Completed" &&
+      !o.completedProcessingAt &&
+      o.fulfillmentStatus !== "ready" &&
+      o.fulfillmentStatus !== "completed" &&
+      o.fulfillmentStatus !== "cancelled"
+  );
+  const isTaskLocked = !isAdmin && myBlockingOrders.length > 0;
   const employees = allUsers.filter((u) => u.role === "EMPLOYEE");
 
   // ── Admin: Assigned Orders (all assigned orders from main list) ──────────────
@@ -890,12 +987,26 @@ export default function OrdersPage() {
             <h2 className="text-lg font-semibold text-muted-foreground">Pending Pool</h2>
             {poolOrders.length > 0 && <Badge variant="outline">{poolOrders.length} available</Badge>}
           </div>
-          {isTaskLocked && myBlockingOrder && (
+          {isTaskLocked && myBlockingOrders.length > 0 && (
             <div className="flex items-start gap-3 p-3 rounded-md bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-sm text-amber-800 dark:text-amber-300">
               <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-              <span>
-                You have an active order <strong>{myBlockingOrder.trackingNumber}</strong>. Mark it done before claiming a new one.
-              </span>
+              <div className="flex-1">
+                <p className="font-medium mb-1">
+                  You have {myBlockingOrders.length} active order{myBlockingOrders.length !== 1 ? "s" : ""}. Mark them done before claiming new ones:
+                </p>
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  {myBlockingOrders.map((o) => (
+                    <button
+                      key={o._id}
+                      onClick={() => navigate(`/orders/${o._id}`)}
+                      className="font-mono text-xs px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 border border-amber-300 dark:border-amber-700 hover:bg-amber-200 dark:hover:bg-amber-900"
+                      data-testid={`blocking-order-${o._id}`}
+                    >
+                      {o.trackingNumber}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
           <div className="relative max-w-sm">
@@ -1111,9 +1222,10 @@ export default function OrdersPage() {
                         key={order._id}
                         order={order}
                         allUsers={allUsers}
-                        onAssign={(username) => {
-                          const found = allUsers.find((u) => u.username === username);
-                          assignMutation.mutate({ orderId: order._id, username, displayName: found?.username || "" });
+                        onAssignClick={(username) => {
+                          if (username && username !== "__unassign__") {
+                            setAssignPending({ orderId: order._id, trackingNumber: order.trackingNumber, username });
+                          }
                         }}
                         onNavigate={() => navigate(`/orders/${order._id}`)}
                       />
@@ -1128,6 +1240,21 @@ export default function OrdersPage() {
 
       {/* Dialogs */}
       <CreateOrderDialog open={createOpen} onClose={() => setCreateOpen(false)} allItems={allItems} />
+
+      {assignPending && (
+        <AssignConfirmDialog
+          open={!!assignPending}
+          onClose={() => setAssignPending(null)}
+          targetUsername={assignPending.username}
+          orderTrackingNumber={assignPending.trackingNumber}
+          allOrders={orders}
+          isPending={assignMutation.isPending}
+          onConfirm={() => {
+            assignMutation.mutate({ orderId: assignPending.orderId, username: assignPending.username, displayName: assignPending.username });
+            setAssignPending(null);
+          }}
+        />
+      )}
     </div>
   );
 }

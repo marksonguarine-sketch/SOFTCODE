@@ -45,6 +45,9 @@ import {
   ALLOWED_PAYMENT_METHODS,
 } from "@shared/schema";
 import Offer from "./models/Offer";
+import RequestModel from "./models/Request";
+import Message from "./models/Message";
+import EmployeeProfile from "./models/EmployeeProfile";
 
 let io: SocketIOServer;
 
@@ -1549,16 +1552,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // My active order (for task-lock check on the client)
+  // My active orders (for task-lock check on the client)
+  // Returns ALL orders that block the employee from claiming a new one.
   app.get("/api/orders/my-active", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const me = req.user!.username;
-      const active = await Order.findOne({
+      const activeOrders = await Order.find({
         assignedTo: me,
         $or: [{ completedProcessingAt: { $exists: false } }, { completedProcessingAt: null }],
         fulfillmentStatus: { $nin: ["completed", "cancelled", "ready"] },
-      }).lean();
-      return ok(res, { order: active || null });
+      }).select("trackingNumber customerName fulfillmentStatus assignedAt").lean();
+      // Keep backwards-compat: also return the first as `order`
+      return ok(res, { order: activeOrders[0] || null, orders: activeOrders });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -2901,6 +2906,394 @@ ${JSON.stringify(fullData, null, 0)}`;
     } catch (err: any) {
       console.error("Voice insight error:", err.message);
       return fail(res, 500, err.message || "Voice generation failed");
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // REQUESTS (employee → admin approval workflows: ADD_ITEM, TRANSFER_ORDER, LEAVE)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // List requests (admin sees all; employee sees own)
+  app.get("/api/requests", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { status, requestType, mine } = req.query as Record<string, string>;
+      const filter: any = {};
+      if (status) filter.status = status;
+      if (requestType) filter.requestType = requestType;
+      if (req.user!.role !== "ADMIN" || mine === "true") {
+        filter.requester = req.user!.username;
+      }
+      const list = await RequestModel.find(filter).sort({ createdAt: -1 }).lean();
+      return ok(res, list);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Create request (employee)
+  app.post("/api/requests", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { requestType, itemPayload, transferPayload, leavePayload, reason } = req.body;
+      if (!["ADD_ITEM", "TRANSFER_ORDER", "LEAVE"].includes(requestType)) {
+        return fail(res, 400, "Invalid request type");
+      }
+      const me = req.user!.username;
+      const doc = await RequestModel.create({
+        requestType,
+        requester: me,
+        requesterDisplay: me,
+        status: "pending",
+        reason: reason || "",
+        itemPayload,
+        transferPayload,
+        leavePayload,
+        history: [{ status: "pending", actor: me, timestamp: new Date(), note: "Request submitted" }],
+      });
+      await logAction("REQUEST_CREATED", me, doc._id.toString(), { requestType });
+      emitEvent("request:created", { requestId: doc._id.toString(), requestType, requester: me });
+      return ok(res, doc);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Cancel request (employee, only own pending)
+  app.post("/api/requests/:id/cancel", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const doc = await RequestModel.findById(req.params.id);
+      if (!doc) return fail(res, 404, "Request not found");
+      if (doc.requester !== req.user!.username) return fail(res, 403, "Not your request");
+      if (doc.status !== "pending") return fail(res, 400, "Cannot cancel a non-pending request");
+      doc.status = "cancelled";
+      doc.decidedAt = new Date();
+      doc.history.push({ status: "cancelled", actor: req.user!.username, timestamp: new Date(), note: "Cancelled by requester" });
+      await doc.save();
+      await logAction("REQUEST_CANCELLED", req.user!.username, doc._id.toString(), {});
+      emitEvent("request:updated", { requestId: doc._id.toString(), status: "cancelled" });
+      return ok(res, doc);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Accept request (admin)
+  app.post("/api/requests/:id/accept", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const { note } = req.body;
+      const doc = await RequestModel.findById(req.params.id);
+      if (!doc) return fail(res, 404, "Request not found");
+      if (doc.status !== "pending") return fail(res, 400, "Request already decided");
+
+      // Perform the actual action depending on request type
+      if (doc.requestType === "ADD_ITEM" && doc.itemPayload) {
+        await Item.create({
+          itemName: doc.itemPayload.itemName,
+          category: doc.itemPayload.category || "Uncategorized",
+          unitPrice: doc.itemPayload.unitPrice || 0,
+          currentQuantity: doc.itemPayload.currentQuantity || 0,
+          supplierName: doc.itemPayload.supplier || "",
+        });
+        await logAction("ITEM_CREATED_FROM_REQUEST", req.user!.username, doc.itemPayload.itemName || "");
+      } else if (doc.requestType === "TRANSFER_ORDER" && doc.transferPayload?.orderId && doc.transferPayload?.targetUsername) {
+        const target = doc.transferPayload.targetUsername;
+        const order = await Order.findByIdAndUpdate(
+          doc.transferPayload.orderId,
+          {
+            $set: { assignedTo: target, assignedToName: target, assignedAt: new Date(), assignedBy: req.user!.username },
+            $unset: { startedAt: "", completedProcessingAt: "" },
+            $push: { statusHistory: { status: "assigned", timestamp: new Date(), actor: req.user!.username, note: `Transferred via request approval (from ${doc.requester} to ${target})` } },
+          },
+          { new: true }
+        );
+        if (order) {
+          emitEvent("order:assigned", { orderId: order._id.toString(), trackingNumber: order.trackingNumber, assignedTo: target, assignedBy: req.user!.username, customerName: order.customerName });
+        }
+      } else if (doc.requestType === "LEAVE") {
+        await EmployeeProfile.updateOne({ username: doc.requester }, { $inc: { approvedLeaves: 1 } }, { upsert: true });
+      }
+
+      doc.status = "accepted";
+      doc.approver = req.user!.username;
+      doc.approverNote = note || "";
+      doc.decidedAt = new Date();
+      doc.history.push({ status: "accepted", actor: req.user!.username, timestamp: new Date(), note: note || "Accepted" });
+      await doc.save();
+      await logAction("REQUEST_ACCEPTED", req.user!.username, doc._id.toString(), { requestType: doc.requestType });
+      emitEvent("request:updated", { requestId: doc._id.toString(), status: "accepted" });
+      return ok(res, doc);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Decline request (admin)
+  app.post("/api/requests/:id/decline", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const { note } = req.body;
+      const doc = await RequestModel.findById(req.params.id);
+      if (!doc) return fail(res, 404, "Request not found");
+      if (doc.status !== "pending") return fail(res, 400, "Request already decided");
+
+      if (doc.requestType === "LEAVE") {
+        await EmployeeProfile.updateOne({ username: doc.requester }, { $inc: { rejectedLeaves: 1 } }, { upsert: true });
+      }
+
+      doc.status = "declined";
+      doc.approver = req.user!.username;
+      doc.approverNote = note || "";
+      doc.decidedAt = new Date();
+      doc.history.push({ status: "declined", actor: req.user!.username, timestamp: new Date(), note: note || "Declined" });
+      await doc.save();
+      await logAction("REQUEST_DECLINED", req.user!.username, doc._id.toString(), { requestType: doc.requestType });
+      emitEvent("request:updated", { requestId: doc._id.toString(), status: "declined" });
+      return ok(res, doc);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MESSAGES (admin ↔ employee internal messaging)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // List messages for current user (inbox)
+  app.get("/api/messages", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const me = req.user!.username;
+      const { direction } = req.query as Record<string, string>;
+      const filter: any = {};
+      if (direction === "sent") filter.fromUsername = me;
+      else filter.toUsername = me;
+      const list = await Message.find(filter).sort({ createdAt: -1 }).lean();
+      return ok(res, list);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Admin: list all messages (for admin's message management)
+  app.get("/api/messages/admin/all", authMiddleware, adminOnly, async (_req: AuthRequest, res: Response) => {
+    try {
+      const list = await Message.find().sort({ createdAt: -1 }).lean();
+      return ok(res, list);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Send message
+  app.post("/api/messages", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { toUsername, subject, body } = req.body;
+      if (!toUsername || !body) return fail(res, 400, "Recipient and body are required");
+      const me = req.user!.username;
+      const direction = req.user!.role === "ADMIN" ? "ADMIN_TO_EMPLOYEE" : "EMPLOYEE_TO_ADMIN";
+      const msg = await Message.create({
+        direction, fromUsername: me, toUsername, subject: subject || "", body, isRead: false,
+      });
+      await logAction("MESSAGE_SENT", me, toUsername, { subject });
+      emitEvent("message:new", { messageId: msg._id.toString(), toUsername, fromUsername: me });
+      return ok(res, msg);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Mark message as read
+  app.patch("/api/messages/:id/read", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const me = req.user!.username;
+      const msg = await Message.findById(req.params.id);
+      if (!msg) return fail(res, 404, "Message not found");
+      if (msg.toUsername !== me) return fail(res, 403, "Not your message");
+      msg.isRead = true;
+      msg.readAt = new Date();
+      await msg.save();
+      return ok(res, msg);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Delete single message (requires password verification on client side)
+  app.delete("/api/messages/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const me = req.user!.username;
+      const msg = await Message.findById(req.params.id);
+      if (!msg) return fail(res, 404, "Message not found");
+      // Allow admin to delete any; users can delete their own (sent or received)
+      if (req.user!.role !== "ADMIN" && msg.toUsername !== me && msg.fromUsername !== me) {
+        return fail(res, 403, "Not allowed");
+      }
+      await Message.findByIdAndDelete(req.params.id);
+      await logAction("MESSAGE_DELETED", me, String(req.params.id));
+      return ok(res, { deleted: true });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Bulk delete (admin only) — requires password confirmation on client
+  app.post("/api/messages/bulk-delete", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const { ids } = req.body as { ids?: string[] };
+      if (!ids?.length) {
+        await Message.deleteMany({});
+      } else {
+        await Message.deleteMany({ _id: { $in: ids } });
+      }
+      await logAction("MESSAGES_BULK_DELETED", req.user!.username, "", { count: ids?.length || "all" });
+      return ok(res, { deleted: true });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // EMPLOYEE PROFILES (extended profile data: photo, email, contact, employee ID)
+  // ════════════════════════════════════════════════════════════════════════════
+
+  // Get my profile
+  app.get("/api/employee-profile/me", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const me = req.user!.username;
+      let profile = await EmployeeProfile.findOne({ username: me });
+      if (!profile) {
+        // Auto-create
+        const userDoc = await User.findById(req.user!._id);
+        const empId = `JOAP-${String(Date.now()).slice(-5).padStart(5, "0")}`;
+        profile = await EmployeeProfile.create({
+          username: me,
+          employeeId: empId,
+          hireDate: userDoc?.createdAt || new Date(),
+        });
+      }
+      return ok(res, profile);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Get profile by username (admin only)
+  app.get("/api/employee-profile/:username", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      let profile = await EmployeeProfile.findOne({ username: req.params.username });
+      if (!profile) {
+        const userDoc = await User.findOne({ username: req.params.username });
+        if (!userDoc) return fail(res, 404, "User not found");
+        const empId = `JOAP-${String(Date.now()).slice(-5).padStart(5, "0")}`;
+        profile = await EmployeeProfile.create({
+          username: String(req.params.username),
+          employeeId: empId,
+          hireDate: userDoc.createdAt,
+        });
+      }
+      return ok(res, profile);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Update profile (self or admin)
+  app.patch("/api/employee-profile/:username", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const isAdmin = req.user!.role === "ADMIN";
+      if (!isAdmin && req.user!.username !== req.params.username) return fail(res, 403, "Not allowed");
+      const allowedFields = ["photoDataUrl", "email", "contactNumber", "adminRemarks"];
+      const updates: any = {};
+      for (const key of allowedFields) {
+        if (key in req.body) updates[key] = req.body[key];
+      }
+      // adminRemarks is admin-only
+      if (updates.adminRemarks && !isAdmin) delete updates.adminRemarks;
+      const profile = await EmployeeProfile.findOneAndUpdate(
+        { username: req.params.username },
+        updates,
+        { new: true, upsert: true }
+      );
+      await logAction("EMPLOYEE_PROFILE_UPDATED", req.user!.username, String(req.params.username));
+      return ok(res, profile);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Employee summary for admin profile modal — productivity, orders, attendance
+  app.get("/api/employee-profile/:username/summary", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const username = req.params.username;
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+      const [completedOrders, recentOrders, recentReservations, recentLogs, profile, userDoc] = await Promise.all([
+        Order.countDocuments({ assignedTo: username, fulfillmentStatus: "completed" }),
+        Order.find({ assignedTo: username }).sort({ createdAt: -1 }).limit(20).lean(),
+        Order.find({
+          assignedTo: username,
+          orderType: { $in: ["online_reservation", "walkin_reservation"] },
+          createdAt: { $gte: since },
+        }).sort({ createdAt: -1 }).limit(20).lean(),
+        SystemLog.find({ actor: username }).sort({ createdAt: -1 }).limit(50).lean(),
+        EmployeeProfile.findOne({ username }).lean(),
+        User.findOne({ username }).lean(),
+      ]);
+
+      const reservationsCount30d = await Order.countDocuments({
+        assignedTo: username,
+        orderType: { $in: ["online_reservation", "walkin_reservation"] },
+        createdAt: { $gte: since },
+      });
+      const pendingLeaves = await RequestModel.countDocuments({ requester: username, requestType: "LEAVE", status: "pending" });
+
+      // Per-day order count for last 7 days
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const perDay = await Order.aggregate([
+        { $match: { assignedTo: username, createdAt: { $gte: sevenDaysAgo } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } },
+            count: { $sum: 1 },
+            revenue: { $sum: "$totalAmount" },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]);
+
+      // lastLogin is tracked separately (UserSession lastActivity); use createdAt as fallback
+      const session = await UserSession.findOne({ userId: userDoc?._id }).sort({ lastActivity: -1 }).lean();
+      const lastLogin = session?.lastActivity || userDoc?.createdAt || null;
+      return ok(res, {
+        profile,
+        user: userDoc ? { username: userDoc.username, role: userDoc.role, isActive: userDoc.isActive, lastLogin, createdAt: userDoc.createdAt } : null,
+        kpi: {
+          completedOrders,
+          reservationsCreated30d: reservationsCount30d,
+          absences30d: 0,
+          pendingLeaves,
+        },
+        recentOrders,
+        recentReservations,
+        recentLogs,
+        productivityChart: perDay,
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // List all employees (admin only) — used by Employees nav
+  app.get("/api/employees", authMiddleware, adminOnly, async (_req: AuthRequest, res: Response) => {
+    try {
+      const employees = await User.find({ role: "EMPLOYEE" }).select("-password").lean();
+      const usernames = employees.map((e) => e.username);
+      const profiles = await EmployeeProfile.find({ username: { $in: usernames } }).lean();
+      const profileMap = new Map(profiles.map((p) => [p.username, p]));
+      const enriched = employees.map((e) => ({
+        ...e,
+        profile: profileMap.get(e.username) || null,
+      }));
+      return ok(res, enriched);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
     }
   });
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, Minus, Equal } from "lucide-react";
+import { X, Calculator as CalcIcon } from "lucide-react";
 
 interface FloatingCalculatorProps {
   username: string;
@@ -20,11 +20,25 @@ function formatDisplay(val: string): string {
   return val;
 }
 
+/**
+ * Floating Casio-style calculator.
+ *
+ * Behavior:
+ * - Shows as a circular bubble button by default (CalcIcon).
+ * - Click bubble → expands to full calculator panel.
+ * - Click X → collapses back to bubble.
+ * - "display calculator: on/off" in Settings persists across sessions
+ *   via localStorage (key `joap_calc_${username}`). When turned off,
+ *   both bubble and panel are hidden entirely.
+ * - Dispatches/listens to the `joap-calc-toggle` event to sync with
+ *   the settings page in real time.
+ */
 export function FloatingCalculator({ username }: FloatingCalculatorProps) {
-  const [visible, setVisible] = useState(() => {
+  const [enabled, setEnabled] = useState(() => {
     const k = `joap_calc_${username}`;
     return localStorage.getItem(k) !== "false";
   });
+  const [expanded, setExpanded] = useState(false);
   const [display, setDisplay] = useState("0");
   const [prev, setPrev] = useState<number | null>(null);
   const [op, setOp] = useState<CalcOp>(null);
@@ -38,21 +52,23 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
 
   // Initialize position bottom-right
   useEffect(() => {
-    setPos({ x: window.innerWidth - 240, y: window.innerHeight - 380 });
+    setPos({ x: window.innerWidth - 72, y: window.innerHeight - 96 });
     setInitialized(true);
   }, []);
 
-  // Listen for toggle events from settings page
+  // Listen for settings page toggle
   useEffect(() => {
     function handleToggle(e: Event) {
       const detail = (e as CustomEvent).detail;
-      setVisible(detail?.enabled ?? true);
+      const isEnabled = detail?.enabled ?? true;
+      setEnabled(isEnabled);
+      if (!isEnabled) setExpanded(false);
     }
     window.addEventListener("joap-calc-toggle", handleToggle);
     return () => window.removeEventListener("joap-calc-toggle", handleToggle);
   }, []);
 
-  // Dragging
+  // Dragging (works for both bubble and panel)
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -61,21 +77,29 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
 
   useEffect(() => {
     if (!isDragging) return;
+    let dragged = false;
     function onMove(e: MouseEvent) {
       const dx = e.clientX - dragStart.current.mx;
       const dy = e.clientY - dragStart.current.my;
-      const newX = Math.max(0, Math.min(window.innerWidth - 220, dragStart.current.cx + dx));
-      const newY = Math.max(0, Math.min(window.innerHeight - 360, dragStart.current.cy + dy));
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragged = true;
+      const width = expanded ? 240 : 56;
+      const height = expanded ? 400 : 56;
+      const newX = Math.max(8, Math.min(window.innerWidth - width - 8, dragStart.current.cx + dx));
+      const newY = Math.max(8, Math.min(window.innerHeight - height - 8, dragStart.current.cy + dy));
       setPos({ x: newX, y: newY });
     }
-    function onUp() { setIsDragging(false); }
+    function onUp() {
+      setIsDragging(false);
+      // If user didn't drag (just clicked), toggle expanded state on bubble
+      if (!dragged && !expanded) setExpanded(true);
+    }
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
     return () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
-  }, [isDragging]);
+  }, [isDragging, expanded]);
 
   function inputDigit(digit: string) {
     if (waitingForOperand) {
@@ -124,24 +148,15 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
 
   function handlePercent() {
     const val = parseFloat(display);
-    if (prev !== null && op) {
-      setDisplay(String((prev * val) / 100));
-    } else {
-      setDisplay(String(val / 100));
-    }
+    if (prev !== null && op) setDisplay(String((prev * val) / 100));
+    else setDisplay(String(val / 100));
     setWaitingForOperand(true);
   }
 
-  function handleSign() {
-    const val = parseFloat(display);
-    setDisplay(String(-val));
-  }
+  function handleSign() { setDisplay(String(-parseFloat(display))); }
 
   function handleAC() {
-    setDisplay("0");
-    setPrev(null);
-    setOp(null);
-    setWaitingForOperand(false);
+    setDisplay("0"); setPrev(null); setOp(null); setWaitingForOperand(false);
   }
 
   function handleButton(label: string) {
@@ -162,18 +177,30 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
   function btnClass(label: string): string {
     const base = "flex items-center justify-center rounded-xl text-sm font-semibold cursor-pointer select-none transition-all duration-75 active:scale-95 h-10";
     if (label === "0") return `${base} col-span-2 px-4 justify-start`;
-    if (["÷", "×", "−", "+", "="].includes(label)) {
-      return `${base} bg-primary text-primary-foreground hover:bg-primary/90`;
-    }
-    if (["AC", "±", "%"].includes(label)) {
-      return `${base} bg-muted text-foreground hover:bg-muted/70`;
-    }
+    if (["÷", "×", "−", "+", "="].includes(label)) return `${base} bg-primary text-primary-foreground hover:bg-primary/90`;
+    if (["AC", "±", "%"].includes(label)) return `${base} bg-muted text-foreground hover:bg-muted/70`;
     return `${base} bg-card text-foreground hover:bg-accent border border-border`;
   }
 
-  if (!initialized || !visible) return null;
+  if (!initialized || !enabled) return null;
 
-  const currentVal = parseFloat(display);
+  // ─── BUBBLE MODE ────────────────────────────────────────────
+  if (!expanded) {
+    return (
+      <button
+        ref={calcRef as any}
+        className="fixed z-[9999] w-12 h-12 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-110 transition-all duration-150 ring-2 ring-background"
+        style={{ left: pos.x, top: pos.y, cursor: isDragging ? "grabbing" : "pointer" }}
+        onMouseDown={handleMouseDown}
+        title="Open calculator"
+        data-testid="calc-bubble"
+      >
+        <CalcIcon className="h-5 w-5" />
+      </button>
+    );
+  }
+
+  // ─── EXPANDED MODE ──────────────────────────────────────────
   const memStr = memory !== 0 ? `M: ${memory}` : "";
 
   return (
@@ -183,20 +210,21 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
       style={{ left: pos.x, top: pos.y, width: 220 }}
     >
       <div className="rounded-2xl overflow-hidden shadow-2xl border border-border/60 bg-background/95 backdrop-blur-sm">
-        {/* Title bar */}
+        {/* Title bar — draggable */}
         <div
           className="flex items-center justify-between px-3 py-2 bg-muted/80 cursor-grab active:cursor-grabbing"
           onMouseDown={handleMouseDown}
         >
-          <span className="text-xs font-semibold text-muted-foreground tracking-wide">CALCULATOR</span>
+          <span className="text-xs font-semibold text-muted-foreground tracking-wide">CASIO ◉</span>
           <div className="flex items-center gap-1">
             {memStr && <span className="text-[9px] text-primary font-medium">{memStr}</span>}
             <button
-              className="w-4 h-4 rounded-full bg-muted-foreground/20 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
-              onClick={() => setVisible(false)}
-              title="Close calculator"
+              className="w-5 h-5 rounded-full bg-muted-foreground/20 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
+              onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+              title="Minimize"
+              data-testid="calc-close"
             >
-              <X className="h-2.5 w-2.5" />
+              <X className="h-3 w-3" />
             </button>
           </div>
         </div>
@@ -221,10 +249,7 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
         {/* Buttons */}
         <div className="p-2 space-y-1.5">
           {BUTTONS.map((row, ri) => (
-            <div
-              key={ri}
-              className={`grid gap-1.5 ${row.length === 4 ? "grid-cols-4" : "grid-cols-4"}`}
-            >
+            <div key={ri} className="grid gap-1.5 grid-cols-4">
               {row.map((label) => (
                 <button
                   key={label}

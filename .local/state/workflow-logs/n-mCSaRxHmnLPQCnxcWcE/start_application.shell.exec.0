@@ -1,0 +1,51 @@
+
+> rest-express@1.0.0 dev
+> NODE_ENV=development ./node_modules/.bin/tsx server/index.ts
+
+[1G[0K8:11:16 AM [mongoose] Connected to MongoDB
+8:11:18 AM [express] serving on port 5000
+Browserslist: browsers data (caniuse-lite) is 7 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+A PostCSS plugin did not pass the `from` option to `postcss.parse`. This may cause imported assets to be incorrectly transformed. If you've recently added a PostCSS plugin that raised this warning, please contact the package author to fix the issue.
+8:14:14 AM [express] GET /api/auth/me 304 in 196ms :: {"success":true,"data":{"user":{"_id":"69ef14416b1fa909913ef538","username":"admin","email":"","role":"ADMIN","isActive":true,"createdAt":"2026-04-27T07:46:09.763Z","updatedAt":"2026-04-27T07:46:09.76
+8:14:19 AM [express] GET /api/settings 304 in 281ms :: {"success":true,"data":{"gcashNumber":"","gcashQrImageUrl":"","storeAddress":"","storeContactNumber":"","autoApplyOffers":true,"showSavingsSummary":true,"ttsVoice":"en-US-AriaNeural","_id":"69ef14426b
+8:14:20 AM [express] GET /api/dashboard/stats 200 in 816ms :: {"success":true,"data":{"totalOrdersToday":4,"completedOrders":0,"pendingPayments":9,"pendingReleases":9,"todayRevenue":0,"totalRevenue":1000,"activeUsers":1,"totalItems":17,"criticalStock":6,"lowStoc
+8:14:20 AM [express] GET /api/dashboard/advanced 200 in 936ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,1000,0,0,0,0,0,0,0]},"orders":{"total":10,"trend":0,"sparkline":[0,0,0,0,10,0,0,0,0,0,0,0]},"customers":{"total":10,"tre
+8:14:20 AM [express] GET /api/dashboard/advanced 200 in 946ms :: {"success":true,"data":{"earnings":{"total":1000,"trend":0,"sparkline":[0,0,0,0,0,0,0,0,0,0,0,0,0,1000,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]},"orders":{"total":10,"trend":0,"sparkline":[0,0,0,0,0,0,1,0,0
+8:14:26 AM [express] GET /api/dashboard/calendar-heatmap 200 in 94ms :: {"success":true,"data":{"year":2026,"month":5,"heatmap":{"2026-05-23":{"orders":4,"orderValue":3555,"payments":0,"revenue":0},"2026-05-22":{"orders":2,"orderValue":6203,"payments":0,"revenue":0},"2026
+8:14:34 AM [express] GET /api/orders 304 in 103ms :: {"success":true,"data":{"orders":[{"_id":"6a11611133875f7ad1bdb46a","trackingNumber":"JOAP-MPI2K48V-5XBM","customerName":"ee","items":[{"itemId":"69ef14426b1fa909913ef54f","itemName":"Deformed Steel B
+8:14:35 AM [express] GET /api/users/simple 304 in 95ms :: {"success":true,"data":[{"_id":"69ef14416b1fa909913ef538","username":"admin","role":"ADMIN"},{"_id":"69ef14416b1fa909913ef539","username":"employee","role":"ADMIN"},{"_id":"6a0fc51c9cec3251e2993f97","
+8:14:35 AM [express] GET /api/items/all 200 in 93ms :: {"success":true,"data":[{"_id":"6a06644343e4c767bda085ae","itemName":"Aa","category":"Aa","supplierName":"Aa","unitPrice":290,"currentQuantity":50,"reorderLevel":5,"barcode":"","imageFilename":"","ima
+8:14:58 AM [express] POST /api/orders 200 in 760ms :: {"success":true,"data":{"order":{"trackingNumber":"JOAP-MPI2P9XE-YV39","customerName":"dd","items":[{"itemId":"69ef14426b1fa909913ef54f","itemName":"Deformed Steel Bar 10mm","qty":1,"originalUnitPrice
+8:15:03 AM [express] GET /api/orders 200 in 149ms :: {"success":true,"data":{"orders":[{"_id":"6a1162020cd76df6c9d36999","trackingNumber":"JOAP-MPI2P9XE-YV39","customerName":"dd","items":[{"itemId":"69ef14426b1fa909913ef54f","itemName":"Deformed Steel B
+8:15:03 AM [express] POST /api/tts 500 in 565ms :: {"success":false,"error":"readable.on is not a function"}
+8:16:26 AM [express] POST /api/tts 401 in 1ms :: {"success":false,"error":"Authentication required"}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[1;1H[0J[2m8:19:02 AM[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css, /src/pages/orders.tsx, /src/pages/reservations.tsx[22m
+8:19:32 AM [express] POST /api/auth/login 200 in 569ms :: {"success":true,"data":{"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJfaWQiOiI2OWVmMTQ0MTZiMWZhOTA5OTEzZWY1MzgiLCJ1c2VybmFtZSI6ImFkbWluIiwicm9sZSI6IkFETUlOIiwiaWF0IjoxNzc5NTI0MzcyLCJleHAiOjE3Nzk2MT
+8:19:33 AM [express] POST /api/tts 500 in 609ms :: {"success":false,"error":"readable.on is not a function"}
+[1G[0K⠙[1G[0K
