@@ -9,9 +9,12 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { SettingsProvider } from "@/lib/settings-context";
-import { Loader2, LogOut, Search, Package, ShoppingCart, Users } from "lucide-react";
+import { Loader2, LogOut, Search, Package, ShoppingCart, Users, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { LiveClock } from "@/components/live-clock";
+import { TweaksPanel } from "@/components/tweaks-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,9 +31,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { GraduationCap } from "lucide-react";
 import { useSocketNotifications } from "@/hooks/use-socket-notifications";
 import { FloatingCalculator } from "@/components/floating-calculator";
-import { Breadcrumbs } from "@/components/breadcrumbs";
-import { LiveClock } from "@/components/live-clock";
-import { TweaksPanel } from "@/components/tweaks-panel";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -110,7 +110,25 @@ function GlobalSearch() {
   const [showDropdown, setShowDropdown] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ⌘K / Ctrl+K to focus the search input
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      } else if (e.key === "Escape" && document.activeElement === inputRef.current) {
+        setShowDropdown(false);
+        inputRef.current?.blur();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -166,37 +184,24 @@ function GlobalSearch() {
     return <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   };
 
-  // ⌘K / Ctrl+K keyboard shortcut to focus the search input
-  const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    function onKeydown(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        inputRef.current?.focus();
-      }
-    }
-    window.addEventListener("keydown", onKeydown);
-    return () => window.removeEventListener("keydown", onKeydown);
-  }, []);
-
   return (
     <div className="relative" ref={containerRef}>
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
       <Input
         ref={inputRef}
         type="search"
-        placeholder="Search...  ⌘K"
-        className="pl-9 pr-12 w-[120px] sm:w-[200px] lg:w-[300px] text-sm"
+        placeholder="Search orders, items, customers…"
+        className="pl-9 pr-12 w-[200px] sm:w-[280px] lg:w-[340px] text-sm h-9 bg-muted/50 border-transparent focus-visible:bg-card focus-visible:border-border"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => { if (results.length > 0) setShowDropdown(true); }}
         data-testid="input-global-search"
       />
-      <kbd className="hidden lg:inline-flex absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-muted text-muted-foreground pointer-events-none">
+      <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground bg-background border border-border rounded px-1.5 py-0.5 tracking-wider pointer-events-none hidden sm:inline-block">
         ⌘K
       </kbd>
       {showDropdown && (
-        <div className="absolute top-full left-0 mt-1 w-[260px] sm:w-[300px] bg-popover border rounded-md shadow-md z-50 max-h-[320px] overflow-auto">
+        <div className="absolute top-full left-0 mt-1 w-[260px] sm:w-[340px] bg-popover border rounded-md shadow-md z-50 max-h-[320px] overflow-auto">
           {isSearching ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -283,27 +288,24 @@ function AuthenticatedLayout() {
       <div className="flex h-screen w-full">
         <AppSidebar />
         <div className="flex flex-col flex-1 min-w-0">
-          <header className="flex items-center justify-between gap-2 p-2 border-b sticky top-0 z-50 bg-background">
-            <div className="flex items-center gap-3">
-              <SidebarTrigger data-testid="button-sidebar-toggle" />
-              <Breadcrumbs />
-              <GlobalSearch />
-            </div>
-            <div className="flex items-center gap-3 flex-wrap">
-              <LiveClock />
-              <TweaksPanel />
-              <div className="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-full bg-muted/60 border border-border/60" data-testid="text-header-user">
-                <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold">
-                  {user?.username?.slice(0, 2).toUpperCase()}
-                </div>
-                <span className="text-sm font-medium">{user?.username}</span>
-              </div>
-              <Button variant="ghost" size="icon" onClick={() => setShowLogoutDialog(true)} data-testid="button-logout" title="Sign out">
-                <LogOut className="h-4 w-4" />
-              </Button>
-            </div>
+          <header className="flex items-center gap-3 px-4 sm:px-6 h-14 border-b sticky top-0 z-50 bg-background/85 backdrop-blur-md backdrop-saturate-150">
+            <SidebarTrigger data-testid="button-sidebar-toggle" className="shrink-0" />
+            <Breadcrumbs />
+            <div className="flex-1" />
+            <GlobalSearch />
+            <Button variant="ghost" size="icon" className="h-9 w-9 relative" title="Notifications">
+              <Bell className="h-4 w-4" />
+              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full ring-2 ring-background" />
+            </Button>
+            <LiveClock />
+            <span className="text-sm text-muted-foreground hidden md:inline pl-2 border-l border-border" data-testid="text-header-user">
+              {user?.username}
+            </span>
+            <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => setShowLogoutDialog(true)} data-testid="button-logout" title="Sign out">
+              <LogOut className="h-4 w-4" />
+            </Button>
           </header>
-          <main className="flex-1 overflow-hidden">
+          <main className="flex-1 overflow-auto">
             <Router />
           </main>
         </div>
@@ -311,6 +313,9 @@ function AuthenticatedLayout() {
 
       {/* Floating Calculator */}
       {calcUsername && <FloatingCalculator username={calcUsername} />}
+
+      {/* Tweaks panel — floating, persists in localStorage */}
+      <TweaksPanel />
 
       {/* TUTORIAL OVERHAUL: The Tutorial component needs to be overhauled.
           See task.txt for full instructions. Key changes:

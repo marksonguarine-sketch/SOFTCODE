@@ -1,39 +1,48 @@
 import { useEffect, useState } from "react";
-import { Clock } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 /**
- * Live PHT (Philippine Time, UTC+8) clock that updates every second.
- * Used in the header to give the app a "command center" feel.
+ * LiveClock — live Philippine Time clock for the global header.
+ * Updates every second. Format: "Sun, May 24 · 14:38:22 PHT"
  */
-export function LiveClock() {
+export function LiveClock({ className }: { className?: string }) {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
-    const tick = () => setNow(new Date());
-    const id = setInterval(tick, 1000);
+    const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const time = now.toLocaleTimeString("en-PH", {
+  const dateOpts: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
     timeZone: "Asia/Manila",
+  };
+  const timeOpts: Intl.DateTimeFormatOptions = {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
-  });
-  const date = now.toLocaleDateString("en-PH", {
     timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-  });
+  };
 
   return (
-    <div className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground font-mono tabular-nums">
-      <Clock className="h-3 w-3 text-primary" />
-      <span className="font-medium text-foreground">{time}</span>
-      <span className="text-muted-foreground/70">·</span>
-      <span>{date}</span>
-      <span className="text-muted-foreground/50 ml-0.5">PHT</span>
+    <div
+      className={cn(
+        "hidden md:flex items-center gap-2 pl-3 ml-1 border-l border-border",
+        "font-mono text-[12px] text-muted-foreground tabular-nums",
+        className
+      )}
+      data-testid="live-clock"
+    >
+      <span
+        className="w-[6px] h-[6px] rounded-full bg-emerald-500"
+        style={{ boxShadow: "0 0 0 3px hsl(152 56% 41% / 0.18)" }}
+      />
+      <span>{now.toLocaleDateString("en-PH", dateOpts)}</span>
+      <span className="opacity-50">·</span>
+      <span>{now.toLocaleTimeString("en-PH", timeOpts)} PHT</span>
     </div>
   );
 }

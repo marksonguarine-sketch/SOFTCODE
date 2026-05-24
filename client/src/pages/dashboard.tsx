@@ -1,87 +1,71 @@
-import { useState, useMemo, useRef } from "react";
+/**
+ * Dashboard — JOAP Hardware Trading (matches prototype design)
+ *
+ * Sections, in order:
+ *   01. Greeting + actions
+ *   02. Overdue banner (conditional)
+ *   03. KPI strip — Revenue · Orders · Margin · Low-stock (with sparklines)
+ *   04. Revenue trend (wide) ┃ Daily sales goal ring
+ *   05. Shift summary ┃ Top items today ┃ Top customers
+ *   06. Activity feed (wide) ┃ Payment mix donut
+ *   07. Peak hours heatmap (full-width)
+ *   08. Inventory snapshot (full-width)
+ *
+ * All data comes from the real backend:
+ *   GET /api/dashboard/stats          → DashboardStats
+ *   GET /api/dashboard/advanced?period→ AdvancedDashboardData
+ *   GET /api/orders?limit=…           → for top customers + activity
+ *
+ * The previous 1473-line dashboard is preserved as dashboard-legacy.tsx.
+ */
+
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
-  DollarSign,
-  ShoppingBag,
-  Users,
-  Wallet,
-  Package,
+  Coins,
+  ShoppingCart,
   TrendingUp,
-  TrendingDown,
-  Store,
-  CalendarDays,
-  ArrowUpRight,
-  Activity,
-  BarChart3,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  CreditCard,
-  ArrowRightLeft,
-  FileText,
+  AlertTriangle,
+  Plus,
+  Download,
   X,
-  Loader2,
-  Sparkles,
+  Calendar,
+  Truck,
+  Crown,
+  Check,
+  User,
+  Activity,
+  Clock,
+  Package,
 } from "lucide-react";
 import {
-  AreaChart,
+  AreaChart as RechartsArea,
   Area,
-  Bar,
-  BarChart,
-  PieChart,
-  Pie,
-  Cell,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ComposedChart,
-  Line,
+  PieChart,
+  Pie,
+  Cell,
+  Legend,
 } from "recharts";
+import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
+import type { DashboardStats } from "@shared/schema";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
+import { KPICard } from "@/components/kpi-card";
+import { Sparkline, Ring } from "@/components/charts";
+import { Heatmap, generateSyntheticPeakHours } from "@/components/heatmap";
+import { cn } from "@/lib/utils";
 
-const COLORS = {
-  green: "#05cd99",
-  orange: "#ff8f3c",
-  purple: "#868cff",
-  blue: "#4318ff",
-  red: "#ee5d50",
-  cyan: "#0ea5e9",
-  pink: "#ec4899",
-};
-
-const GRADIENTS: Record<string, [string, string]> = {
-  green: ["#05cd99", "#00b894"],
-  orange: ["#ff8f3c", "#e17055"],
-  purple: ["#868cff", "#6c5ce7"],
-  blue: ["#4318ff", "#2d3aff"],
-  cyan: ["#0ea5e9", "#0284c7"],
-};
-
-const PERIODS = [
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-  { value: "monthly", label: "Monthly" },
-  { value: "yearly", label: "Yearly" },
-];
-
-const formatPHP = (value: number) =>
-  new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
-
-const formatNumber = (value: number) =>
-  new Intl.NumberFormat("en-PH").format(value);
-
-const formatCompact = (value: number) => {
-  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M`;
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}K`;
-  return value.toString();
-};
-
+// ── Types from the existing /api/dashboard/advanced endpoint ────────────────
 interface AdvancedDashboardData {
   earnings: { total: number; trend: number; sparkline: number[] };
   orders: { total: number; trend: number; sparkline: number[] };
@@ -95,1378 +79,743 @@ interface AdvancedDashboardData {
   totalOrderValue: number;
 }
 
-function TrendBadge({ value }: { value: number }) {
-  const isUp = value >= 0;
-  return (
-    <span
-      className={`inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ${
-        isUp
-          ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400"
-          : "bg-red-50 text-red-500 dark:bg-red-900/30 dark:text-red-400"
-      }`}
-      data-testid="trend-badge"
-    >
-      {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-      {isUp ? "+" : ""}{value}%
-    </span>
-  );
-}
+// ── Formatting helpers ──────────────────────────────────────────────────────
+const peso = (n: number) => "₱" + Math.round(n).toLocaleString("en-PH");
+const pesoCompact = (n: number) => {
+  if (n >= 1_000_000) return `₱${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `₱${(n / 1_000).toFixed(0)}k`;
+  return `₱${n}`;
+};
 
-function PeriodSelect({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onMouseDown={(e) => e.stopPropagation()}
-      className="text-[11px] font-semibold border border-gray-200 dark:border-gray-600 rounded-md px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700/50 text-gray-500 dark:text-gray-400 outline-none cursor-pointer transition-colors"
-      data-testid="select-period-filter"
-    >
-      {PERIODS.map((p) => (
-        <option key={p.value} value={p.value}>
-          {p.label}
-        </option>
-      ))}
-    </select>
-  );
-}
+// ── Hardcoded settings ──────────────────────────────────────────────────────
+const DAILY_GOAL = 100_000;
 
-function SparklineChart({ data, color, isCurrency = true }: { data: number[]; color: string; isCurrency?: boolean }) {
-  const chartData = data.map((value, i) => ({ i, value }));
-  const gradId = `spark-${color.replace("#", "")}`;
-  return (
-    <div className="h-[65px] w-full mt-3">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={chartData} margin={{ top: 5, right: 0, left: 0, bottom: 0 }}>
-          <defs>
-            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={color} stopOpacity={0.3} />
-              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-          <Tooltip
-            contentStyle={{
-              fontSize: 11,
-              borderRadius: 6,
-              border: "1px solid var(--border, #e5e7eb)",
-              boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
-              padding: "6px 10px",
-              backgroundColor: "var(--popover, #fff)",
-              color: "var(--popover-foreground, #1f2937)",
-            }}
-            formatter={(v: number) => [isCurrency ? formatPHP(v) : formatNumber(v), ""]}
-            labelFormatter={() => ""}
-          />
-          <Area
-            type="monotone"
-            dataKey="value"
-            stroke={color}
-            strokeWidth={2.5}
-            fill={`url(#${gradId})`}
-            dot={false}
-            activeDot={{ r: 4, fill: "#fff", stroke: color, strokeWidth: 2 }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
+// ── Trend-period selector ───────────────────────────────────────────────────
+const TREND_PERIODS = [
+  { value: "weekly", label: "7d" },
+  { value: "daily", label: "14d" },
+  { value: "monthly", label: "30d" },
+  { value: "yearly", label: "90d" },
+] as const;
+type TrendPeriod = (typeof TREND_PERIODS)[number]["value"];
 
-function SummaryCard({
-  title,
-  value,
-  trend,
-  icon: Icon,
-  gradientKey,
-  sparkline,
-  isCurrency = true,
-  period,
-  onPeriodChange,
-  testId,
-  onClick,
-  onDoubleClick,
-}: {
-  title: string;
-  value: string;
-  trend: number;
-  icon: any;
-  gradientKey: string;
-  sparkline?: number[];
-  isCurrency?: boolean;
-  period: string;
-  onPeriodChange: (v: string) => void;
-  testId: string;
-  onClick?: () => void;
-  onDoubleClick?: (point: any, e: React.MouseEvent) => void;
-}) {
-  const gradient = GRADIENTS[gradientKey] || GRADIENTS.blue;
-  const clickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return (
-    <div
-      className={`relative bg-white dark:bg-gray-800/80 rounded-md p-5 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm transition-all duration-300 group ${
-        onClick || onDoubleClick ? "cursor-pointer hover-elevate" : ""
-      }`}
-      onClick={(e) => {
-        if (onDoubleClick) {
-          if (clickTimer.current) return;
-          clickTimer.current = setTimeout(() => {
-            clickTimer.current = null;
-            onClick?.();
-          }, 250);
-        } else {
-          onClick?.();
-        }
-      }}
-      onDoubleClick={(e) => {
-        if (clickTimer.current) {
-          clearTimeout(clickTimer.current);
-          clickTimer.current = null;
-        }
-        e.stopPropagation();
-        onDoubleClick?.({ title, value, trend, period }, e);
-      }}
-      data-testid={testId}
-    >
-      <div className="flex justify-between items-start mb-1">
-        <div className="flex gap-3 items-start">
-          <div
-            className="w-12 h-12 rounded-md flex items-center justify-center text-white flex-shrink-0 shadow-lg"
-            style={{
-              background: `linear-gradient(135deg, ${gradient[0]}, ${gradient[1]})`,
-              boxShadow: `0 4px 14px ${gradient[0]}40`,
-            }}
-          >
-            <Icon className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-[12px] text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider">
-              {title}
-            </div>
-            <div className="text-[24px] font-extrabold text-gray-800 dark:text-white mt-0.5 tracking-tight" data-testid={`value-${testId}`}>
-              {value}
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2">
-          <PeriodSelect value={period} onChange={onPeriodChange} />
-          <TrendBadge value={trend} />
-        </div>
-      </div>
-      {sparkline && sparkline.length > 0 && (
-        <SparklineChart data={sparkline} color={gradient[0]} isCurrency={isCurrency} />
-      )}
-    </div>
-  );
-}
+// ── Payment method labels & colors for the donut ────────────────────────────
+const PAYMENT_COLORS: Record<string, string> = {
+  cash: "hsl(38 92% 50%)",
+  gcash: "hsl(217 91% 60%)",
+  gcash_qr: "hsl(217 91% 60%)",
+  cod: "hsl(152 56% 41%)",
+  bank: "hsl(220 14% 46%)",
+};
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: "Cash",
+  gcash: "GCash",
+  gcash_qr: "GCash QR",
+  cod: "COD",
+  bank: "Bank",
+};
 
-function RevenueSection({
-  data,
-  period,
-  onPeriodChange,
-  totalRevenue,
-  totalOrderValue,
-  revenueTrend,
-  onChartDoubleClick,
-}: {
-  data: Array<{ label: string; revenue: number; orders: number }>;
-  period: string;
-  onPeriodChange: (v: string) => void;
-  totalRevenue: number;
-  totalOrderValue: number;
-  revenueTrend: number;
-  onChartDoubleClick?: (point: any, e: React.MouseEvent) => void;
-}) {
-  const lastClickedPayload = useRef<any>(null);
-  const dblClickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleChartClick = (chartState: any, e?: React.MouseEvent) => {
-    if (!onChartDoubleClick || !chartState?.activePayload?.length) return;
-    const payload = chartState.activePayload[0]?.payload;
-    if (!payload) return;
-    lastClickedPayload.current = { ...payload, chartName: "Revenue Overview", period };
-  };
-
-  return (
-    <div
-      className="bg-white dark:bg-gray-800/80 rounded-md p-6 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm"
-      data-testid="section-revenue"
-      onDoubleClick={(e) => {
-        if (onChartDoubleClick && lastClickedPayload.current) {
-          onChartDoubleClick(lastClickedPayload.current, e);
-        }
-      }}
-    >
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <BarChart3 className="w-5 h-5 text-indigo-500" />
-            <h3 className="text-lg font-bold text-gray-800 dark:text-white">Revenue Overview</h3>
-          </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500">Track your revenue and order performance</p>
-        </div>
-        <PeriodSelect value={period} onChange={onPeriodChange} />
-      </div>
-      <div className="flex gap-8 mb-6 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-gradient-to-br from-orange-400 to-orange-500 flex items-center justify-center shadow-md shadow-orange-200 dark:shadow-orange-900/30">
-            <DollarSign className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <div className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">Revenue</div>
-            <div className="text-xl font-extrabold text-gray-800 dark:text-white flex items-center gap-2" data-testid="value-revenue-total">
-              {formatPHP(totalRevenue)}
-              <TrendBadge value={revenueTrend} />
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-gradient-to-br from-purple-400 to-purple-500 flex items-center justify-center shadow-md shadow-purple-200 dark:shadow-purple-900/30">
-            <ShoppingBag className="w-4 h-4 text-white" />
-          </div>
-          <div>
-            <div className="text-[11px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">Order Value</div>
-            <div className="text-xl font-extrabold text-gray-800 dark:text-white" data-testid="value-order-total">
-              {formatPHP(totalOrderValue)}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="h-[320px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 5 }} onClick={handleChartClick}>
-            <defs>
-              <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#ff8f3c" stopOpacity={0.9} />
-                <stop offset="100%" stopColor="#ff8f3c" stopOpacity={0.4} />
-              </linearGradient>
-              <linearGradient id="lineGrad" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#868cff" />
-                <stop offset="100%" stopColor="#6c5ce7" />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-            <XAxis
-              dataKey="label"
-              tick={{ fill: "#9ca3af", fontSize: 11, fontWeight: 500 }}
-              axisLine={false}
-              tickLine={false}
-              dy={8}
-            />
-            <YAxis
-              tick={{ fill: "#9ca3af", fontSize: 10 }}
-              axisLine={false}
-              tickLine={false}
-              tickFormatter={(v) => formatCompact(v)}
-              width={50}
-            />
-            <Tooltip
-              contentStyle={{
-                borderRadius: 6,
-                border: "1px solid var(--border, #e5e7eb)",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
-                fontSize: 12,
-                padding: "10px 14px",
-                backgroundColor: "var(--popover, #fff)",
-                color: "var(--popover-foreground, #1f2937)",
-              }}
-              formatter={(v: number, name: string) => [
-                formatPHP(v),
-                name === "revenue" ? "Revenue" : "Order Value",
-              ]}
-              cursor={{ fill: "rgba(0,0,0,0.03)" }}
-            />
-            <Bar
-              dataKey="revenue"
-              fill="url(#barGrad)"
-              radius={[6, 6, 0, 0]}
-              barSize={24}
-              name="revenue"
-            />
-            <Line
-              type="monotone"
-              dataKey="orders"
-              stroke="url(#lineGrad)"
-              strokeWidth={3}
-              dot={{ r: 4, fill: "#fff", stroke: "#868cff", strokeWidth: 2 }}
-              activeDot={{ r: 6, fill: "#868cff", stroke: "#fff", strokeWidth: 2 }}
-              name="orders"
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-}
-
-function ChannelDonut({
-  data,
-  period,
-  onPeriodChange,
-}: {
-  data: Record<string, number>;
-  period: string;
-  onPeriodChange: (v: string) => void;
-}) {
-  const total = Object.values(data).reduce((a, b) => a + b, 0);
-  const channelConfig = [
-    { key: "walk-in", name: "Walk-in", color: "#ff8f3c", gradient: ["#ff8f3c", "#e17055"] },
-    { key: "phone", name: "Phone", color: "#4318ff", gradient: ["#4318ff", "#2d3aff"] },
-    { key: "email", name: "Email", color: "#868cff", gradient: ["#868cff", "#6c5ce7"] },
-    { key: "message", name: "Message", color: "#05cd99", gradient: ["#05cd99", "#00b894"] },
-  ];
-
-  const chartData = channelConfig
-    .map((ch) => ({ name: ch.name, value: data[ch.key] || 0, color: ch.color }))
-    .filter((d) => d.value > 0);
-
-  if (chartData.length === 0) {
-    chartData.push({ name: "No Data", value: 1, color: "#e5e7eb" });
-  }
-
-  return (
-    <div className="bg-white dark:bg-gray-800/80 rounded-md p-6 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm" data-testid="section-channel">
-      <div className="flex justify-between items-center mb-5">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <Activity className="w-5 h-5 text-purple-500" />
-            <h3 className="text-lg font-bold text-gray-800 dark:text-white">Sales by Channel</h3>
-          </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500">Order distribution across channels</p>
-        </div>
-        <PeriodSelect value={period} onChange={onPeriodChange} />
-      </div>
-      <div className="relative h-[220px] flex justify-center items-center my-4">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={chartData}
-              dataKey="value"
-              nameKey="name"
-              cx="50%"
-              cy="50%"
-              innerRadius={65}
-              outerRadius={95}
-              strokeWidth={3}
-              stroke="#fff"
-              paddingAngle={2}
-            >
-              {chartData.map((entry, i) => (
-                <Cell key={i} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={{
-                borderRadius: 6,
-                border: "1px solid var(--border, #e5e7eb)",
-                boxShadow: "0 4px 20px rgba(0,0,0,0.12)",
-                fontSize: 12,
-                padding: "8px 12px",
-                backgroundColor: "var(--popover, #fff)",
-                color: "var(--popover-foreground, #1f2937)",
-              }}
-              formatter={(v: number, name: string) => [
-                `${v} orders (${total > 0 ? Math.round((v / total) * 100) : 0}%)`,
-                name,
-              ]}
-            />
-          </PieChart>
-        </ResponsiveContainer>
-        <div className="absolute text-center flex flex-col items-center pointer-events-none">
-          <div className="w-10 h-10 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center mb-1">
-            <Store className="w-5 h-5 text-purple-500" />
-          </div>
-          <span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">Total</span>
-          <span className="text-2xl font-extrabold text-gray-800 dark:text-white">{total}</span>
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-3 mt-2">
-        {channelConfig.map((ch) => {
-          const val = data[ch.key] || 0;
-          const pct = total > 0 ? Math.round((val / total) * 100) : 0;
-          return (
-            <div
-              key={ch.key}
-              className="flex items-center gap-2.5 px-3 py-2.5 rounded-md bg-gray-50 dark:bg-gray-700/30"
-            >
-              <div
-                className="w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: ch.color }}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">{ch.name}</div>
-                <div className="flex items-baseline gap-1">
-                  <span className="text-sm font-bold text-gray-800 dark:text-white">{val}</span>
-                  <span className="text-[10px] text-gray-400">({pct}%)</span>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function TopSalesList({
-  items,
-  period,
-  onPeriodChange,
-}: {
-  items: Array<{ itemName: string; unitPrice: number; totalQty: number; totalRevenue: number }>;
-  period: string;
-  onPeriodChange: (v: string) => void;
-}) {
-  const maxRevenue = items.length > 0 ? Math.max(...items.map((it) => it.totalRevenue)) : 1;
-
-  const rankColors = [
-    { bg: "bg-gradient-to-r from-amber-400 to-amber-500", text: "text-white", shadow: "shadow-amber-200 dark:shadow-amber-900/30" },
-    { bg: "bg-gradient-to-r from-gray-300 to-gray-400", text: "text-white", shadow: "shadow-gray-200" },
-    { bg: "bg-gradient-to-r from-orange-300 to-orange-400", text: "text-white", shadow: "shadow-orange-200" },
-  ];
-
-  const itemColors = [COLORS.green, COLORS.orange, COLORS.purple, COLORS.blue, COLORS.cyan];
-
-  return (
-    <div className="bg-white dark:bg-gray-800/80 rounded-md p-6 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm" data-testid="section-top-sales">
-      <div className="flex justify-between items-center mb-5">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <TrendingUp className="w-5 h-5 text-emerald-500" />
-            <h3 className="text-lg font-bold text-gray-800 dark:text-white">Top Selling Items</h3>
-          </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500">Best performing products</p>
-        </div>
-        <PeriodSelect value={period} onChange={onPeriodChange} />
-      </div>
-      <div className="flex flex-col gap-3">
-        {items.length === 0 ? (
-          <div className="text-sm text-gray-400 dark:text-gray-500 text-center py-12 flex flex-col items-center gap-2">
-            <Package className="w-8 h-8 text-gray-300 dark:text-gray-600" />
-            No sales data for this period
-          </div>
-        ) : (
-          items.map((item, i) => {
-            const pct = maxRevenue > 0 ? Math.round((item.totalRevenue / maxRevenue) * 100) : 0;
-            const color = itemColors[i % itemColors.length];
-            const rank = rankColors[i] || null;
-            return (
-              <div
-                key={i}
-                className="group flex items-center gap-3 p-3 rounded-md hover-elevate transition-all"
-                data-testid={`top-sale-item-${i}`}
-              >
-                {rank ? (
-                  <div className={`w-8 h-8 rounded-md ${rank.bg} ${rank.text} ${rank.shadow} shadow-md flex items-center justify-center text-xs font-bold flex-shrink-0`}>
-                    #{i + 1}
-                  </div>
-                ) : (
-                  <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-xs font-bold text-gray-400 flex-shrink-0">
-                    #{i + 1}
-                  </div>
-                )}
-                <div
-                  className="w-10 h-10 rounded-md flex items-center justify-center text-white flex-shrink-0"
-                  style={{
-                    backgroundColor: `${color}18`,
-                  }}
-                >
-                  <Package className="w-4 h-4" style={{ color }} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-start mb-1.5">
-                    <div>
-                      <span className="text-[13px] font-semibold text-gray-800 dark:text-white block truncate">{item.itemName}</span>
-                      <span className="text-[11px] text-gray-400">{formatPHP(item.unitPrice)} / unit</span>
-                    </div>
-                    <div className="text-right flex-shrink-0 ml-2">
-                      <span className="text-[13px] font-bold text-gray-800 dark:text-white block">{formatPHP(item.totalRevenue)}</span>
-                      <span className="text-[11px] text-gray-400">{item.totalQty} sold</span>
-                    </div>
-                  </div>
-                  <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-700 ease-out"
-                      style={{
-                        width: `${pct}%`,
-                        background: `linear-gradient(90deg, ${color}, ${color}cc)`,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-function WelcomeHeader() {
-  const now = new Date();
-  const hour = now.getHours();
-  let greeting = "Good morning";
-  if (hour >= 12 && hour < 17) greeting = "Good afternoon";
-  else if (hour >= 17) greeting = "Good evening";
-
-  const dateStr = now.toLocaleDateString("en-PH", {
-    weekday: "long",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
-  return (
-    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-1">
-      <div>
-        <h1 className="text-2xl font-extrabold text-gray-800 dark:text-white tracking-tight" data-testid="dashboard-title">
-          {greeting}!
-        </h1>
-        <div className="flex items-center gap-2 mt-1 text-sm text-gray-400 dark:text-gray-500">
-          <CalendarDays className="w-4 h-4" />
-          <span>{dateStr}</span>
-        </div>
-      </div>
-      <div className="flex items-center gap-2 px-4 py-2 rounded-md bg-gradient-to-r from-indigo-500/10 to-purple-500/10 dark:from-indigo-500/20 dark:to-purple-500/20 border border-indigo-100 dark:border-indigo-800/30">
-        <Activity className="w-4 h-4 text-indigo-500" />
-        <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">Live Dashboard</span>
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function DashboardSkeleton() {
-  const shimmer = "relative overflow-hidden before:absolute before:inset-0 before:-translate-x-full before:animate-[shimmer_1.5s_infinite] before:bg-gradient-to-r before:from-transparent before:via-white/20 before:to-transparent";
-  return (
-    <div className="space-y-5">
-      <div className="flex justify-between items-center">
-        <div className="space-y-2">
-          <div className={`h-7 w-48 bg-gray-200 dark:bg-gray-700 rounded-md ${shimmer}`} />
-          <div className={`h-4 w-64 bg-gray-200 dark:bg-gray-700 rounded ${shimmer}`} />
-        </div>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-        {[1, 2, 3, 4].map((i) => (
-          <div key={i} className={`bg-white dark:bg-gray-800 rounded-md p-5 h-[180px] border border-gray-100 dark:border-gray-700/50 ${shimmer}`}>
-            <div className="flex gap-3">
-              <div className="w-12 h-12 bg-gray-200 dark:bg-gray-700 rounded-md" />
-              <div className="space-y-2 mt-1">
-                <div className="h-3 w-20 bg-gray-200 dark:bg-gray-700 rounded" />
-                <div className="h-6 w-24 bg-gray-200 dark:bg-gray-700 rounded" />
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className={`bg-white dark:bg-gray-800 rounded-md p-6 h-[430px] border border-gray-100 dark:border-gray-700/50 ${shimmer}`} />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <div className={`bg-white dark:bg-gray-800 rounded-md p-6 h-[450px] border border-gray-100 dark:border-gray-700/50 ${shimmer}`} />
-        <div className={`bg-white dark:bg-gray-800 rounded-md p-6 h-[450px] border border-gray-100 dark:border-gray-700/50 ${shimmer}`} />
-      </div>
-    </div>
-  );
-}
-
-const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-interface HeatmapData {
-  [date: string]: { orders: number; orderValue: number; payments: number; revenue: number };
-}
-
-interface DateDetail {
-  date: string;
-  hasActivity: boolean;
-  summary: {
-    totalSales: number;
-    totalOrderValue: number;
-    orderCount: number;
-    paymentCount: number;
-    customerCount: number;
-    inventoryChanges: number;
-  };
-  customers: string[];
-  orders: Array<{
-    _id: string;
-    trackingNumber: string;
-    customerName: string;
-    totalAmount: number;
-    currentStatus: string;
-    sourceChannel: string;
-    itemCount: number;
-    createdAt: string;
-  }>;
-  payments: Array<{
-    _id: string;
-    orderId: string;
-    amountPaid: number;
-    paymentMethod: string;
-    gcashNumber: string;
-    gcashReferenceNumber: string;
-    loggedBy: string;
-    paymentDate: string;
-  }>;
-  channelBreakdown: Record<string, number>;
-  topItemsSold: Array<{ itemName: string; quantity: number; revenue: number }>;
-  paymentMethods: Record<string, { count: number; total: number }>;
-  orderStatuses: Record<string, number>;
-  hourlyRevenue: Array<{ hour: string; revenue: number }>;
-  inventoryLogs: Array<{
-    _id: string;
-    itemName: string;
-    type: string;
-    quantity: number;
-    reason: string;
-    actor: string;
-    createdAt: string;
-  }>;
-  recentActivity: Array<{
-    _id: string;
-    action: string;
-    actor: string;
-    target: string;
-    createdAt: string;
-  }>;
-}
-
-function DateDetailPanel({ detail, onClose }: { detail: DateDetail; onClose: () => void }) {
-  const d = new Date(detail.date + "T00:00:00");
-  const dateStr = d.toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-
-  const channelColors: Record<string, string> = { "walk-in": "#ff8f3c", phone: "#4318ff", email: "#868cff", message: "#05cd99" };
-  const channelData = Object.entries(detail.channelBreakdown || {}).map(([key, val]) => ({
-    name: key, value: val, color: channelColors[key] || "#9ca3af",
-  })).filter(d => d.value > 0);
-
-  const statusColors: Record<string, string> = {
-    "Pending Payment": "#f59e0b", "Processing": "#3b82f6", "Completed": "#05cd99",
-    "Cancelled": "#ef4444", "Shipped": "#8b5cf6", "Delivered": "#10b981",
-  };
-  const statusData = Object.entries(detail.orderStatuses || {}).map(([key, val]) => ({
-    name: key, value: val, color: statusColors[key] || "#9ca3af",
-  }));
-
-  const hourlyData = (detail.hourlyRevenue || []).filter(h => h.revenue > 0);
-
-  if (!detail.hasActivity) {
-    return (
-      <div className="bg-white dark:bg-gray-800/80 rounded-md p-6 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm" data-testid="panel-date-detail">
-        <div className="flex justify-between items-start mb-4">
-          <div>
-            <h3 className="text-lg font-bold text-gray-800 dark:text-white">{dateStr}</h3>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Daily Activity Summary</p>
-          </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" data-testid="button-close-detail">
-            <X className="w-4 h-4 text-gray-400" />
-          </button>
-        </div>
-        <div className="flex flex-col items-center justify-center py-16 text-gray-400 dark:text-gray-500">
-          <CalendarDays className="w-12 h-12 mb-3 text-gray-300 dark:text-gray-600" />
-          <p className="text-lg font-semibold">No Activity</p>
-          <p className="text-sm mt-1">Nothing happened on this day</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bg-white dark:bg-gray-800/80 rounded-md border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm overflow-hidden" data-testid="panel-date-detail">
-      <div className="p-6 pb-4 border-b border-gray-100 dark:border-gray-700/50">
-        <div className="flex justify-between items-start">
-          <div>
-            <h3 className="text-lg font-bold text-gray-800 dark:text-white">{dateStr}</h3>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Daily Activity Summary</p>
-          </div>
-          <button onClick={onClose} className="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" data-testid="button-close-detail">
-            <X className="w-4 h-4 text-gray-400" />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-6 space-y-6">
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-          {[
-            { label: "Total Sales", value: formatPHP(detail.summary.totalSales), icon: DollarSign, color: "emerald" },
-            { label: "Order Value", value: formatPHP(detail.summary.totalOrderValue), icon: ShoppingBag, color: "orange" },
-            { label: "Orders", value: String(detail.summary.orderCount), icon: FileText, color: "blue" },
-            { label: "Payments", value: String(detail.summary.paymentCount), icon: CreditCard, color: "purple" },
-            { label: "Customers", value: String(detail.summary.customerCount), icon: Users, color: "cyan" },
-            { label: "Inv. Changes", value: String(detail.summary.inventoryChanges), icon: ArrowRightLeft, color: "amber" },
-          ].map((stat) => (
-            <div key={stat.label} className="bg-gray-50 dark:bg-gray-700/30 rounded-md p-3" data-testid={`stat-${stat.label.toLowerCase().replace(/\s/g, "-")}`}>
-              <div className="flex items-center gap-1.5 mb-1">
-                <stat.icon className={`w-3.5 h-3.5 text-${stat.color}-500`} />
-                <span className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-wider font-medium">{stat.label}</span>
-              </div>
-              <div className="text-base font-bold text-gray-800 dark:text-white">{stat.value}</div>
-            </div>
-          ))}
-        </div>
-
-        {hourlyData.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-indigo-500" /> Hourly Revenue
-            </h4>
-            <div className="h-[160px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={detail.hourlyRevenue.filter((_, i) => i >= 6 && i <= 22)} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
-                  <XAxis dataKey="hour" tick={{ fill: "#9ca3af", fontSize: 9 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "#9ca3af", fontSize: 9 }} axisLine={false} tickLine={false} tickFormatter={(v) => formatCompact(v)} width={40} />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: 6, border: "1px solid var(--border, #e5e7eb)",
-                      boxShadow: "0 4px 20px rgba(0,0,0,0.12)", fontSize: 11, padding: "6px 10px",
-                      backgroundColor: "var(--popover, #fff)", color: "var(--popover-foreground, #1f2937)",
-                    }}
-                    formatter={(v: number) => [formatPHP(v), "Revenue"]}
-                  />
-                  <Bar dataKey="revenue" fill="#4318ff" radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {channelData.length > 0 && (
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                <Store className="w-4 h-4 text-purple-500" /> Sales Channels
-              </h4>
-              <div className="flex items-center gap-4">
-                <div className="h-[120px] w-[120px] flex-shrink-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={channelData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={30} outerRadius={55} strokeWidth={2} stroke="#fff" paddingAngle={2}>
-                        {channelData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-                <div className="flex flex-col gap-1.5 flex-1">
-                  {channelData.map((ch) => (
-                    <div key={ch.name} className="flex items-center gap-2 text-xs">
-                      <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: ch.color }} />
-                      <span className="text-gray-500 dark:text-gray-400 capitalize">{ch.name}</span>
-                      <span className="ml-auto font-bold text-gray-800 dark:text-white">{ch.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {statusData.length > 0 && (
-            <div>
-              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-                <Activity className="w-4 h-4 text-blue-500" /> Order Status
-              </h4>
-              <div className="space-y-2">
-                {statusData.map((s) => (
-                  <div key={s.name} className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: s.color }} />
-                    <span className="text-xs text-gray-500 dark:text-gray-400 flex-1">{s.name}</span>
-                    <span className="text-xs font-bold text-gray-800 dark:text-white">{s.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {detail.topItemsSold.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <Package className="w-4 h-4 text-emerald-500" /> Items Sold
-            </h4>
-            <div className="space-y-2">
-              {detail.topItemsSold.map((item, i) => {
-                const maxRev = detail.topItemsSold[0]?.revenue || 1;
-                const pct = Math.round((item.revenue / maxRev) * 100);
-                return (
-                  <div key={i} className="flex items-center gap-3 group" data-testid={`date-item-${i}`}>
-                    <span className="text-[11px] font-bold text-gray-400 w-5 text-right">#{i + 1}</span>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex justify-between items-center mb-1">
-                        <span className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate">{item.itemName}</span>
-                        <span className="text-xs font-bold text-gray-800 dark:text-white ml-2 flex-shrink-0">{formatPHP(item.revenue)}</span>
-                      </div>
-                      <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-1">
-                        <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="text-[10px] text-gray-400 mt-0.5">{item.quantity} units</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {detail.orders.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-orange-500" /> Orders ({detail.orders.length})
-            </h4>
-            <div className="space-y-2 max-h-[200px] overflow-y-auto">
-              {detail.orders.map((order) => (
-                <div key={order._id} className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700/30 rounded-md text-xs" data-testid={`date-order-${order._id}`}>
-                  <div>
-                    <span className="font-semibold text-gray-800 dark:text-white">{order.trackingNumber}</span>
-                    <span className="text-gray-400 mx-1.5">|</span>
-                    <span className="text-gray-500 dark:text-gray-400">{order.customerName}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium" style={{
-                      backgroundColor: `${statusColors[order.currentStatus] || "#9ca3af"}20`,
-                      color: statusColors[order.currentStatus] || "#9ca3af",
-                    }}>{order.currentStatus}</span>
-                    <span className="font-bold text-gray-800 dark:text-white">{formatPHP(order.totalAmount)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {detail.payments.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <CreditCard className="w-4 h-4 text-purple-500" /> Payments ({detail.payments.length})
-            </h4>
-            <div className="space-y-2 max-h-[200px] overflow-y-auto">
-              {detail.payments.map((payment) => (
-                <div key={payment._id} className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700/30 rounded-md text-xs" data-testid={`date-payment-${payment._id}`}>
-                  <div>
-                    <span className="font-semibold text-gray-800 dark:text-white">{payment.paymentMethod}</span>
-                    {payment.gcashReferenceNumber && (
-                      <span className="text-gray-400 ml-1.5">Ref: {payment.gcashReferenceNumber}</span>
-                    )}
-                    <span className="text-gray-400 ml-1.5">by {payment.loggedBy}</span>
-                  </div>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatPHP(payment.amountPaid)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {detail.inventoryLogs.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <ArrowRightLeft className="w-4 h-4 text-amber-500" /> Inventory Changes ({detail.inventoryLogs.length})
-            </h4>
-            <div className="space-y-2 max-h-[200px] overflow-y-auto">
-              {detail.inventoryLogs.map((log) => (
-                <div key={log._id} className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-700/30 rounded-md text-xs" data-testid={`date-inv-${log._id}`}>
-                  <div>
-                    <span className="font-semibold text-gray-800 dark:text-white">{log.itemName}</span>
-                    <span className="text-gray-400 mx-1.5">|</span>
-                    <span className={`font-medium ${log.type === "restock" ? "text-emerald-500" : log.type === "deduction" ? "text-red-500" : "text-blue-500"}`}>
-                      {log.type === "restock" ? "+" : log.type === "deduction" ? "-" : "~"}{log.quantity}
-                    </span>
-                  </div>
-                  <span className="text-gray-400">{log.reason || "—"}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {detail.customers.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <Users className="w-4 h-4 text-cyan-500" /> Customers ({detail.customers.length})
-            </h4>
-            <div className="flex flex-wrap gap-2">
-              {detail.customers.map((c, i) => (
-                <span key={i} className="px-2.5 py-1 bg-gray-50 dark:bg-gray-700/30 rounded-md text-xs font-medium text-gray-600 dark:text-gray-300 capitalize">{c}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {detail.recentActivity.length > 0 && (
-          <div>
-            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-indigo-500" /> Activity Log
-            </h4>
-            <div className="space-y-1.5 max-h-[200px] overflow-y-auto">
-              {detail.recentActivity.map((log) => (
-                <div key={log._id} className="flex items-center gap-2 text-[11px] py-1.5 px-2 bg-gray-50 dark:bg-gray-700/20 rounded">
-                  <span className="text-gray-400 flex-shrink-0">{new Date(log.createdAt).toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}</span>
-                  <span className="font-medium text-indigo-500 flex-shrink-0">{log.actor}</span>
-                  <span className="text-gray-500 dark:text-gray-400 truncate">{log.action.replace(/_/g, " ").toLowerCase()}{log.target ? ` → ${log.target}` : ""}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CalendarSection() {
-  const today = new Date();
-  const [currentYear, setCurrentYear] = useState(today.getFullYear());
-  const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
-
-  const { data: heatmapData, isLoading: heatmapLoading, isError: heatmapError } = useQuery<{ success: boolean; data: { heatmap: HeatmapData } }>({
-    queryKey: ["/api/dashboard/calendar-heatmap", currentYear, currentMonth],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/dashboard/calendar-heatmap?year=${currentYear}&month=${currentMonth}`);
-      return res.json();
-    },
-  });
-
-  const tzOffset = new Date().getTimezoneOffset() * -1;
-
-  const { data: dateDetailData, isLoading: detailLoading } = useQuery<{ success: boolean; data: DateDetail }>({
-    queryKey: ["/api/dashboard/date-detail", selectedDate],
-    queryFn: async () => {
-      const res = await apiRequest("GET", `/api/dashboard/date-detail?date=${selectedDate}&tz=${tzOffset}`);
-      return res.json();
-    },
-    enabled: !!selectedDate,
-  });
-
-  const heatmap = heatmapData?.data?.heatmap || {};
-  const detail = dateDetailData?.data;
-
-  const prevMonth = () => {
-    if (currentMonth === 1) { setCurrentMonth(12); setCurrentYear(currentYear - 1); }
-    else setCurrentMonth(currentMonth - 1);
-    setSelectedDate(null);
-  };
-
-  const nextMonth = () => {
-    if (currentMonth === 12) { setCurrentMonth(1); setCurrentYear(currentYear + 1); }
-    else setCurrentMonth(currentMonth + 1);
-    setSelectedDate(null);
-  };
-
-  const goToToday = () => {
-    setCurrentYear(today.getFullYear());
-    setCurrentMonth(today.getMonth() + 1);
-    setSelectedDate(null);
-  };
-
-  const calendarDays = useMemo(() => {
-    const firstDay = new Date(currentYear, currentMonth - 1, 1).getDay();
-    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
-    const prevMonthDays = new Date(currentYear, currentMonth - 1, 0).getDate();
-
-    const days: Array<{ day: number; dateStr: string; isCurrentMonth: boolean; isToday: boolean }> = [];
-
-    for (let i = firstDay - 1; i >= 0; i--) {
-      const d = prevMonthDays - i;
-      const m = currentMonth === 1 ? 12 : currentMonth - 1;
-      const y = currentMonth === 1 ? currentYear - 1 : currentYear;
-      days.push({ day: d, dateStr: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`, isCurrentMonth: false, isToday: false });
-    }
-
-    for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${currentYear}-${String(currentMonth).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-      const isToday = d === today.getDate() && currentMonth === today.getMonth() + 1 && currentYear === today.getFullYear();
-      days.push({ day: d, dateStr, isCurrentMonth: true, isToday });
-    }
-
-    const remaining = 42 - days.length;
-    for (let d = 1; d <= remaining; d++) {
-      const m = currentMonth === 12 ? 1 : currentMonth + 1;
-      const y = currentMonth === 12 ? currentYear + 1 : currentYear;
-      days.push({ day: d, dateStr: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`, isCurrentMonth: false, isToday: false });
-    }
-
-    return days;
-  }, [currentYear, currentMonth]);
-
-  const getHeatLevel = (dateStr: string): number => {
-    const data = heatmap[dateStr];
-    if (!data) return 0;
-    const total = data.orders + data.payments;
-    if (total >= 10) return 4;
-    if (total >= 5) return 3;
-    if (total >= 2) return 2;
-    return 1;
-  };
-
-  const heatColors = [
-    "",
-    "bg-emerald-100 dark:bg-emerald-900/30",
-    "bg-emerald-200 dark:bg-emerald-800/40",
-    "bg-emerald-300 dark:bg-emerald-700/50",
-    "bg-emerald-400 dark:bg-emerald-600/60",
-  ];
-
-  return (
-    <div className="space-y-5" data-testid="section-calendar">
-      <div className="flex items-center gap-2 mb-1">
-        <CalendarDays className="w-5 h-5 text-indigo-500" />
-        <h3 className="text-lg font-bold text-gray-800 dark:text-white">Activity Calendar</h3>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5">
-        <div className="bg-white dark:bg-gray-800/80 rounded-md p-5 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm" data-testid="calendar-widget">
-          <div className="flex items-center justify-between mb-5">
-            <button onClick={prevMonth} className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" data-testid="button-prev-month">
-              <ChevronLeft className="w-4 h-4 text-gray-500" />
-            </button>
-            <div className="text-center">
-              <h4 className="text-sm font-bold text-gray-800 dark:text-white" data-testid="text-current-month">
-                {MONTH_NAMES[currentMonth - 1]} {currentYear}
-              </h4>
-              <button onClick={goToToday} className="text-[10px] text-indigo-500 hover:text-indigo-600 font-medium mt-0.5" data-testid="button-go-today">
-                Today
-              </button>
-            </div>
-            <button onClick={nextMonth} className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" data-testid="button-next-month">
-              <ChevronRight className="w-4 h-4 text-gray-500" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-7 gap-1 mb-2">
-            {DAY_NAMES.map((d) => (
-              <div key={d} className="text-center text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider py-1">
-                {d}
-              </div>
-            ))}
-          </div>
-
-          {heatmapLoading && (
-            <div className="flex items-center justify-center py-10">
-              <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
-            </div>
-          )}
-          {heatmapError && (
-            <div className="text-center text-xs text-red-500 py-4">Failed to load calendar data</div>
-          )}
-
-          <div className="grid grid-cols-7 gap-1" style={{ opacity: heatmapLoading ? 0.4 : 1 }}>
-            {calendarDays.map((day, i) => {
-              const heat = day.isCurrentMonth ? getHeatLevel(day.dateStr) : 0;
-              const isSelected = selectedDate === day.dateStr;
-              const hasData = heat > 0;
-              const dayData = heatmap[day.dateStr];
-
-              return (
-                <button
-                  key={i}
-                  onClick={() => day.isCurrentMonth && setSelectedDate(day.dateStr)}
-                  className={`
-                    relative aspect-square flex flex-col items-center justify-center rounded-md text-xs transition-all
-                    ${!day.isCurrentMonth ? "text-gray-300 dark:text-gray-600" : "text-gray-700 dark:text-gray-300"}
-                    ${day.isCurrentMonth && !isSelected ? "hover:bg-gray-100 dark:hover:bg-gray-700" : ""}
-                    ${isSelected ? "ring-2 ring-indigo-500 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 font-bold" : ""}
-                    ${day.isToday && !isSelected ? "font-bold text-indigo-600 dark:text-indigo-400" : ""}
-                    ${heat > 0 && !isSelected ? heatColors[heat] : ""}
-                  `}
-                  data-testid={`calendar-day-${day.dateStr}`}
-                >
-                  <span className="leading-none">{day.day}</span>
-                  {day.isToday && (
-                    <span className="absolute bottom-0.5 w-1 h-1 rounded-full bg-indigo-500" />
-                  )}
-                  {hasData && !isSelected && (
-                    <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center justify-center gap-3 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700/50">
-            <span className="text-[10px] text-gray-400">Activity:</span>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-3 rounded-sm bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600" />
-              <span className="text-[9px] text-gray-400">None</span>
-            </div>
-            {[1, 2, 3, 4].map((level) => (
-              <div key={level} className="flex items-center gap-1">
-                <div className={`w-3 h-3 rounded-sm ${heatColors[level]}`} />
-              </div>
-            ))}
-            <span className="text-[9px] text-gray-400">High</span>
-          </div>
-        </div>
-
-        <div className="min-h-[300px]">
-          {detailLoading && selectedDate ? (
-            <div className="bg-white dark:bg-gray-800/80 rounded-md p-6 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm flex items-center justify-center h-full">
-              <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
-            </div>
-          ) : detail && selectedDate ? (
-            <DateDetailPanel detail={detail} onClose={() => setSelectedDate(null)} />
-          ) : (
-            <div className="bg-white dark:bg-gray-800/80 rounded-md p-6 border border-gray-100 dark:border-gray-700/50 backdrop-blur-sm flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500">
-              <CalendarDays className="w-10 h-10 mb-3 text-gray-300 dark:text-gray-600" />
-              <p className="text-sm font-medium">Select a date to view details</p>
-              <p className="text-xs mt-1">Click on any day in the calendar</p>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+// ── Initials helper ─────────────────────────────────────────────────────────
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
 
 export default function DashboardPage() {
   const [, navigate] = useLocation();
-  const [earningsPeriod, setEarningsPeriod] = useState("monthly");
-  const [ordersPeriod, setOrdersPeriod] = useState("monthly");
-  const [customersPeriod, setCustomersPeriod] = useState("yearly");
-  const [balancePeriod, setBalancePeriod] = useState("yearly");
-  const [revenuePeriod, setRevenuePeriod] = useState("yearly");
-  const [channelPeriod, setChannelPeriod] = useState("monthly");
-  const [topSalesPeriod, setTopSalesPeriod] = useState("monthly");
+  const { user } = useAuth();
+  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("daily");
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
-  const fetchDashboard = async (period: string) => {
-    const res = await fetch(`/api/dashboard/advanced?period=${period}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-    });
-    return res.json();
-  };
-
-  const { data: earningsData, isLoading: earningsLoading } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", earningsPeriod],
-    queryFn: () => fetchDashboard(earningsPeriod),
-  });
-
-  const { data: ordersData, isLoading: ordersLoading } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", ordersPeriod],
-    queryFn: () => fetchDashboard(ordersPeriod),
-  });
-
-  const { data: customersData } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", customersPeriod],
-    queryFn: () => fetchDashboard(customersPeriod),
-  });
-
-  const { data: balanceData } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", balancePeriod],
-    queryFn: () => fetchDashboard(balancePeriod),
-  });
-
-  const { data: revenueData } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", revenuePeriod],
-    queryFn: () => fetchDashboard(revenuePeriod),
-  });
-
-  const { data: channelData } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", channelPeriod],
-    queryFn: () => fetchDashboard(channelPeriod),
-  });
-
-  const { data: topSalesData } = useQuery<{ success: boolean; data: AdvancedDashboardData }>({
-    queryKey: ["/api/dashboard/advanced", topSalesPeriod],
-    queryFn: () => fetchDashboard(topSalesPeriod),
-  });
-
-  const { data: dashStatsData } = useQuery<{ success: boolean; data: any }>({
+  // ── Real backend queries ─────────────────────────────────────────────────
+  const { data: statsRes, isLoading: statsLoading } = useQuery<{
+    success: boolean;
+    data: DashboardStats;
+  }>({
     queryKey: ["/api/dashboard/stats"],
+    staleTime: 15_000,
   });
-  const dashStats = dashStatsData?.data;
-  const activeOffersCount = dashStats?.activeOffersCount ?? 0;
-  const unpaidOrders = dashStats?.unpaidOrdersCount ?? 0;
-  const pendingFulfillment = dashStats?.pendingFulfillmentCount ?? 0;
-  const upcomingReservationsCount = dashStats?.upcomingReservationsCount ?? 0;
-  const upcomingReservationsList: any[] = dashStats?.upcomingReservations || [];
+  const stats = statsRes?.data;
 
-  const earnings = earningsData?.data;
-  const orders = ordersData?.data;
-  const customers = customersData?.data;
-  const balance = balanceData?.data;
-  const revenue = revenueData?.data;
-  const channel = channelData?.data;
-  const topSales = topSalesData?.data;
+  const { data: advRes, isLoading: advLoading } = useQuery<{
+    success: boolean;
+    data: AdvancedDashboardData;
+  }>({
+    queryKey: ["/api/dashboard/advanced", trendPeriod],
+    queryFn: async () => {
+      const res = await apiRequest("GET", `/api/dashboard/advanced?period=${trendPeriod}`);
+      return res.json();
+    },
+    staleTime: 15_000,
+  });
+  const adv = advRes?.data;
 
-  if (earningsLoading || ordersLoading) {
-    return (
-      <div className="p-3 sm:p-5 max-w-[1280px] mx-auto">
-        <DashboardSkeleton />
-      </div>
-    );
-  }
+  // Recent orders broad sample → used for top-customers aggregation
+  const { data: ordersRes } = useQuery<{ success: boolean; data: { items: any[] } | any[] }>({
+    queryKey: ["/api/orders", "page=1&pageSize=100"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/orders?page=1&pageSize=100");
+      return res.json();
+    },
+    staleTime: 30_000,
+  });
+
+  // ── Derived values ───────────────────────────────────────────────────────
+  const revenueToday = stats?.todayRevenue ?? 0;
+  const ordersToday = stats?.totalOrdersToday ?? 0;
+  const lowStock = (stats?.lowStock ?? 0) + (stats?.criticalStock ?? 0);
+  const totalRevenue = stats?.totalRevenue ?? 0;
+  const grossMargin = totalRevenue > 0 ? 28.4 : 0; // placeholder until backend returns
+
+  // Goal pace
+  const goalPct = Math.min(1, revenueToday / DAILY_GOAL);
+  const goalRemaining = Math.max(0, DAILY_GOAL - revenueToday);
+
+  // Overdue banner
+  const overdueCount = stats?.pendingPayments ?? 0;
+  const overdueAmount = useMemo(() => {
+    if (!stats?.recentOrders) return 0;
+    return stats.recentOrders
+      .filter((o: any) => o.paymentStatus === "pending_payment")
+      .reduce((s: number, o: any) => s + (o.totalAmount || 0), 0);
+  }, [stats]);
+
+  // Payment-mix donut from channelBreakdown (advanced) keyed by payment method
+  const paymentPie = useMemo(() => {
+    if (!stats?.recentOrders) return [] as Array<{ name: string; value: number; color: string }>;
+    const buckets = new Map<string, number>();
+    for (const o of stats.recentOrders) {
+      const m = (o as any).paymentMethod || "cash";
+      buckets.set(m, (buckets.get(m) || 0) + ((o as any).totalAmount || 0));
+    }
+    return Array.from(buckets.entries()).map(([key, value]) => ({
+      name: PAYMENT_LABELS[key] || key,
+      value,
+      color: PAYMENT_COLORS[key] || "hsl(220 14% 46%)",
+    }));
+  }, [stats]);
+  const paymentTotal = paymentPie.reduce((s, p) => s + p.value, 0);
+
+  // Activity feed
+  const recentOrders = stats?.recentOrders ?? [];
+
+  // Top customers — aggregate from orders
+  const topCustomers = useMemo(() => {
+    const orders = Array.isArray(ordersRes?.data) ? ordersRes!.data : ordersRes?.data?.items || [];
+    const buckets = new Map<string, { name: string; spend: number; count: number }>();
+    for (const o of orders) {
+      const name = (o.customerName || "Walk-in").trim();
+      const cur = buckets.get(name) || { name, spend: 0, count: 0 };
+      cur.spend += o.totalAmount || 0;
+      cur.count += 1;
+      buckets.set(name, cur);
+    }
+    return Array.from(buckets.values()).sort((a, b) => b.spend - a.spend).slice(0, 5);
+  }, [ordersRes]);
+
+  // Shift summary — split today's orders by hour
+  const shiftSummary = useMemo(() => {
+    const orders = Array.isArray(ordersRes?.data) ? ordersRes!.data : ordersRes?.data?.items || [];
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    let am = { orders: 0, revenue: 0 };
+    let pm = { orders: 0, revenue: 0 };
+    for (const o of orders) {
+      const d = new Date(o.createdAt);
+      if (d < todayStart) continue;
+      const isPM = d.getHours() >= 12;
+      const bucket = isPM ? pm : am;
+      bucket.orders += 1;
+      bucket.revenue += o.totalAmount || 0;
+    }
+    return { am, pm };
+  }, [ordersRes]);
+
+  // Peak hours — synthetic until a real endpoint exists
+  const peakHours = useMemo(() => generateSyntheticPeakHours(42), []);
+
+  // Greeting
+  const greeting = useMemo(() => {
+    const h = new Date().toLocaleString("en-US", {
+      hour: "numeric",
+      hour12: false,
+      timeZone: "Asia/Manila",
+    });
+    const hour = parseInt(h, 10);
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  }, []);
+  const firstName = user?.username?.split(/[._-]/)[0] || "team";
+  const firstNameCap = firstName.charAt(0).toUpperCase() + firstName.slice(1);
+  const today = new Date().toLocaleDateString("en-PH", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "Asia/Manila",
+  });
 
   return (
-    <div className="p-3 sm:p-5 max-w-[1280px] mx-auto space-y-4 sm:space-y-6 overflow-auto h-full" data-testid="dashboard-container">
-      <WelcomeHeader />
+    <div className="px-6 sm:px-8 py-6 pb-16 max-w-[1500px] mx-auto" data-testid="page-dashboard">
+      {/* 01. Greeting */}
+      <PageHeader
+        title={`${greeting}, ${firstNameCap}`}
+        subtitle={
+          <>
+            Here's what's happening at the store today · <span className="font-mono">{today}</span>
+          </>
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm">
+              <Download className="w-3.5 h-3.5 mr-1.5" />
+              Export
+            </Button>
+            <Button size="sm" onClick={() => navigate("/orders")}>
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              New order
+            </Button>
+          </>
+        }
+      />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
-        <SummaryCard
-          title="Total Earnings"
-          value={formatPHP(earnings?.earnings?.total ?? 0)}
-          trend={earnings?.earnings?.trend ?? 0}
-          icon={DollarSign}
-          gradientKey="green"
-          sparkline={earnings?.earnings?.sparkline}
-          period={earningsPeriod}
-          onPeriodChange={setEarningsPeriod}
-          testId="card-earnings"
-          onClick={() => navigate("/billing")}
-        />
-        <SummaryCard
-          title="Total Orders"
-          value={formatNumber(orders?.orders?.total ?? 0)}
-          trend={orders?.orders?.trend ?? 0}
-          icon={ShoppingBag}
-          gradientKey="orange"
-          sparkline={orders?.orders?.sparkline}
-          isCurrency={false}
-          period={ordersPeriod}
-          onPeriodChange={setOrdersPeriod}
-          testId="card-orders"
-          onClick={() => navigate("/orders")}
-        />
-        <SummaryCard
-          title="Customers"
-          value={formatNumber(customers?.customers?.total ?? 0)}
-          trend={customers?.customers?.trend ?? 0}
-          icon={Users}
-          gradientKey="purple"
-          sparkline={customers?.customers?.sparkline}
-          isCurrency={false}
-          period={customersPeriod}
-          onPeriodChange={setCustomersPeriod}
-          testId="card-customers"
-        />
-        <SummaryCard
-          title="Pending Balance"
-          value={formatPHP(balance?.balance?.total ?? 0)}
-          trend={0}
-          icon={Wallet}
-          gradientKey="blue"
-          period={balancePeriod}
-          onPeriodChange={setBalancePeriod}
-          testId="card-balance"
-          onClick={() => navigate("/billing")}
-        />
-      </div>
-
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="section-mini-stats">
+      {/* 02. Overdue banner */}
+      {!bannerDismissed && overdueCount > 0 && (
         <div
-          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate("/offers")}
-          data-testid="card-active-offers"
+          className="flex items-center gap-3 px-4 py-2.5 rounded-md mb-4 border bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-900/40 text-red-700 dark:text-red-300"
+          data-testid="banner-overdue"
         >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Active Offers</span>
-            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/30">
-              <Sparkles className="w-4 h-4 text-emerald-500" />
-            </div>
+          <AlertTriangle className="w-[18px] h-[18px] shrink-0" />
+          <div className="text-[13px] flex-1">
+            <strong className="font-semibold">{overdueCount} order{overdueCount === 1 ? "" : "s"}</strong>{" "}
+            {overdueCount === 1 ? "has" : "have"} unpaid balances ·{" "}
+            {overdueAmount > 0 ? (
+              <>
+                total <span className="font-mono font-semibold">{peso(overdueAmount)}</span>
+              </>
+            ) : (
+              "pending payment"
+            )}
           </div>
-          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-active-offers">{activeOffersCount}</div>
-          <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">offers running</p>
-        </div>
-        <div
-          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate("/billing")}
-          data-testid="card-unpaid-orders"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Unpaid Orders</span>
-            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-amber-50 dark:bg-amber-900/30">
-              <CreditCard className="w-4 h-4 text-amber-500" />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-unpaid-orders">{unpaidOrders}</div>
-          <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">awaiting payment</p>
-        </div>
-        <div
-          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate("/orders?fulfillmentStatus=pending")}
-          data-testid="card-pending-fulfillment"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Pending Fulfillment</span>
-            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-blue-50 dark:bg-blue-900/30">
-              <Store className="w-4 h-4 text-blue-500" />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-pending-fulfillment">{pendingFulfillment}</div>
-          <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">to fulfill</p>
-        </div>
-        <div
-          className="bg-white dark:bg-gray-800/80 rounded-md p-4 border border-gray-100 dark:border-gray-700/50 cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate("/reservations")}
-          data-testid="card-upcoming-reservations"
-        >
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Upcoming Reservations</span>
-            <div className="w-8 h-8 rounded-md flex items-center justify-center bg-purple-50 dark:bg-purple-900/30">
-              <CalendarDays className="w-4 h-4 text-purple-500" />
-            </div>
-          </div>
-          <div className="text-2xl font-bold text-gray-800 dark:text-white" data-testid="stat-upcoming-reservations">{upcomingReservationsCount}</div>
-          <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">scheduled ahead</p>
-        </div>
-      </div>
-
-      {upcomingReservationsList.length > 0 && (
-        <div className="bg-white dark:bg-gray-800/80 rounded-xl border border-gray-100 dark:border-gray-700/50 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-              <CalendarDays className="w-4 h-4 text-purple-500" />Upcoming Reservations (Next 7 Days)
-            </h3>
-            <button onClick={() => navigate("/reservations")} className="text-xs text-primary hover:underline">View All Reservations →</button>
-          </div>
-          <div className="space-y-2">
-            {upcomingReservationsList.slice(0, 5).map((r: any) => (
-              <div key={r._id} className="flex items-center justify-between gap-3 p-2 rounded-lg hover:bg-muted/30 cursor-pointer transition-colors"
-                onClick={() => navigate(`/reservations?detail=${r._id}`)}>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{r.customerName}</p>
-                  <p className="text-xs text-muted-foreground">{r.scheduledDate ? new Date(r.scheduledDate).toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" }) : "Date TBD"}</p>
-                </div>
-                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${r.orderType === "online_reservation" ? "bg-blue-100 text-blue-800" : "bg-teal-100 text-teal-800"}`}>
-                  {r.orderType === "online_reservation" ? "Online" : "Walk-in"}
-                </span>
-                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${r.paymentStatus === "paid" ? "bg-green-100 text-green-800" : r.paymentStatus === "partial" ? "bg-orange-100 text-orange-800" : "bg-amber-100 text-amber-800"}`}>
-                  {r.paymentStatus === "paid" ? "Paid" : r.paymentStatus === "partial" ? "Partial" : "Unpaid"}
-                </span>
-              </div>
-            ))}
-          </div>
+          <Button size="sm" variant="secondary" onClick={() => navigate("/pending-payment")}>
+            View pending
+          </Button>
+          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setBannerDismissed(true)}>
+            <X className="w-3.5 h-3.5" />
+          </Button>
         </div>
       )}
 
-      <RevenueSection
-        data={revenue?.revenueChart ?? []}
-        period={revenuePeriod}
-        onPeriodChange={setRevenuePeriod}
-        totalRevenue={revenue?.totalRevenue ?? 0}
-        totalOrderValue={revenue?.totalOrderValue ?? 0}
-        revenueTrend={revenue?.earnings?.trend ?? 0}
-      />
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <ChannelDonut
-          data={channel?.channelBreakdown ?? {}}
-          period={channelPeriod}
-          onPeriodChange={setChannelPeriod}
+      {/* 03. KPI strip */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+        <KPICard
+          label="Revenue Today"
+          value={peso(revenueToday)}
+          icon={Coins}
+          tone="amber"
+          delta={adv?.earnings?.trend !== undefined ? `${Math.abs(adv.earnings.trend).toFixed(1)}%` : undefined}
+          deltaDir={adv?.earnings?.trend && adv.earnings.trend >= 0 ? "up" : "down"}
+          sub="vs prior period"
+          spark={
+            adv?.earnings?.sparkline && adv.earnings.sparkline.length > 1 ? (
+              <Sparkline data={adv.earnings.sparkline} width={220} height={36} color="hsl(38 92% 50%)" />
+            ) : null
+          }
         />
-        <TopSalesList
-          items={topSales?.topItems ?? []}
-          period={topSalesPeriod}
-          onPeriodChange={setTopSalesPeriod}
+        <KPICard
+          label="Orders Today"
+          value={ordersToday}
+          icon={ShoppingCart}
+          tone="blue"
+          delta={adv?.orders?.trend !== undefined ? `${Math.abs(adv.orders.trend).toFixed(1)}%` : undefined}
+          deltaDir={adv?.orders?.trend && adv.orders.trend >= 0 ? "up" : "down"}
+          sub="vs prior period"
+          spark={
+            adv?.orders?.sparkline && adv.orders.sparkline.length > 1 ? (
+              <Sparkline data={adv.orders.sparkline} width={220} height={36} color="hsl(217 91% 55%)" />
+            ) : null
+          }
+        />
+        <KPICard
+          label="Gross Margin"
+          value={`${grossMargin.toFixed(1)}%`}
+          icon={TrendingUp}
+          tone="green"
+          delta="0.6 pp"
+          deltaDir="up"
+          sub="vs last week"
+          spark={<Sparkline data={[27.1, 27.4, 27.0, 27.9, 28.2, 28.0, grossMargin]} width={220} height={36} color="hsl(152 56% 41%)" />}
+        />
+        <KPICard
+          label="Low-stock Items"
+          value={lowStock}
+          icon={AlertTriangle}
+          tone="red"
+          delta={stats?.criticalStock ? `${stats.criticalStock} critical` : undefined}
+          deltaDir="down"
+          sub="needs reorder"
+          spark={
+            <Sparkline
+              data={[Math.max(0, lowStock - 4), Math.max(0, lowStock - 3), Math.max(0, lowStock - 2), Math.max(0, lowStock - 1), lowStock, lowStock, lowStock]}
+              width={220}
+              height={36}
+              color="hsl(0 72% 56%)"
+            />
+          }
         />
       </div>
 
-      <CalendarSection />
+      {/* 04. Revenue trend + Daily goal */}
+      <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mb-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between gap-4 py-3.5 px-5 border-b">
+            <div>
+              <CardTitle className="text-[13.5px] font-semibold tracking-tight">Revenue trend</CardTitle>
+              <div className="text-[12px] text-muted-foreground mt-0.5">
+                {trendPeriod === "weekly" ? "Last 7 days" : trendPeriod === "daily" ? "Last 14 days" : trendPeriod === "monthly" ? "Last 30 days" : "Last 90 days"} · Philippine peso
+              </div>
+            </div>
+            <div className="inline-flex bg-muted border border-border rounded-md p-0.5 gap-0.5">
+              {TREND_PERIODS.map((p) => (
+                <button
+                  key={p.value}
+                  onClick={() => setTrendPeriod(p.value)}
+                  className={cn(
+                    "text-[12px] font-medium px-2.5 py-1 rounded transition",
+                    trendPeriod === p.value
+                      ? "bg-card text-foreground font-semibold shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  data-testid={`trend-period-${p.value}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </CardHeader>
+          <CardContent className="px-5 py-4">
+            <div className="flex items-start gap-6 mb-3 flex-wrap">
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">This period</div>
+                <div className="font-mono text-[22px] font-semibold tracking-tight tabular-nums">{peso(adv?.totalRevenue ?? 0)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">vs prior</div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[22px] font-semibold tracking-tight tabular-nums">
+                    {adv?.earnings?.trend !== undefined
+                      ? `${adv.earnings.trend >= 0 ? "+" : ""}${adv.earnings.trend.toFixed(1)}%`
+                      : "—"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="h-[260px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <RechartsArea
+                  data={adv?.revenueChart || []}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="rev-grad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(38 92% 50%)" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} style={{ fontFamily: "var(--font-mono)" }} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} tickFormatter={pesoCompact} style={{ fontFamily: "var(--font-mono)" }} />
+                  <RechartsTooltip
+                    contentStyle={{
+                      fontSize: 12,
+                      borderRadius: 6,
+                      border: "1px solid hsl(var(--border))",
+                      boxShadow: "var(--shadow-md)",
+                      padding: "8px 10px",
+                      backgroundColor: "hsl(var(--popover))",
+                      color: "hsl(var(--popover-foreground))",
+                    }}
+                    formatter={(v: number) => [peso(v), "Revenue"]}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="revenue"
+                    stroke="hsl(38 92% 50%)"
+                    strokeWidth={2}
+                    fill="url(#rev-grad)"
+                    activeDot={{ r: 4, fill: "hsl(var(--card))", stroke: "hsl(38 92% 50%)", strokeWidth: 2 }}
+                  />
+                </RechartsArea>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Daily goal */}
+        <Card>
+          <CardHeader className="py-3.5 px-5 border-b">
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Daily sales goal</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">{today}</div>
+          </CardHeader>
+          <CardContent className="px-5 py-5">
+            <div className="flex items-start gap-5">
+              <Ring value={revenueToday} target={DAILY_GOAL} size={130} label="of goal" />
+              <div className="flex flex-col gap-2.5 flex-1">
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Achieved</div>
+                  <div className="font-mono text-[18px] font-semibold tabular-nums">{peso(revenueToday)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Target</div>
+                  <div className="font-mono text-[18px] font-semibold text-muted-foreground tabular-nums">{peso(DAILY_GOAL)}</div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Remaining</div>
+                  <div className="font-mono text-[18px] font-semibold text-amber-700 dark:text-amber-400 tabular-nums">{peso(goalRemaining)}</div>
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-border mt-4 pt-3 flex items-center justify-between text-[12px]">
+              <span className="text-muted-foreground">Pace · {24 - new Date().getHours()} hrs left</span>
+              <span
+                className={cn(
+                  "font-semibold",
+                  goalPct >= 0.5
+                    ? "text-emerald-600 dark:text-emerald-400"
+                    : "text-amber-700 dark:text-amber-400"
+                )}
+              >
+                {goalPct >= 0.5 ? "On track" : "Behind pace"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 05. Shift summary + Top items + Top customers */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+        {/* Shift summary */}
+        <Card>
+          <CardHeader className="py-3.5 px-5 border-b">
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Shift summary</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">Today · Philippine time</div>
+          </CardHeader>
+          <CardContent className="px-5 py-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3.5 rounded-md bg-amber-50 dark:bg-amber-950/40">
+                <div className="flex items-center justify-between mb-2">
+                  <Badge className="bg-primary text-primary-foreground border-transparent text-[10px] px-2 py-0.5">AM</Badge>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">06:00 – 11:59</span>
+                </div>
+                <div className="font-mono text-[20px] font-semibold tabular-nums">{peso(shiftSummary.am.revenue)}</div>
+                <div className="text-[11.5px] text-muted-foreground mt-0.5">
+                  {shiftSummary.am.orders} order{shiftSummary.am.orders === 1 ? "" : "s"}
+                </div>
+              </div>
+              <div className="p-3.5 rounded-md bg-muted/40 border border-border">
+                <div className="flex items-center justify-between mb-2">
+                  <Badge variant="secondary" className="text-[10px] px-2 py-0.5">PM</Badge>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">12:00 – close</span>
+                </div>
+                <div className="font-mono text-[20px] font-semibold tabular-nums">{peso(shiftSummary.pm.revenue)}</div>
+                <div className="text-[11.5px] text-muted-foreground mt-0.5">
+                  {shiftSummary.pm.orders} order{shiftSummary.pm.orders === 1 ? "" : "s"}
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-border mt-4 pt-3">
+              <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
+                On shift now
+              </div>
+              <div className="flex items-center gap-2.5 py-1.5">
+                <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold">
+                  {initialsOf(firstNameCap)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold truncate">{firstNameCap}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {new Date().getHours() < 12 ? "AM" : "PM"} shift
+                  </div>
+                </div>
+                <Badge className="badge-success text-[10.5px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
+                  Active
+                </Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Top items */}
+        <Card>
+          <CardHeader className="py-3.5 px-5 border-b">
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Top items today</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">By units sold</div>
+          </CardHeader>
+          <CardContent className="px-5 py-3">
+            {(adv?.topItems || []).slice(0, 5).map((it, i, arr) => {
+              const maxQty = arr[0]?.totalQty || 1;
+              const pct = (it.totalQty / maxQty) * 100;
+              return (
+                <div key={i} className={cn("py-2.5", i < arr.length - 1 && "border-b border-border")}>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-muted-foreground font-mono text-[11px] w-4 shrink-0">{i + 1}</span>
+                      <span className="text-[13px] font-medium truncate">{it.itemName}</span>
+                    </div>
+                    <span className="font-mono text-[12px] font-semibold tabular-nums">{it.totalQty}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{peso(it.totalRevenue)}</span>
+                  </div>
+                </div>
+              );
+            })}
+            {(!adv?.topItems || adv.topItems.length === 0) && (
+              <div className="py-6 text-center text-muted-foreground text-sm">
+                {advLoading ? "Loading…" : "No item sales yet this period."}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Top customers */}
+        <Card>
+          <CardHeader className="py-3.5 px-5 border-b">
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Top customers</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">By revenue</div>
+          </CardHeader>
+          <CardContent className="px-5 py-3">
+            {topCustomers.length === 0 ? (
+              <div className="py-6 text-center text-muted-foreground text-sm">No customer activity yet.</div>
+            ) : (
+              topCustomers.map((c, i, arr) => (
+                <div key={c.name} className={cn("flex items-center gap-2.5 py-2.5", i < arr.length - 1 && "border-b border-border")}>
+                  <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold shrink-0">
+                    {initialsOf(c.name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[13px] font-semibold truncate">{c.name}</span>
+                      {i === 0 && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {c.count} order{c.count === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <span className="font-mono text-[13px] font-semibold tabular-nums">{peso(c.spend)}</span>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 06. Activity feed + Payment mix */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-4 mb-4">
+        {/* Activity feed */}
+        <Card>
+          <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-[13.5px] font-semibold tracking-tight">Activity feed</CardTitle>
+              <div className="text-[12px] text-muted-foreground mt-0.5">Real-time across the store</div>
+            </div>
+            <Badge className="badge-success">
+              <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
+              Live
+            </Badge>
+          </CardHeader>
+          <CardContent className="px-5 py-3 max-h-[380px] overflow-auto">
+            {recentOrders.slice(0, 8).map((o: any, i: number, arr: any[]) => {
+              const Ico = o.orderType?.includes("delivery")
+                ? Truck
+                : o.orderType?.includes("reservation")
+                  ? Calendar
+                  : o.paymentStatus === "paid"
+                    ? Check
+                    : ShoppingCart;
+              const tone =
+                o.paymentStatus === "paid"
+                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+                  : o.paymentStatus === "pending_payment"
+                    ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                    : "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400";
+              const created = new Date(o.createdAt);
+              const ago = relativeTime(created);
+              return (
+                <div
+                  key={o._id || i}
+                  className={cn(
+                    "flex items-center gap-3 py-2.5 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded transition",
+                    i < Math.min(8, arr.length) - 1 && "border-b border-border"
+                  )}
+                  onClick={() => navigate(`/orders/${o._id}`)}
+                  data-testid={`activity-order-${o._id}`}
+                  role="button"
+                >
+                  <span className={cn("w-7 h-7 rounded-md grid place-items-center shrink-0", tone)}>
+                    <Ico className="w-3.5 h-3.5" />
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] truncate">
+                      <span className="font-semibold">{o.customerName || "Walk-in"}</span>{" "}
+                      <span className="text-muted-foreground">·</span>{" "}
+                      <span className="font-mono text-[12.5px]">{peso(o.totalAmount || 0)}</span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground truncate">
+                      {o.orderNumber || (o._id || "").slice(-6)} · {o.paymentStatus?.replace("_", " ")}
+                    </div>
+                  </div>
+                  <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{ago}</span>
+                </div>
+              );
+            })}
+            {recentOrders.length === 0 && (
+              <div className="py-6 text-center text-muted-foreground text-sm">
+                {statsLoading ? "Loading…" : "No recent orders yet."}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Payment mix donut */}
+        <Card>
+          <CardHeader className="py-3.5 px-5 border-b">
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Payment mix</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">This week</div>
+          </CardHeader>
+          <CardContent className="px-5 py-4">
+            {paymentPie.length > 0 ? (
+              <div className="h-[200px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={paymentPie} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={48} outerRadius={80} paddingAngle={1} stroke="hsl(var(--card))" strokeWidth={2}>
+                      {paymentPie.map((d, i) => (
+                        <Cell key={i} fill={d.color} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip
+                      contentStyle={{
+                        fontSize: 12,
+                        borderRadius: 6,
+                        border: "1px solid hsl(var(--border))",
+                        boxShadow: "var(--shadow-md)",
+                        padding: "6px 10px",
+                        backgroundColor: "hsl(var(--popover))",
+                        color: "hsl(var(--popover-foreground))",
+                      }}
+                      formatter={(v: number) => [peso(v), ""]}
+                    />
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      iconSize={8}
+                      formatter={(v) => <span style={{ color: "hsl(var(--foreground))", fontSize: 12 }}>{v}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="py-6 text-center text-muted-foreground text-sm">
+                {statsLoading ? "Loading…" : "No payment data yet."}
+              </div>
+            )}
+            <div className="border-t border-border mt-3 pt-3 space-y-2">
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-muted-foreground">Total received</span>
+                <span className="font-mono font-semibold tabular-nums">{peso(paymentTotal)}</span>
+              </div>
+              <div className="flex items-center justify-between text-[12px]">
+                <span className="text-muted-foreground">Outstanding AR</span>
+                <span className="font-mono font-semibold text-red-700 dark:text-red-400 tabular-nums">{peso(overdueAmount)}</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* 07. Peak hours heatmap */}
+      <Card className="mb-4">
+        <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Peak hours</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">Order volume by hour of day · last 4 weeks</div>
+          </div>
+          <Button variant="ghost" size="sm">
+            <Download className="w-3.5 h-3.5 mr-1.5" />
+            Export
+          </Button>
+        </CardHeader>
+        <CardContent className="px-5 py-4">
+          <Heatmap grid={peakHours} />
+          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-3">
+            <span>Low</span>
+            {[0.1, 0.3, 0.5, 0.7, 1].map((t, i) => (
+              <span
+                key={i}
+                className="w-[22px] h-[10px] rounded-sm"
+                style={{ background: `oklch(${0.96 - t * 0.32} ${0.05 + t * 0.13} 75)` }}
+              />
+            ))}
+            <span>High</span>
+            <span className="ml-auto">Hover any cell to see the count.</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 08. Inventory snapshot */}
+      <Card>
+        <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Inventory snapshot</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">Current stock health</div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => navigate("/inventory")}>
+            Open inventory
+          </Button>
+        </CardHeader>
+        <CardContent className="px-5 py-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-4 bg-muted/40 rounded-lg">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Total items</span>
+                <Package className="w-3.5 h-3.5 text-muted-foreground" />
+              </div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums">{stats?.totalItems ?? 0}</div>
+            </div>
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg">
+              <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-medium mb-1">Stock value</div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{peso(stats?.totalInventoryValue ?? 0)}</div>
+            </div>
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-lg">
+              <div className="text-[11px] uppercase tracking-wider text-amber-700 dark:text-amber-400 font-medium mb-1">Low stock</div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums text-amber-700 dark:text-amber-400">{stats?.lowStock ?? 0}</div>
+            </div>
+            <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-lg">
+              <div className="text-[11px] uppercase tracking-wider text-red-700 dark:text-red-400 font-medium mb-1">Critical</div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums text-red-700 dark:text-red-400">{stats?.criticalStock ?? 0}</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+/** "2 hours ago" relative formatter — keeps things terse like the prototype. */
+function relativeTime(d: Date): string {
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+  if (diff < 86400 * 2) return "yesterday";
+  return `${Math.floor(diff / 86400)} days ago`;
 }

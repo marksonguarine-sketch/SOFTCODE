@@ -1,63 +1,68 @@
 import { useLocation } from "wouter";
-import { ChevronRight, Home } from "lucide-react";
-import { Link } from "wouter";
-
-const LABELS: Record<string, string> = {
-  "": "Dashboard",
-  "inventory": "Inventory",
-  "orders": "Orders",
-  "billing": "Billing",
-  "offers": "Offers",
-  "users": "Users",
-  "accounting": "Accounting",
-  "reports": "Reports",
-  "settings": "Settings",
-  "about": "About",
-  "help": "Help",
-  "system-logs": "System Logs",
-  "maintenance": "Maintenance",
-  "reservations": "Reservations",
-  "pending-payment": "Pending Payment",
-  "requests": "Requests",
-  "employees": "Employees",
-  "profile": "Profile",
-};
-
-function prettify(seg: string): string {
-  return LABELS[seg] || seg.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
+import { ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useMemo } from "react";
 
 /**
- * Breadcrumb trail derived from the current route. Shows Home › Section › [Subsection].
- * Renders nothing on the root dashboard route.
+ * Maps a wouter location path to a breadcrumb trail.
+ * E.g. "/orders/JH-2418" → ["Orders", "JH-2418"]
  */
-export function Breadcrumbs() {
-  const [location] = useLocation();
-  const segments = location.split("/").filter(Boolean);
+const PATH_LABELS: Record<string, string[]> = {
+  "/": ["Dashboard"],
+  "/inventory": ["Inventory"],
+  "/orders": ["Orders"],
+  "/billing": ["Billing"],
+  "/accounting": ["Accounting"],
+  "/reports": ["Reports"],
+  "/reservations": ["Reservations"],
+  "/pending-payment": ["Billing", "Pending Payment"],
+  "/users": ["Admin", "Users"],
+  "/settings": ["Settings"],
+  "/maintenance": ["Admin", "Maintenance"],
+  "/system-logs": ["Admin", "System Logs"],
+  "/offers": ["Admin", "Offers"],
+  "/requests": ["Admin", "Requests"],
+  "/employees": ["Admin", "Employees"],
+  "/profile": ["My Profile"],
+  "/help": ["Help"],
+  "/about": ["About"],
+};
 
-  if (segments.length === 0) return null;
+export function Breadcrumbs({ className }: { className?: string }) {
+  const [location] = useLocation();
+
+  const crumbs = useMemo(() => {
+    // Order detail route: /orders/:id
+    if (location.startsWith("/orders/") && location.length > 8) {
+      const id = location.slice(8);
+      return ["Orders", id];
+    }
+    return PATH_LABELS[location] ?? ["—"];
+  }, [location]);
 
   return (
-    <nav className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground" aria-label="Breadcrumb">
-      <Link href="/" className="flex items-center gap-1 hover:text-foreground transition-colors">
-        <Home className="h-3 w-3" />
-      </Link>
-      {segments.map((seg, idx) => {
-        const isLast = idx === segments.length - 1;
-        const href = "/" + segments.slice(0, idx + 1).join("/");
-        return (
-          <span key={href} className="flex items-center gap-1">
-            <ChevronRight className="h-3 w-3 text-muted-foreground/50" />
-            {isLast ? (
-              <span className="text-foreground font-medium">{prettify(seg)}</span>
-            ) : (
-              <Link href={href} className="hover:text-foreground transition-colors">
-                {prettify(seg)}
-              </Link>
+    <nav
+      className={cn(
+        "hidden sm:flex items-center gap-1.5 text-[13px] text-muted-foreground min-w-0",
+        className
+      )}
+      aria-label="Breadcrumb"
+      data-testid="breadcrumbs"
+    >
+      <span className="whitespace-nowrap">JOAP</span>
+      {crumbs.map((c, i) => (
+        <span key={i} className="flex items-center gap-1.5 min-w-0">
+          <ChevronRight className="w-3 h-3 opacity-55 shrink-0" />
+          <span
+            className={cn(
+              "whitespace-nowrap max-w-[220px] overflow-hidden text-ellipsis",
+              i === crumbs.length - 1 && "text-foreground font-semibold"
             )}
+          >
+            {c}
           </span>
-        );
-      })}
+        </span>
+      ))}
     </nav>
   );
 }
