@@ -89,14 +89,11 @@ app.use((req, res, next) => {
   }
 
   const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  // reusePort is a Linux-only socket option; on Windows it raises ENOTSUP
+  const isWindows = process.platform === "win32";
+  const listenOpts: any = { port, host: "0.0.0.0" };
+  if (!isWindows) listenOpts.reusePort = true;
+  httpServer.listen(listenOpts, () => {
+    log(`serving on port ${port}`);
+  });
 })();

@@ -401,7 +401,8 @@ export default function OffersPage() {
         headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
       });
       const json = await res.json();
-      return json.data;
+      // Ensure we never return undefined — TanStack Query throws on undefined.
+      return json?.data ?? { offers: [], total: 0 };
     },
   });
 
