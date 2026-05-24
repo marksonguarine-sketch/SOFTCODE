@@ -248,14 +248,39 @@ export type LogPaymentInput = z.infer<typeof logPaymentSchema>;
 export const processPaymentSchema = z.object({
   orderId: z.string().min(1),
   paymentMethod: z.enum(PAYMENT_METHODS),
-  customerName: z.string().min(1, "Customer name is required"),
+  // Customer & Recipient
+  customerName: z.string().min(1, "Customer name required"),
+  contactNumber: z.string().optional().default(""),
+  recipientName: z.string().optional().default(""),
+  companyName: z.string().optional().default(""),
   deliveryAddress: z.string().optional().default(""),
+  // Item Verification
+  allItemsComplete: z.boolean().optional().default(true),
+  itemConditionNotes: z.string().optional().default(""),
+  checkerName: z.string().optional().default(""),
+  // Payment
   amountPaid: z.number().min(0.01, "Amount must be greater than 0"),
   amountTendered: z.number().optional(),
-  transactionCode: z.string().optional().default(""),
+  orNumber: z.string().optional().default(""),
+  // GCash / QR fields
+  gcashSenderName: z.string().optional().default(""),
   gcashSenderNumber: z.string().optional().default(""),
   gcashReferenceNumber: z.string().optional().default(""),
+  // Bank
+  bankName: z.string().optional().default(""),
+  bankReference: z.string().optional().default(""),
+  // Proof uploads
   receiptImagePath: z.string().optional().default(""),
+  proofOfDeliveryPath: z.string().optional().default(""),
+  // Logistics
+  driverName: z.string().optional().default(""),
+  plateNumber: z.string().optional().default(""),
+  // Balance
+  isFullPayment: z.boolean().optional().default(true),
+  remainingBalance: z.number().optional().default(0),
+  balanceDueDate: z.string().optional().default(""),
+  // Meta
+  transactionCode: z.string().optional().default(""),
   notes: z.string().optional().default(""),
   paymentDate: z.string().optional(),
 }).superRefine((data, ctx) => {
@@ -271,6 +296,9 @@ export const processPaymentSchema = z.object({
     if (data.amountTendered < data.amountPaid) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Amount tendered must be at least the total amount", path: ["amountTendered"] });
     }
+  }
+  if (data.isFullPayment === false && (!data.remainingBalance || data.remainingBalance <= 0)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Enter the remaining balance amount", path: ["remainingBalance"] });
   }
 });
 export type ProcessPaymentInput = z.infer<typeof processPaymentSchema>;

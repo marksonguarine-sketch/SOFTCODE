@@ -1931,9 +1931,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       const order = await Order.findById(parsed.data.orderId);
       if (!order) return fail(res, 404, "Order not found");
-      if (order.currentStatus !== "Pending Payment") return fail(res, 400, "Order is not pending payment");
+      if (order.paymentStatus === "paid") return fail(res, 400, "Order has already been paid");
 
-      if (parsed.data.amountPaid < order.totalAmount) return fail(res, 400, `Payment must be at least ₱${order.totalAmount.toFixed(2)}`);
+      if (!parsed.data.isFullPayment) {
+        if (parsed.data.amountPaid <= 0) return fail(res, 400, "Amount paid must be greater than 0");
+      } else {
+        if (parsed.data.amountPaid < order.totalAmount) return fail(res, 400, `Full payment must be at least ₱${order.totalAmount.toFixed(2)}`);
+      }
 
       const isGcash = parsed.data.paymentMethod === "gcash" || parsed.data.paymentMethod === "gcash_qr";
 
@@ -1948,12 +1952,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         orderId: parsed.data.orderId,
         paymentMethod: parsed.data.paymentMethod,
         gcashNumber: parsed.data.gcashSenderNumber || "",
+        gcashSenderName: parsed.data.gcashSenderName || "",
         gcashReferenceNumber: isGcash ? parsed.data.gcashReferenceNumber : transactionCode,
         amountPaid: parsed.data.amountPaid,
         amountTendered: parsed.data.amountTendered,
         transactionCode,
         receiptImagePath: parsed.data.receiptImagePath || "",
         deliveryAddress: parsed.data.deliveryAddress || "",
+        orNumber: parsed.data.orNumber || "",
+        recipientName: parsed.data.recipientName || "",
+        contactNumber: parsed.data.contactNumber || "",
+        checkerName: parsed.data.checkerName || "",
+        driverName: parsed.data.driverName || "",
+        plateNumber: parsed.data.plateNumber || "",
+        allItemsComplete: parsed.data.allItemsComplete ?? true,
+        itemConditionNotes: parsed.data.itemConditionNotes || "",
+        isFullPayment: parsed.data.isFullPayment ?? true,
+        remainingBalance: parsed.data.remainingBalance || 0,
+        balanceDueDate: parsed.data.balanceDueDate ? new Date(parsed.data.balanceDueDate) : undefined,
         paymentDate: parsed.data.paymentDate ? new Date(parsed.data.paymentDate) : new Date(),
         proofNote: parsed.data.notes || "",
         loggedBy: req.user!.username,

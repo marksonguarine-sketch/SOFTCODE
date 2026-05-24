@@ -7,7 +7,9 @@ import {
   ArrowLeft, Loader2, CreditCard, Truck, Clock, CheckCircle, MapPin,
   Lock, UserCheck, AlertTriangle, User, RefreshCw, Play, CheckCheck,
   UserX, Circle, Upload, X, Receipt, Banknote, Smartphone, Package,
-  FileText, Hash, DollarSign, ImageIcon,
+  FileText, Hash, DollarSign, ImageIcon, Car, ClipboardCheck,
+  Building2, Phone, UserRound, BadgeCheck, WalletCards, Camera,
+  ChevronRight, Scale, Wallet, CalendarClock, Clipboard,
 } from "lucide-react";
 import { processPaymentSchema, type ProcessPaymentInput, type IOrder, PAYMENT_METHOD_LABELS } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -24,6 +26,8 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 
 function StatusBadge({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
@@ -56,7 +60,7 @@ function formatCurrency(v: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
 }
 
-// ─── Payment Processing Modal ─────────────────────────────────────────────────
+// ─── Comprehensive Order Log Details Modal ────────────────────────────────────
 interface PaymentModalProps {
   open: boolean;
   order: IOrder;
@@ -64,78 +68,125 @@ interface PaymentModalProps {
   onSuccess: () => void;
 }
 
+function SectionHeader({ icon: Icon, title }: { icon: React.ElementType; title: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary/10">
+        <Icon className="h-3.5 w-3.5 text-primary" />
+      </div>
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-foreground">{title}</h3>
+    </div>
+  );
+}
+
+function UploadBox({
+  label, hint, file, preview, inputRef, onChange, onClear, required,
+}: {
+  label: string; hint: string; file: File | null; preview: string;
+  inputRef: React.RefObject<HTMLInputElement>; onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onClear: () => void; required?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-sm font-medium mb-1.5">{label}{required && <span className="text-destructive ml-1">*</span>}</p>
+      <div
+        onClick={() => inputRef.current?.click()}
+        className="border-2 border-dashed rounded-lg p-4 flex flex-col items-center justify-center gap-1.5 cursor-pointer hover:border-primary/60 hover:bg-muted/20 transition-colors min-h-[90px]"
+      >
+        {preview ? (
+          <div className="relative w-full">
+            <img src={preview} alt="preview" className="max-h-36 mx-auto rounded object-contain" />
+            <Button type="button" variant="destructive" size="sm" className="absolute top-1 right-1 h-6 w-6 p-0"
+              onClick={(e) => { e.stopPropagation(); onClear(); }}>
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+        ) : (
+          <>
+            <Camera className="h-7 w-7 text-muted-foreground" />
+            <p className="text-xs font-medium text-center">{hint}</p>
+            <p className="text-[10px] text-muted-foreground">JPG, PNG, WEBP · max 10MB</p>
+          </>
+        )}
+      </div>
+      <input ref={inputRef} type="file" accept="image/*" className="hidden" onChange={onChange} />
+    </div>
+  );
+}
+
 function PaymentModal({ open, order, onClose, onSuccess }: PaymentModalProps) {
   const { toast } = useToast();
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptPreview, setReceiptPreview] = useState<string>("");
+  const [receiptPreview, setReceiptPreview] = useState("");
+  const [deliveryFile, setDeliveryFile] = useState<File | null>(null);
+  const [deliveryPreview, setDeliveryPreview] = useState("");
   const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const receiptRef = useRef<HTMLInputElement>(null);
+  const deliveryRef = useRef<HTMLInputElement>(null);
 
   const isGcash = order.paymentMethod === "gcash" || order.paymentMethod === "gcash_qr";
   const isCash = order.paymentMethod === "cash";
   const isCod = order.paymentMethod === "cod";
-  const isPickup = order.orderType?.includes("pickup") || order.orderType?.includes("walkin");
+  const isBank = order.paymentMethod === "bank";
+  const isDelivery = order.orderType?.includes("delivery");
+  const isPickup = !isDelivery;
+
+  const defaultAddress = [order.address?.street, order.address?.unitNumber, order.address?.city, order.address?.province, order.address?.zipCode].filter(Boolean).join(", ");
 
   const form = useForm<ProcessPaymentInput>({
     resolver: zodResolver(processPaymentSchema),
     defaultValues: {
-      orderId: order._id,
-      paymentMethod: order.paymentMethod,
-      customerName: order.customerName,
-      deliveryAddress: [
-        order.address?.street,
-        order.address?.city,
-        order.address?.province,
-        order.address?.zipCode,
-      ].filter(Boolean).join(", "),
-      amountPaid: order.totalAmount,
-      amountTendered: order.totalAmount,
-      transactionCode: "",
-      gcashSenderNumber: "",
-      gcashReferenceNumber: "",
-      receiptImagePath: "",
-      notes: "",
+      orderId: order._id, paymentMethod: order.paymentMethod,
+      customerName: order.customerName, contactNumber: "", recipientName: order.customerName,
+      companyName: "", deliveryAddress: defaultAddress,
+      allItemsComplete: true, itemConditionNotes: "", checkerName: "",
+      amountPaid: order.totalAmount, amountTendered: order.totalAmount,
+      orNumber: "", gcashSenderName: "", gcashSenderNumber: "", gcashReferenceNumber: "",
+      bankName: "", bankReference: "",
+      receiptImagePath: "", proofOfDeliveryPath: "",
+      driverName: "", plateNumber: "",
+      isFullPayment: true, remainingBalance: 0, balanceDueDate: "",
+      transactionCode: "", notes: "",
       paymentDate: new Date().toISOString().slice(0, 16),
     },
   });
 
-  const amountPaid = form.watch("amountPaid") || 0;
-  const amountTendered = form.watch("amountTendered") || 0;
-  const change = Math.max(0, amountTendered - amountPaid);
-
   useEffect(() => {
     if (open) {
       form.reset({
-        orderId: order._id,
-        paymentMethod: order.paymentMethod,
-        customerName: order.customerName,
-        deliveryAddress: [
-          order.address?.street,
-          order.address?.city,
-          order.address?.province,
-          order.address?.zipCode,
-        ].filter(Boolean).join(", "),
-        amountPaid: order.totalAmount,
-        amountTendered: order.totalAmount,
-        transactionCode: "",
-        gcashSenderNumber: "",
-        gcashReferenceNumber: "",
-        receiptImagePath: "",
-        notes: "",
+        orderId: order._id, paymentMethod: order.paymentMethod,
+        customerName: order.customerName, contactNumber: "", recipientName: order.customerName,
+        companyName: "", deliveryAddress: defaultAddress,
+        allItemsComplete: true, itemConditionNotes: "", checkerName: "",
+        amountPaid: order.totalAmount, amountTendered: order.totalAmount,
+        orNumber: "", gcashSenderName: "", gcashSenderNumber: "", gcashReferenceNumber: "",
+        bankName: "", bankReference: "",
+        receiptImagePath: "", proofOfDeliveryPath: "",
+        driverName: "", plateNumber: "",
+        isFullPayment: true, remainingBalance: 0, balanceDueDate: "",
+        transactionCode: "", notes: "",
         paymentDate: new Date().toISOString().slice(0, 16),
       });
-      setReceiptFile(null);
-      setReceiptPreview("");
+      setReceiptFile(null); setReceiptPreview("");
+      setDeliveryFile(null); setDeliveryPreview("");
     }
-  }, [open, order]);
+  }, [open, order._id]);
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setReceiptFile(file);
-    const reader = new FileReader();
-    reader.onload = (ev) => setReceiptPreview(ev.target?.result as string);
-    reader.readAsDataURL(file);
+  function mkFileHandler(setFile: (f: File) => void, setPreview: (s: string) => void) {
+    return (e: React.ChangeEvent<HTMLInputElement>) => {
+      const f = e.target.files?.[0]; if (!f) return;
+      setFile(f);
+      const reader = new FileReader();
+      reader.onload = (ev) => setPreview(ev.target?.result as string);
+      reader.readAsDataURL(f);
+    };
+  }
+
+  async function uploadFile(file: File): Promise<string> {
+    const fd = new FormData(); fd.append("receipt", file);
+    const res = await fetch("/api/billing/upload-receipt", { method: "POST", body: fd, credentials: "include" });
+    const json = await res.json();
+    return json.success ? json.data.path : "";
   }
 
   const completeMutation = useMutation({
@@ -159,33 +210,13 @@ function PaymentModal({ open, order, onClose, onSuccess }: PaymentModalProps) {
   const handleSubmit = async (data: ProcessPaymentInput) => {
     try {
       setUploading(true);
-
-      // 1. Upload receipt image if selected
-      if (receiptFile) {
-        const formData = new FormData();
-        formData.append("receipt", receiptFile);
-        const uploadRes = await fetch("/api/billing/upload-receipt", {
-          method: "POST",
-          body: formData,
-          credentials: "include",
-        });
-        const uploadJson = await uploadRes.json();
-        if (uploadJson.success) {
-          data.receiptImagePath = uploadJson.data.path;
-        }
-      }
-
+      if (receiptFile) data.receiptImagePath = await uploadFile(receiptFile);
+      if (deliveryFile) data.proofOfDeliveryPath = await uploadFile(deliveryFile);
       setUploading(false);
 
-      // 2. Log payment (this moves order to Pending Release)
       const payResult = await payMutation.mutateAsync(data);
+      if (!order.completedProcessingAt) await completeMutation.mutateAsync();
 
-      // 3. Mark processing complete (set fulfillmentStatus = ready)
-      if (!order.completedProcessingAt) {
-        await completeMutation.mutateAsync();
-      }
-
-      // 4. Invalidate all relevant queries
       queryClient.invalidateQueries({ queryKey: ["/api/orders", order._id] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
@@ -193,352 +224,497 @@ function PaymentModal({ open, order, onClose, onSuccess }: PaymentModalProps) {
       queryClient.invalidateQueries({ queryKey: ["/api/accounting/ledger"] });
 
       const txnCode = payResult?.data?.transactionCode || "";
-      toast({
-        title: "Payment recorded successfully!",
-        description: txnCode ? `Transaction Code: ${txnCode}` : "Order is now Pending Release.",
-      });
-      onSuccess();
-      onClose();
+      toast({ title: "Order details logged!", description: txnCode ? `Txn Code: ${txnCode}` : "Order moved to Pending Release." });
+      onSuccess(); onClose();
     } catch (err: any) {
       setUploading(false);
-      toast({ title: "Payment failed", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to log details", description: err.message, variant: "destructive" });
     }
   };
 
+  const amountPaid = form.watch("amountPaid") || 0;
+  const amountTendered = form.watch("amountTendered") || 0;
+  const isFullPayment = form.watch("isFullPayment");
+  const allItemsComplete = form.watch("allItemsComplete");
+  const change = Math.max(0, amountTendered - amountPaid);
   const isSubmitting = uploading || payMutation.isPending || completeMutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v && !isSubmitting) onClose(); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-lg">
-            <FileText className="h-5 w-5 text-primary" />
-            Log Order Details — {order.trackingNumber}
-          </DialogTitle>
-          <DialogDescription>
-            Fill in all required information before marking this order as done. Payment, proof, and delivery details are saved to the system.
-          </DialogDescription>
-        </DialogHeader>
-
-        {/* Order Summary Banner */}
-        <div className="rounded-lg border bg-muted/40 p-4 space-y-3">
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0">
+        {/* Sticky header */}
+        <div className="sticky top-0 z-10 bg-background border-b px-6 py-4">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Package className="h-4 w-4 text-muted-foreground" />
-              <span className="text-sm font-semibold">{order.trackingNumber}</span>
-              <Badge variant="outline" className="text-xs capitalize">
-                {order.orderType?.replace(/_/g, " ") || ""}
-              </Badge>
+            <div>
+              <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                <ClipboardCheck className="h-5 w-5 text-primary" />
+                Log Order Details
+              </DialogTitle>
+              <DialogDescription className="text-xs mt-0.5">
+                {order.trackingNumber} · {order.customerName} · {formatCurrency(order.totalAmount)}
+              </DialogDescription>
             </div>
-            <span className="text-xl font-bold text-primary">{formatCurrency(order.totalAmount)}</span>
-          </div>
-
-          {/* Items list */}
-          <div className="space-y-1">
-            {order.items.map((item, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span className="text-muted-foreground">{item.itemName} × {item.qty}</span>
-                <span className="font-medium">{formatCurrency(item.lineTotal)}</span>
-              </div>
-            ))}
-            {order.deliveryFee > 0 && (
-              <div className="flex justify-between text-sm pt-1 border-t">
-                <span className="text-muted-foreground">Delivery Fee</span>
-                <span className="font-medium">{formatCurrency(order.deliveryFee)}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Customer info */}
-          <div className="flex items-center gap-4 text-sm pt-1 border-t">
-            <div className="flex items-center gap-1.5">
-              <User className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="font-medium">{order.customerName}</span>
-            </div>
-            {order.address && (order.address.street || order.address.city) && (
-              <div className="flex items-center gap-1.5 text-muted-foreground">
-                <MapPin className="h-3.5 w-3.5" />
-                <span>{[order.address.street, order.address.city].filter(Boolean).join(", ")}</span>
-              </div>
-            )}
+            <Badge variant="outline" className="capitalize text-xs">
+              {PAYMENT_METHOD_LABELS[order.paymentMethod] || order.paymentMethod}
+            </Badge>
           </div>
         </div>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-5">
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="px-6 py-5 space-y-6">
 
-            {/* ── SECTION: Customer & Address ────────────────────── */}
+            {/* ── ORDER SUMMARY ─────────────────────────────────────── */}
+            <div className="rounded-lg border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold flex items-center gap-1.5">
+                  <Package className="h-4 w-4 text-muted-foreground" />{order.trackingNumber}
+                  <Badge variant="secondary" className="text-xs capitalize ml-1">{order.orderType?.replace(/_/g, " ")}</Badge>
+                </span>
+                <span className="text-lg font-bold text-primary">{formatCurrency(order.totalAmount)}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground">
+                {order.items.map((it, i) => (
+                  <div key={i} className="flex justify-between">
+                    <span>{it.itemName} × {it.qty}</span>
+                    <span>{formatCurrency(it.lineTotal)}</span>
+                  </div>
+                ))}
+              </div>
+              {order.deliveryFee > 0 && (
+                <div className="flex justify-between text-xs border-t pt-1">
+                  <span className="text-muted-foreground">Delivery Fee</span>
+                  <span>{formatCurrency(order.deliveryFee)}</span>
+                </div>
+              )}
+            </div>
+
+            {/* ── SECTION 1: CUSTOMER & RECIPIENT ──────────────────── */}
             <div>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <User className="h-3.5 w-3.5" /> Customer Details
-              </h3>
-              <div className="grid grid-cols-1 gap-3">
+              <SectionHeader icon={UserRound} title="Customer & Recipient Details" />
+              <div className="grid grid-cols-2 gap-3">
                 <FormField control={form.control} name="customerName" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Customer Name</FormLabel>
-                    <FormControl>
-                      <Input {...field} data-testid="input-customer-name" />
-                    </FormControl>
+                    <FormLabel>Customer Name <span className="text-destructive">*</span></FormLabel>
+                    <FormControl><Input {...field} data-testid="input-customer-name" /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
-
-                {isPickup && (
+                <FormField control={form.control} name="contactNumber" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Contact / Mobile Number</FormLabel>
+                    <FormControl><Input {...field} placeholder="09XXXXXXXXX" maxLength={11} data-testid="input-contact-number" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="recipientName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Received By <span className="text-muted-foreground text-xs">(if different from customer)</span></FormLabel>
+                    <FormControl><Input {...field} placeholder="Name of person who received the items" data-testid="input-recipient-name" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <FormField control={form.control} name="companyName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Company / Contractor Name <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                    <FormControl><Input {...field} placeholder="e.g. ABC Construction" data-testid="input-company-name" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+                <div className="col-span-2">
                   <FormField control={form.control} name="deliveryAddress" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Pickup / Delivery Address</FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="Street, City, Province" data-testid="input-delivery-address" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                )}
-                {!isPickup && order.address && (
-                  <FormField control={form.control} name="deliveryAddress" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Delivery Address</FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="Full delivery address" data-testid="input-delivery-address" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                )}
-              </div>
-            </div>
-
-            <Separator />
-
-            {/* ── SECTION: Payment Details (GCash) ─────────────────── */}
-            {isGcash && (
-              <div>
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                  <Smartphone className="h-3.5 w-3.5" /> GCash Details
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField control={form.control} name="gcashSenderNumber" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Sender's GCash Number <span className="text-destructive">*</span></FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="09XXXXXXXXX" maxLength={11} data-testid="input-gcash-sender" />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form.control} name="gcashReferenceNumber" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>GCash Reference Number <span className="text-destructive">*</span></FormLabel>
-                      <FormControl>
-                        <Input {...field} placeholder="e.g. 12345678901" data-testid="input-gcash-ref" />
-                      </FormControl>
+                      <FormLabel>{isDelivery ? "Delivery Address" : "Pickup / Home Address"}</FormLabel>
+                      <FormControl><Input {...field} placeholder="Complete address" data-testid="input-delivery-address" /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
                 </div>
               </div>
-            )}
+            </div>
 
-            {/* ── SECTION: Payment Details (Cash / COD) ────────────── */}
-            {(isCash || isCod) && (
-              <div>
-                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                  <Banknote className="h-3.5 w-3.5" /> {isCod ? "Cash on Delivery Details" : "Cash Payment Details"}
-                </h3>
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField control={form.control} name="amountTendered" render={({ field }) => (
+            <Separator />
+
+            {/* ── SECTION 2: ITEM VERIFICATION ─────────────────────── */}
+            <div>
+              <SectionHeader icon={BadgeCheck} title="Item Verification & Condition" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/20">
+                  <div>
+                    <p className="text-sm font-medium">All items complete and in good condition?</p>
+                    <p className="text-xs text-muted-foreground">Toggle off if any items are missing, damaged, or wet</p>
+                  </div>
+                  <FormField control={form.control} name="allItemsComplete" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Amount Tendered (₱) <span className="text-destructive">*</span></FormLabel>
                       <FormControl>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          min={order.totalAmount}
-                          {...field}
-                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                          data-testid="input-amount-tendered"
-                        />
+                        <Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-items-complete" />
+                      </FormControl>
+                    </FormItem>
+                  )} />
+                </div>
+
+                {!allItemsComplete && (
+                  <FormField control={form.control} name="itemConditionNotes" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel className="text-amber-700 dark:text-amber-400 flex items-center gap-1">
+                        <AlertTriangle className="h-3.5 w-3.5" /> Describe the issue <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <FormControl>
+                        <Textarea {...field} rows={2} placeholder="e.g. 2 bags of cement torn/wet, 1 sheet plywood with crack, missing 5 pcs nails..." data-testid="input-item-condition" />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
-                  <div className="flex flex-col justify-end pb-1">
-                    <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">Change Due</p>
-                    <div className={`text-2xl font-bold tabular-nums ${change > 0 ? "text-green-600" : "text-muted-foreground"}`}>
-                      {formatCurrency(change)}
+                )}
+
+                <FormField control={form.control} name="checkerName" render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Checker / Packer Name <span className="text-muted-foreground text-xs">(staff who prepared this order)</span></FormLabel>
+                    <FormControl><Input {...field} placeholder="Staff name who packed and checked the items" data-testid="input-checker-name" /></FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )} />
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ── SECTION 3: PAYMENT DETAILS ────────────────────────── */}
+            <div>
+              <SectionHeader icon={WalletCards} title="Payment Collection" />
+              <div className="space-y-3">
+
+                {/* CASH */}
+                {isCash && (
+                  <div className="rounded-lg border p-4 space-y-3 bg-green-50/50 dark:bg-green-950/20 border-green-200 dark:border-green-800">
+                    <p className="text-xs font-semibold text-green-700 dark:text-green-400 uppercase tracking-wide flex items-center gap-1.5">
+                      <Banknote className="h-3.5 w-3.5" /> Cash Payment
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField control={form.control} name="amountTendered" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Amount Tendered (₱) <span className="text-destructive">*</span></FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" min={order.totalAmount} {...field}
+                              onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-amount-tendered" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <div className="flex flex-col justify-end pb-1">
+                        <p className="text-xs text-muted-foreground font-medium mb-1">Change Due</p>
+                        <div className={`text-3xl font-bold tabular-nums ${change > 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                          {formatCurrency(change)}
+                        </div>
+                      </div>
+                    </div>
+                    <FormField control={form.control} name="orNumber" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>OR / Official Receipt Number <span className="text-muted-foreground text-xs">(for BIR compliance)</span></FormLabel>
+                        <FormControl><Input {...field} placeholder="e.g. OR-0012345" data-testid="input-or-number" /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                )}
+
+                {/* GCASH */}
+                {isGcash && (
+                  <div className="rounded-lg border p-4 space-y-3 bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                    <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 uppercase tracking-wide flex items-center gap-1.5">
+                      <Smartphone className="h-3.5 w-3.5" /> GCash / GCash QR
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField control={form.control} name="gcashSenderName" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Sender's Full Name <span className="text-destructive">*</span></FormLabel>
+                          <FormControl><Input {...field} placeholder="Name on GCash account" data-testid="input-gcash-sender-name" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="gcashSenderNumber" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Sender's GCash Number <span className="text-destructive">*</span></FormLabel>
+                          <FormControl><Input {...field} placeholder="09XXXXXXXXX" maxLength={11} data-testid="input-gcash-sender" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="gcashReferenceNumber" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>GCash Reference Number <span className="text-destructive">*</span></FormLabel>
+                          <FormControl><Input {...field} placeholder="e.g. 12345678901" data-testid="input-gcash-ref" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="orNumber" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>OR / Invoice Number <span className="text-muted-foreground text-xs">(optional)</span></FormLabel>
+                          <FormControl><Input {...field} placeholder="e.g. INV-0001" data-testid="input-or-gcash" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </div>
+                  </div>
+                )}
+
+                {/* COD */}
+                {isCod && (
+                  <div className="rounded-lg border p-4 space-y-3 bg-orange-50/50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-800">
+                    <p className="text-xs font-semibold text-orange-700 dark:text-orange-400 uppercase tracking-wide flex items-center gap-1.5">
+                      <Truck className="h-3.5 w-3.5" /> Cash on Delivery
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField control={form.control} name="amountTendered" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Amount Collected (₱) <span className="text-destructive">*</span></FormLabel>
+                          <FormControl>
+                            <Input type="number" step="0.01" min={0} {...field}
+                              onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-cod-collected" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="driverName" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Collected By (Driver / Rider)</FormLabel>
+                          <FormControl><Input {...field} placeholder="Name of the delivery rider" data-testid="input-cod-driver" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </div>
+                    <FormField control={form.control} name="orNumber" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>OR / Receipt Number</FormLabel>
+                        <FormControl><Input {...field} placeholder="e.g. OR-0012345" data-testid="input-cod-or" /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                )}
+
+                {/* BANK */}
+                {isBank && (
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5" /> Bank Transfer
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <FormField control={form.control} name="bankName" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Bank Name <span className="text-destructive">*</span></FormLabel>
+                          <FormControl><Input {...field} placeholder="e.g. BDO, BPI, Landbank" data-testid="input-bank-name" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                      <FormField control={form.control} name="bankReference" render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Bank Reference / Trace Number <span className="text-destructive">*</span></FormLabel>
+                          <FormControl><Input {...field} placeholder="e.g. 202605240001" data-testid="input-bank-ref" /></FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )} />
+                    </div>
+                    <FormField control={form.control} name="orNumber" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>OR / Invoice Number</FormLabel>
+                        <FormControl><Input {...field} placeholder="OR or invoice number" data-testid="input-bank-or" /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                )}
+
+                {/* Amount Paid */}
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={form.control} name="amountPaid" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Amount Paid (₱) <span className="text-destructive">*</span></FormLabel>
+                      <FormControl>
+                        <Input type="number" step="0.01" min={0.01} {...field}
+                          onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-amount-paid" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <div className="flex flex-col justify-end gap-1">
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1"><Hash className="h-3 w-3" /> Transaction Code</p>
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/40 h-9">
+                      <span className="font-mono text-xs text-muted-foreground">Auto-generated on save</span>
                     </div>
                   </div>
                 </div>
               </div>
-            )}
+            </div>
 
             <Separator />
 
-            {/* ── SECTION: Amount & Transaction Code ──────────────── */}
+            {/* ── SECTION 4: PROOF / DOCUMENTATION ─────────────────── */}
             <div>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <DollarSign className="h-3.5 w-3.5" /> Amount & Transaction
-              </h3>
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={form.control} name="amountPaid" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Amount Paid (₱) <span className="text-destructive">*</span></FormLabel>
-                    <FormControl>
-                      <Input
-                        type="number"
-                        step="0.01"
-                        min={0.01}
-                        {...field}
-                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
-                        data-testid="input-amount-paid"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-                    <Hash className="h-3 w-3" /> Transaction Code
-                  </p>
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-md border bg-muted/40 h-9">
-                    <span className="font-mono text-sm text-muted-foreground select-all">
-                      Auto-generated on save
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">System-generated unique code</p>
-                </div>
-              </div>
-
-              <div className="mt-3">
-                <FormField control={form.control} name="paymentDate" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Date & Time of Payment</FormLabel>
-                    <FormControl>
-                      <Input type="datetime-local" {...field} data-testid="input-payment-date" />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )} />
+              <SectionHeader icon={Camera} title="Proof of Payment & Delivery" />
+              <div className="grid grid-cols-2 gap-4">
+                <UploadBox
+                  label={isGcash ? "GCash Screenshot" : "Receipt / Payment Proof"}
+                  hint={isGcash ? "Take a photo of the GCash confirmation" : "Photo of cash receipt or OR"}
+                  file={receiptFile} preview={receiptPreview} inputRef={receiptRef}
+                  onChange={mkFileHandler(setReceiptFile, setReceiptPreview)}
+                  onClear={() => { setReceiptFile(null); setReceiptPreview(""); }}
+                  required={isGcash}
+                />
+                <UploadBox
+                  label="Proof of Delivery / Pickup"
+                  hint="Photo at delivery site, truck unloading, or customer pickup"
+                  file={deliveryFile} preview={deliveryPreview} inputRef={deliveryRef}
+                  onChange={mkFileHandler(setDeliveryFile, setDeliveryPreview)}
+                  onClear={() => { setDeliveryFile(null); setDeliveryPreview(""); }}
+                />
               </div>
             </div>
 
             <Separator />
 
-            {/* ── SECTION: Receipt / Proof Upload ─────────────────── */}
+            {/* ── SECTION 5: LOGISTICS ──────────────────────────────── */}
             <div>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <ImageIcon className="h-3.5 w-3.5" />
-                {isGcash ? "GCash Screenshot / Proof" : "Receipt Image"}
-                {isGcash && <span className="text-destructive ml-1">*</span>}
-              </h3>
-              <div
-                onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed rounded-lg p-6 flex flex-col items-center justify-center gap-2 cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors"
-                data-testid="upload-receipt-drop"
-              >
-                {receiptPreview ? (
-                  <div className="relative w-full">
-                    <img src={receiptPreview} alt="Receipt preview" className="max-h-48 mx-auto rounded-md object-contain" />
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      size="sm"
-                      className="absolute top-1 right-1 h-6 w-6 p-0"
-                      onClick={(e) => { e.stopPropagation(); setReceiptFile(null); setReceiptPreview(""); }}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Upload className="h-8 w-8 text-muted-foreground" />
-                    <p className="text-sm font-medium">
-                      {isGcash ? "Upload GCash screenshot" : "Upload receipt photo"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">JPG, PNG, WEBP up to 10MB</p>
-                  </>
-                )}
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleFileChange}
-              />
-              {isGcash && !receiptFile && (
-                <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                  <AlertTriangle className="h-3 w-3" /> GCash screenshot is strongly recommended for verification
-                </p>
+              <SectionHeader icon={Car} title={isDelivery ? "Delivery Logistics" : "Pickup Logistics"} />
+              {isDelivery ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={form.control} name="driverName" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Driver / Rider Name</FormLabel>
+                      <FormControl><Input {...field} placeholder="Name of delivery driver" data-testid="input-driver-name" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="plateNumber" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Vehicle Plate Number</FormLabel>
+                      <FormControl><Input {...field} placeholder="e.g. ABC 1234" data-testid="input-plate-number" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="paymentDate" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date & Time of Delivery</FormLabel>
+                      <FormControl><Input type="datetime-local" {...field} data-testid="input-delivery-datetime" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={form.control} name="paymentDate" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Date & Time of Pickup</FormLabel>
+                      <FormControl><Input type="datetime-local" {...field} data-testid="input-pickup-datetime" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form.control} name="plateNumber" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Customer's Vehicle Plate <span className="text-muted-foreground text-xs">(if items loaded to vehicle)</span></FormLabel>
+                      <FormControl><Input {...field} placeholder="e.g. ABC 1234 (optional)" data-testid="input-customer-plate" /></FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                </div>
               )}
             </div>
 
             <Separator />
 
-            {/* ── SECTION: Notes ───────────────────────────────────── */}
+            {/* ── SECTION 6: BALANCE & PAYMENT TERMS ───────────────── */}
             <div>
-              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <FileText className="h-3.5 w-3.5" /> Notes / Remarks
-              </h3>
+              <SectionHeader icon={Scale} title="Payment Completion & Balance" />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between rounded-lg border p-3 bg-muted/20">
+                  <div>
+                    <p className="text-sm font-medium">Full payment received?</p>
+                    <p className="text-xs text-muted-foreground">Toggle off if customer will pay the remaining balance later</p>
+                  </div>
+                  <FormField control={form.control} name="isFullPayment" render={({ field }) => (
+                    <FormItem>
+                      <FormControl>
+                        <Switch checked={field.value} onCheckedChange={field.onChange} data-testid="switch-full-payment" />
+                      </FormControl>
+                    </FormItem>
+                  )} />
+                </div>
+
+                {!isFullPayment && (
+                  <div className="grid grid-cols-2 gap-3 p-3 rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20">
+                    <FormField control={form.control} name="remainingBalance" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-amber-700 dark:text-amber-400">Remaining Balance (₱) <span className="text-destructive">*</span></FormLabel>
+                        <FormControl>
+                          <Input type="number" step="0.01" min={0.01} {...field}
+                            onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)} data-testid="input-remaining-balance" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form.control} name="balanceDueDate" render={({ field }) => (
+                      <FormItem>
+                        <FormLabel className="text-amber-700 dark:text-amber-400">Agreed Payment Due Date</FormLabel>
+                        <FormControl><Input type="date" {...field} data-testid="input-balance-due-date" /></FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <Separator />
+
+            {/* ── SECTION 7: INTERNAL NOTES ────────────────────────── */}
+            <div>
+              <SectionHeader icon={Clipboard} title="Internal Staff Notes" />
               <FormField control={form.control} name="notes" render={({ field }) => (
                 <FormItem>
+                  <FormLabel>Notes / Remarks <span className="text-muted-foreground text-xs">(staff-only, not shown to customer)</span></FormLabel>
                   <FormControl>
-                    <Textarea
-                      {...field}
-                      placeholder="Any remarks, instructions, or verification notes..."
-                      rows={2}
-                      data-testid="input-payment-notes"
-                    />
+                    <Textarea {...field} rows={3}
+                      placeholder="e.g. Customer requested delivery to 2nd floor. Cement bags stacked properly. Customer had no complaints. Rider waited 15 min..."
+                      data-testid="input-payment-notes" />
                   </FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
             </div>
 
-            {/* ── Summary Row ──────────────────────────────────────── */}
-            <div className="rounded-lg border border-primary/20 bg-primary/5 p-4 flex items-center justify-between">
+            {/* ── SUMMARY FOOTER ────────────────────────────────────── */}
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 grid grid-cols-3 gap-4">
               <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total to Collect</p>
-                <p className="text-2xl font-bold">{formatCurrency(order.totalAmount)}</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Total Amount</p>
+                <p className="text-xl font-bold">{formatCurrency(order.totalAmount)}</p>
               </div>
-              {(isCash || isCod) && amountTendered > 0 && (
-                <div className="text-right">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Amount Paid</p>
+                <p className="text-xl font-bold text-green-600">{formatCurrency(amountPaid)}</p>
+              </div>
+              {(isCash || isCod) && amountTendered > 0 ? (
+                <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Change</p>
-                  <p className={`text-2xl font-bold ${change > 0 ? "text-green-600" : "text-muted-foreground"}`}>
-                    {formatCurrency(change)}
-                  </p>
+                  <p className={`text-xl font-bold ${change > 0 ? "text-green-600" : "text-muted-foreground"}`}>{formatCurrency(change)}</p>
                 </div>
-              )}
+              ) : !isFullPayment ? (
+                <div>
+                  <p className="text-xs text-amber-600 uppercase tracking-wide font-medium">Balance Remaining</p>
+                  <p className="text-xl font-bold text-amber-600">{formatCurrency(form.watch("remainingBalance") || 0)}</p>
+                </div>
+              ) : <div />}
             </div>
 
-            {/* ── Action Buttons ────────────────────────────────────── */}
-            <div className="flex gap-3 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                className="flex-1"
-                onClick={onClose}
-                disabled={isSubmitting}
-                data-testid="button-cancel-payment"
-              >
+            {/* ── ACTIONS ───────────────────────────────────────────── */}
+            <div className="flex gap-3">
+              <Button type="button" variant="outline" className="flex-1" onClick={onClose} disabled={isSubmitting} data-testid="button-cancel-payment">
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                disabled={isSubmitting}
-                data-testid="button-confirm-payment"
-              >
-                {isSubmitting ? (
-                  <><Loader2 className="animate-spin mr-2 h-4 w-4" />
-                    {uploading ? "Uploading..." : "Processing..."}
-                  </>
-                ) : (
-                  <><Receipt className="mr-2 h-4 w-4" /> Confirm & Record Payment</>
-                )}
+              <Button type="submit" className="flex-2 bg-green-600 hover:bg-green-700 text-white flex-[2]" disabled={isSubmitting} data-testid="button-confirm-payment">
+                {isSubmitting
+                  ? <><Loader2 className="animate-spin mr-2 h-4 w-4" />{uploading ? "Uploading files..." : "Saving..."}</>
+                  : <><ClipboardCheck className="mr-2 h-4 w-4" /> Submit & Mark as Paid</>}
               </Button>
             </div>
+
           </form>
         </Form>
       </DialogContent>
@@ -970,28 +1146,41 @@ export default function OrderDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Log Payment — fallback card for orders already in Pending Payment but not through the modal flow */}
-          {order.currentStatus === "Pending Payment" && !order.startedAt && (
-            <Card className="border-amber-200 dark:border-amber-800">
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2 text-amber-700 dark:text-amber-400">
-                  <CreditCard className="h-4 w-4" /> Payment Pending
-                </CardTitle>
-                <CardDescription>
-                  This order is waiting for payment. Assign it to a staff member and start processing to collect payment.
-                </CardDescription>
-              </CardHeader>
-              {isAdmin && (
-                <CardContent>
-                  <Button
-                    onClick={() => setPaymentModalOpen(true)}
-                    className="bg-green-600 hover:bg-green-700 text-white"
-                    data-testid="button-log-payment-admin"
-                  >
-                    <Receipt className="mr-2 h-4 w-4" /> Log Payment Now
-                  </Button>
-                </CardContent>
-              )}
+          {/* Action Required Banner — shows for any unpaid order */}
+          {order.paymentStatus !== "paid" && (
+            <Card className={`border-2 ${order.startedAt ? "border-green-400 dark:border-green-700 bg-green-50/40 dark:bg-green-950/20" : "border-amber-300 dark:border-amber-700 bg-amber-50/40 dark:bg-amber-950/20"}`}>
+              <CardContent className="p-4 flex items-center justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <div className={`mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full ${order.startedAt ? "bg-green-100 dark:bg-green-900" : "bg-amber-100 dark:bg-amber-900"}`}>
+                    {order.startedAt
+                      ? <ClipboardCheck className="h-5 w-5 text-green-700 dark:text-green-400" />
+                      : <CreditCard className="h-5 w-5 text-amber-700 dark:text-amber-400" />}
+                  </div>
+                  <div>
+                    <p className={`text-sm font-semibold ${order.startedAt ? "text-green-800 dark:text-green-300" : "text-amber-800 dark:text-amber-300"}`}>
+                      {order.startedAt ? "Ready to Log Details & Collect Payment" : "Awaiting Payment Collection"}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {order.startedAt
+                        ? `Order is being processed by ${order.assignedTo || "staff"}. Fill in the log details form to record payment and complete this order.`
+                        : "This order is pending payment. Assign and start processing, or log the payment directly as admin."}
+                    </p>
+                    {!order.startedAt && (
+                      <p className="text-xs font-medium mt-1 text-amber-700 dark:text-amber-400">
+                        Balance due: <span className="font-bold">{formatCurrency(order.totalAmount)}</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  onClick={() => setPaymentModalOpen(true)}
+                  className={`flex-shrink-0 font-semibold ${order.startedAt ? "bg-green-600 hover:bg-green-700 text-white" : "bg-amber-600 hover:bg-amber-700 text-white"}`}
+                  data-testid="button-log-details-banner"
+                >
+                  <ClipboardCheck className="mr-2 h-4 w-4" />
+                  Log Details
+                </Button>
+              </CardContent>
             </Card>
           )}
 
@@ -1081,14 +1270,14 @@ export default function OrderDetailPage() {
                       Start Processing
                     </Button>
                   )}
-                  {order.startedAt && !order.completedProcessingAt && order.currentStatus === "Pending Payment" && (
+                  {order.startedAt && !order.completedProcessingAt && order.paymentStatus !== "paid" && (
                     <Button
                       size="sm"
                       className="w-full bg-green-600 hover:bg-green-700 text-white"
                       onClick={() => setPaymentModalOpen(true)}
                       data-testid="button-complete-processing"
                     >
-                      <FileText className="h-3 w-3 mr-1" />
+                      <ClipboardCheck className="h-3 w-3 mr-1" />
                       Log Details
                     </Button>
                   )}
@@ -1138,16 +1327,15 @@ export default function OrderDetailPage() {
                       Unassign
                     </Button>
                   )}
-                  {/* Admin can also log payment directly */}
-                  {order.currentStatus === "Pending Payment" && (
+                  {/* Admin can also log details / payment directly */}
+                  {order.paymentStatus !== "paid" && (
                     <Button
                       size="sm"
-                      variant="outline"
-                      className="w-full text-green-700 border-green-300 hover:bg-green-50 dark:text-green-400 dark:border-green-700 dark:hover:bg-green-950/30"
+                      className="w-full bg-green-600 hover:bg-green-700 text-white"
                       onClick={() => setPaymentModalOpen(true)}
                       data-testid="button-admin-log-payment"
                     >
-                      <Receipt className="h-3 w-3 mr-1" /> Log Payment
+                      <ClipboardCheck className="h-3 w-3 mr-1" /> Log Details &amp; Payment
                     </Button>
                   )}
                 </div>

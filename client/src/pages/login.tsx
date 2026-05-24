@@ -28,8 +28,6 @@ export default function LoginPage() {
     totalItems: 0,
     totalStaff: 0,
   });
-  const [statsLoaded, setStatsLoaded] = useState(false);
-
   useEffect(() => {
     if (localStorage.getItem("session_expired") === "1") {
       setSessionExpired(true);
@@ -41,19 +39,18 @@ export default function LoginPage() {
         const res = await fetch("/api/public/stats");
         if (!res.ok) return;
         const json = await res.json();
-        if (json.success && json.data) {
+        if (json?.data) {
           setLiveStats({
-            ordersToday: json.data.ordersToday ?? 0,
-            totalItems: json.data.totalItems ?? 0,
-            totalStaff: json.data.totalStaff ?? 0,
+            ordersToday: Number(json.data.ordersToday) || 0,
+            totalItems: Number(json.data.totalItems) || 0,
+            totalStaff: Number(json.data.totalStaff) || 0,
           });
-          setStatsLoaded(true);
         }
       } catch { /* ignore */ }
     }
     fetchStats();
-    const interval = setInterval(fetchStats, 30000);
-    return () => clearInterval(interval);
+    const iv = setInterval(fetchStats, 20000);
+    return () => clearInterval(iv);
   }, []);
 
   const form = useForm<LoginInput>({
@@ -131,7 +128,7 @@ export default function LoginPage() {
             ].map((m) => (
               <div key={m.label}>
                 <div className="font-mono text-[22px] font-semibold tracking-tight text-amber-300 tabular-nums">
-                  {statsLoaded ? m.value : <span className="inline-block w-6 h-5 bg-slate-700 rounded animate-pulse" />}
+                  {m.value}
                 </div>
                 <div className="text-[11px] uppercase tracking-wider text-slate-500 mt-1">
                   {m.label}
