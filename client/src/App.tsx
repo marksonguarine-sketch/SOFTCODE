@@ -28,6 +28,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { GraduationCap } from "lucide-react";
 import { useSocketNotifications } from "@/hooks/use-socket-notifications";
 import { FloatingCalculator } from "@/components/floating-calculator";
+import { Breadcrumbs } from "@/components/breadcrumbs";
+import { LiveClock } from "@/components/live-clock";
+import { TweaksPanel } from "@/components/tweaks-panel";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -163,18 +166,35 @@ function GlobalSearch() {
     return <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />;
   };
 
+  // ⌘K / Ctrl+K keyboard shortcut to focus the search input
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    function onKeydown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    }
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, []);
+
   return (
     <div className="relative" ref={containerRef}>
       <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
       <Input
+        ref={inputRef}
         type="search"
-        placeholder="Search..."
-        className="pl-9 w-[120px] sm:w-[200px] lg:w-[300px] text-sm"
+        placeholder="Search...  ⌘K"
+        className="pl-9 pr-12 w-[120px] sm:w-[200px] lg:w-[300px] text-sm"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => { if (results.length > 0) setShowDropdown(true); }}
         data-testid="input-global-search"
       />
+      <kbd className="hidden lg:inline-flex absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-muted text-muted-foreground pointer-events-none">
+        ⌘K
+      </kbd>
       {showDropdown && (
         <div className="absolute top-full left-0 mt-1 w-[260px] sm:w-[300px] bg-popover border rounded-md shadow-md z-50 max-h-[320px] overflow-auto">
           {isSearching ? (
@@ -264,14 +284,20 @@ function AuthenticatedLayout() {
         <AppSidebar />
         <div className="flex flex-col flex-1 min-w-0">
           <header className="flex items-center justify-between gap-2 p-2 border-b sticky top-0 z-50 bg-background">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-3">
               <SidebarTrigger data-testid="button-sidebar-toggle" />
+              <Breadcrumbs />
               <GlobalSearch />
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm text-muted-foreground hidden md:inline" data-testid="text-header-user">
-                {user?.username}
-              </span>
+            <div className="flex items-center gap-3 flex-wrap">
+              <LiveClock />
+              <TweaksPanel />
+              <div className="hidden md:flex items-center gap-2 px-2.5 py-1 rounded-full bg-muted/60 border border-border/60" data-testid="text-header-user">
+                <div className="w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-[10px] font-bold">
+                  {user?.username?.slice(0, 2).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium">{user?.username}</span>
+              </div>
               <Button variant="ghost" size="icon" onClick={() => setShowLogoutDialog(true)} data-testid="button-logout" title="Sign out">
                 <LogOut className="h-4 w-4" />
               </Button>

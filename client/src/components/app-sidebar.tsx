@@ -126,13 +126,13 @@ export function AppSidebar() {
   return (
     <Sidebar>
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-3">
-          <div className="flex items-center justify-center rounded-md bg-primary p-1.5">
-            <Hammer className="h-5 w-5 text-primary-foreground" />
+        <div className="flex items-center gap-2.5 px-2 py-3">
+          <div className="flex items-center justify-center rounded-lg bg-primary p-2 shadow-sm ring-1 ring-primary/20">
+            <Hammer className="h-4 w-4 text-primary-foreground" />
           </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-semibold" data-testid="text-brand-name">JOAP Hardware Trading</span>
-            <span className="text-xs text-muted-foreground">Supplier Management</span>
+          <div className="flex flex-col leading-tight">
+            <span className="text-sm font-bold tracking-tight" data-testid="text-brand-name">JOAP Hardware</span>
+            <span className="text-[11px] text-muted-foreground font-medium">Trading · Tarlac</span>
           </div>
         </div>
       </SidebarHeader>
