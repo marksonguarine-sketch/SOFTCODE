@@ -8,9 +8,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import cron from "node-cron";
-import { spawn } from "child_process";
-import os from "os";
 import { randomUUID } from "crypto";
+import { MsEdgeTTS, OUTPUT_FORMAT } from "msedge-tts";
 
 import { authMiddleware, adminOnly, generateToken, clearSessionCache, clearAllSessionsForUser, AuthRequest } from "./middleware/auth";
 import User from "./models/User";
@@ -2364,40 +2363,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   // ─── TTS ────────────────────────────────────────────────
   app.post("/api/tts", authMiddleware, async (req: AuthRequest, res: Response) => {
-    const tmpFile = path.join(os.tmpdir(), `tts-${randomUUID()}.mp3`);
     try {
       const { text } = req.body as { text?: string };
       if (!text || !text.trim()) return fail(res, 400, "text is required");
       const settings = await Settings.findOne().lean();
       const voice = (settings?.ttsVoice as string) || "en-US-AriaNeural";
-      const truncated = text.slice(0, 500);
+      const truncated = text.slice(0, 1000);
 
-      await new Promise<void>((resolve, reject) => {
-        const proc = spawn("edge-tts", [
-          "--voice", voice,
-          "--text", truncated,
-          "--write-media", tmpFile,
-        ]);
-        let stderr = "";
-        proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
-        proc.on("close", (code) => {
-          if (code === 0) resolve();
-          else reject(new Error(`edge-tts exited ${code}: ${stderr}`));
-        });
-        proc.on("error", (e) => reject(new Error(`edge-tts spawn error: ${e.message}`)));
-      });
+      const tts = new MsEdgeTTS();
+      await tts.setMetadata(voice, OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3);
+      const { audioStream } = tts.toStream(truncated);
 
       res.setHeader("Content-Type", "audio/mpeg");
       res.setHeader("Cache-Control", "no-store");
-      const stream = fs.createReadStream(tmpFile);
-      stream.pipe(res);
-      stream.on("end", () => fs.unlink(tmpFile, () => {}));
-      stream.on("error", (e) => {
-        fs.unlink(tmpFile, () => {});
+
+      audioStream.pipe(res);
+
+      audioStream.on("error", (e: Error) => {
+        tts.close();
         if (!res.headersSent) fail(res, 500, e.message);
       });
+
+      res.on("close", () => {
+        tts.close();
+      });
     } catch (err: any) {
-      fs.unlink(tmpFile, () => {});
       if (!res.headersSent) return fail(res, 500, err.message);
     }
   });
