@@ -45,17 +45,14 @@ const ADMIN_STEPS: TutorialStep[] = [
     title: "Welcome to JOAP Hardware Trading",
     narration: "Welcome to JOAP Hardware Trading management system! I'll guide you through all the features. This is the sidebar toggle. You can click it to expand or collapse the navigation menu on the left side.",
   },
-  // ── TUT2: tut2.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Move cursor to search bar, click it (focus the input)
-  // 2. On "search" → type "cement" letter by letter into the search bar
-  // 3. On "results" → wait for dropdown results to appear, hover over first result
-  // 4. On "instantly" → clear the typed text, small-circle focus on search bar
+  // ── TUT2: Breadcrumbs + live clock ─────────────────────────────────
+  // The global search was removed in favor of contextual per-page search.
+  // Now the header shows breadcrumbs and a live PHT clock.
   {
     path: "/",
-    target: "[data-testid='input-global-search']",
-    title: "Global Search",
-    narration: "This is the global search bar. You can search for items, orders, and customers from anywhere in the system. Just type at least 2 characters and results will appear instantly.",
+    target: "[data-testid='breadcrumbs']",
+    title: "Header & Navigation",
+    narration: "The header shows your current location as a breadcrumb trail — JOAP, then the section you're in. To the right you'll see a live Philippine Time clock that ticks every second. Each page has its own search bar built in, so you can always find what you need contextually.",
   },
   // ── TUT3: tut3.mp3 ─────────────────────────────────────────────────
   // ALIVE CURSOR CHOREOGRAPHY:
@@ -284,7 +281,49 @@ const ADMIN_STEPS: TutorialStep[] = [
     path: "/help",
     target: "[data-testid='text-help-title']",
     title: "Help & Support",
-    narration: "The Help page has frequently asked questions covering all system features. You can also send feedback or messages to administrators if you need additional assistance. That completes the tutorial! You now know all the features of JOAP Hardware Trading system.",
+    narration: "The Help page is where you'll find FAQs and where employees send you messages.",
+  },
+  // ── NEW: Pending Payment ─────────────────────────────────────────
+  {
+    path: "/pending-payment",
+    target: "[data-testid='text-pending-payment-title']",
+    title: "Pending Payment Dashboard",
+    narration: "This dedicated page lists every order that's waiting on payment. Each row shows the tracking number, customer, type, payment method, amount due, and the date. Click any row to jump straight to the order detail and log the payment.",
+  },
+  // ── NEW: Requests ────────────────────────────────────────────────
+  {
+    path: "/requests",
+    target: "[data-testid='text-requests-title']",
+    title: "Employee Requests",
+    narration: "Employees can request new inventory items, transfer one of their orders to another employee, or file a leave request. They all land here for your approval. Click any pending request to see the full payload, the history, and the Accept or Decline buttons.",
+  },
+  // ── NEW: Employees ───────────────────────────────────────────────
+  {
+    path: "/employees",
+    target: "[data-testid='text-employees-title']",
+    title: "Employee Directory",
+    narration: "This is your team. Each card shows a photo, employee ID, online status, and contact info. Click an employee to open their profile modal with KPIs, productivity charts, recent orders and reservations, an activity timeline, and an Export PDF button.",
+  },
+  // ── NEW: Settings — Daily Sales Goal ─────────────────────────────
+  {
+    path: "/settings",
+    target: "[data-testid='input-daily-sales-goal']",
+    title: "Daily Sales Goal",
+    narration: "Set the daily revenue target here. Every dashboard — yours and every employee's — reads this value and shows it as a progress ring. Only admins can change it.",
+  },
+  // ── NEW: Floating Calculator ─────────────────────────────────────
+  {
+    path: "/",
+    target: "[data-testid='calc-bubble']",
+    title: "Floating Calculator",
+    narration: "A Casio-style calculator floats in the bottom-right of every page. Click the bubble to expand it. Drag it anywhere. It has memory keys MC, MR, M-plus, and M-minus. Each user can toggle it on or off in Settings — your preference persists across logins.",
+  },
+  // ── NEW: Tweaks Panel ────────────────────────────────────────────
+  {
+    path: "/",
+    target: "[data-testid='tweaks-launcher']",
+    title: "UI Tweaks Panel",
+    narration: "The Tweaks pill at the bottom-right lets you switch between light and dark mode, change the accent color, font, and density on the fly. Your preferences are saved in this browser. That completes the tutorial — you're ready to run the store!",
   },
 ];
 
@@ -297,9 +336,9 @@ const EMPLOYEE_STEPS: TutorialStep[] = [
   },
   {
     path: "/",
-    target: "[data-testid='input-global-search']",
-    title: "Global Search",
-    narration: "Use this search bar to quickly find items, orders, or customers from anywhere in the system.",
+    target: "[data-testid='breadcrumbs']",
+    title: "Header & Navigation",
+    narration: "The header shows breadcrumbs of where you are. Next to your name on the right is a live Philippine Time clock. Each page has its own search bar — no global search needed.",
   },
   {
     path: "/",
@@ -358,8 +397,33 @@ const EMPLOYEE_STEPS: TutorialStep[] = [
   {
     path: "/help",
     target: "[data-testid='text-help-title']",
-    title: "Help",
-    narration: "Check the FAQs for answers to common questions, or send a message to your admin for help. That's everything you need to know! Enjoy using the system.",
+    title: "Help & Messages",
+    narration: "Check the FAQs and send messages to your admin here. Any reply from admin shows in your inbox above the message form.",
+  },
+  // ── NEW EMPLOYEE STEPS ──────────────────────────────────────────
+  {
+    path: "/pending-payment",
+    target: "[data-testid='text-pending-payment-title']",
+    title: "Pending Payment",
+    narration: "This page lists every order that still owes money. Click a row to log the payment.",
+  },
+  {
+    path: "/profile",
+    target: "[data-testid='text-profile-title']",
+    title: "My Profile",
+    narration: "Update your photo, email, and contact number here. You can also request leave — your admin will see it under Requests and approve or decline.",
+  },
+  {
+    path: "/",
+    target: "[data-testid='calc-bubble']",
+    title: "Floating Calculator",
+    narration: "A calculator floats at the bottom-right of every page. Click to expand. Toggle it off in Settings if you don't want it.",
+  },
+  {
+    path: "/",
+    target: "[data-testid='tweaks-launcher']",
+    title: "UI Tweaks",
+    narration: "Switch to dark mode, change colors, fonts, and density. Your choices are saved per browser. Tutorial complete — happy selling!",
   },
 ];
 
@@ -672,37 +736,99 @@ export function Tutorial({ isAdmin, onComplete }: TutorialProps) {
         />
       )}
 
+      {/* ── Lightning focus rings ────────────────────────────────────────
+          A stack of 3 expanding rings + a soft conic-gradient halo that
+          gives a "lightning lock-on" feel. Each ring uses a slightly larger
+          inset and opacity so the focus visibly emanates outward.
+      */}
       {showSpotlight && (
-        <div
-          className="fixed pointer-events-none rounded-full border-2 border-primary animate-pulse"
-          style={{
-            left: spotlightRect.left - 24,
-            top: spotlightRect.top - 24,
-            width: spotlightRect.width + 48,
-            height: spotlightRect.height + 48,
-            zIndex: 10000,
-          }}
-        />
+        <>
+          {/* Outer pulsing halo */}
+          <div
+            className="fixed pointer-events-none rounded-full"
+            style={{
+              left: spotlightRect.left - 36,
+              top: spotlightRect.top - 36,
+              width: spotlightRect.width + 72,
+              height: spotlightRect.height + 72,
+              zIndex: 9999,
+              background:
+                "radial-gradient(circle, hsl(var(--primary) / 0.35) 0%, transparent 70%)",
+              animation: "tutorialHalo 2s ease-in-out infinite",
+            }}
+          />
+          {/* Mid-glow ring */}
+          <div
+            className="fixed pointer-events-none rounded-full"
+            style={{
+              left: spotlightRect.left - 28,
+              top: spotlightRect.top - 28,
+              width: spotlightRect.width + 56,
+              height: spotlightRect.height + 56,
+              zIndex: 10000,
+              border: "2px solid hsl(var(--primary) / 0.5)",
+              boxShadow: "0 0 38px 6px hsl(var(--primary) / 0.4)",
+              animation: "tutorialRingExpand 1.6s ease-out infinite",
+            }}
+          />
+          {/* Crisp focus ring */}
+          <div
+            className="fixed pointer-events-none rounded-full border-2"
+            style={{
+              left: spotlightRect.left - 18,
+              top: spotlightRect.top - 18,
+              width: spotlightRect.width + 36,
+              height: spotlightRect.height + 36,
+              zIndex: 10001,
+              borderColor: "hsl(var(--primary))",
+              boxShadow:
+                "inset 0 0 12px hsl(var(--primary) / 0.5), 0 0 20px hsl(var(--primary) / 0.7)",
+            }}
+          />
+          {/* Inline keyframes — keep them next to the rings so they ship
+              together with the component. */}
+          <style>{`
+            @keyframes tutorialRingExpand {
+              0%   { transform: scale(0.97); opacity: 1;   }
+              70%  { transform: scale(1.05); opacity: 0.55; }
+              100% { transform: scale(1.10); opacity: 0;   }
+            }
+            @keyframes tutorialHalo {
+              0%, 100% { opacity: 0.55; transform: scale(0.98); }
+              50%      { opacity: 1;    transform: scale(1.04); }
+            }
+          `}</style>
+        </>
       )}
 
       {showSpotlight && cursorPos && (
         <div
-          className="fixed pointer-events-none transition-all duration-700 ease-in-out hidden sm:block"
+          className="fixed pointer-events-none hidden sm:block"
           style={{
             left: cursorPos.x - 12,
             top: cursorPos.y - 4,
             zIndex: 10002,
+            transition: "left 700ms cubic-bezier(.4, .0, .2, 1), top 700ms cubic-bezier(.4, .0, .2, 1)",
+            filter: "drop-shadow(0 0 6px hsl(var(--primary) / 0.7)) drop-shadow(0 4px 8px rgba(0,0,0,.35))",
           }}
         >
-          <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
+          <svg width="26" height="30" viewBox="0 0 24 28" fill="none">
+            <defs>
+              <linearGradient id="tutCursorGrad" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stopColor="white" />
+                <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.95} />
+              </linearGradient>
+            </defs>
             <path
               d="M5 2L5 20L9.5 16L13 24L16 22.5L12.5 15L18 14L5 2Z"
-              fill="white"
+              fill="url(#tutCursorGrad)"
               stroke="black"
               strokeWidth="1.5"
             />
           </svg>
-          <div className="absolute top-0 left-0 w-8 h-8 rounded-full bg-primary/30 animate-ping" />
+          {/* Trailing ripple — pings out from the cursor tip */}
+          <div className="absolute top-0 left-0 w-9 h-9 rounded-full bg-primary/40 animate-ping" />
+          <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-primary/60 animate-pulse" />
         </div>
       )}
 

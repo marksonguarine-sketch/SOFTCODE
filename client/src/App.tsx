@@ -30,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { GraduationCap } from "lucide-react";
 import { useSocketNotifications } from "@/hooks/use-socket-notifications";
 import { FloatingCalculator } from "@/components/floating-calculator";
+import { ErrorBoundary } from "@/components/error-boundary";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -166,7 +167,9 @@ function AuthenticatedLayout() {
             </Button>
           </header>
           <main className="flex-1 overflow-auto">
-            <Router />
+            <ErrorBoundary>
+              <Router />
+            </ErrorBoundary>
           </main>
         </div>
       </div>
@@ -276,14 +279,16 @@ function AppContent() {
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+          <Toaster />
+        </TooltipProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   );
 }
 

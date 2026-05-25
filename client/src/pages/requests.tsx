@@ -9,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -164,7 +165,16 @@ export default function RequestsPage() {
               <Clock className="h-3.5 w-3.5" />Pending ({pending.length})
             </h2>
             {pending.length === 0 ? (
-              <Card><CardContent className="py-6 text-center text-muted-foreground text-sm">No pending requests.</CardContent></Card>
+              <Card>
+                <CardContent className="p-0">
+                  <EmptyState
+                    icon={Inbox}
+                    title="Inbox zero"
+                    description="No pending employee requests. New Add Item, Transfer Order, or Leave requests will appear here for your approval."
+                    tone="success"
+                  />
+                </CardContent>
+              </Card>
             ) : (
               <div className="space-y-2">
                 {pending.map((r) => (

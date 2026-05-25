@@ -6,6 +6,7 @@ import type { IOrder } from "@shared/schema";
 import { PAYMENT_STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -99,13 +100,19 @@ export default function PendingPaymentPage() {
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-12">
+                  <TableCell colSpan={7} className="p-0">
                     {allOrders.length === 0 ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <CreditCard className="h-8 w-8 text-muted-foreground/40" />
-                        <p>No pending payment orders</p>
+                      <EmptyState
+                        icon={CreditCard}
+                        title="All caught up!"
+                        description="No orders are waiting for payment. New unpaid orders will land here automatically."
+                        tone="success"
+                      />
+                    ) : (
+                      <div className="py-10 text-center text-sm text-muted-foreground">
+                        No orders match your search
                       </div>
-                    ) : "No orders match your search"}
+                    )}
                   </TableCell>
                 </TableRow>
               ) : (
