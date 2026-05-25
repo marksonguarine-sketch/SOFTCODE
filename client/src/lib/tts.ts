@@ -24,12 +24,17 @@ export function unlockAudio() {
   } catch {}
 }
 
-export async function speakTTS(text: string): Promise<void> {
+// ── Audio queue — prevents simultaneous playback ──────────────────────────────
+const ttsQueue: string[] = [];
+let ttsPlaying = false;
+
+async function playNextInQueue(): Promise<void> {
+  if (ttsPlaying || ttsQueue.length === 0) return;
+  ttsPlaying = true;
+  const text = ttsQueue.shift()!;
   try {
     const ctx = getAudioContext();
-    if (ctx.state === "suspended") {
-      await ctx.resume();
-    }
+    if (ctx.state === "suspended") await ctx.resume();
 
     const token = localStorage.getItem("token");
     const res = await fetch("/api/tts", {
@@ -41,19 +46,30 @@ export async function speakTTS(text: string): Promise<void> {
       credentials: "include",
       body: JSON.stringify({ text }),
     });
-    if (!res.ok) return;
-
-    const arrayBuffer = await res.arrayBuffer();
-    if (!arrayBuffer.byteLength) return;
-
-    const decoded = await ctx.decodeAudioData(arrayBuffer);
-    const src = ctx.createBufferSource();
-    src.buffer = decoded;
-    src.connect(ctx.destination);
-    src.start(0);
+    if (res.ok) {
+      const arrayBuffer = await res.arrayBuffer();
+      if (arrayBuffer.byteLength) {
+        const decoded = await ctx.decodeAudioData(arrayBuffer);
+        await new Promise<void>((resolve) => {
+          const src = ctx.createBufferSource();
+          src.buffer = decoded;
+          src.connect(ctx.destination);
+          src.onended = () => resolve();
+          src.start(0);
+        });
+      }
+    }
   } catch {
     // Silent fail — TTS is non-critical
+  } finally {
+    ttsPlaying = false;
+    playNextInQueue();
   }
+}
+
+export function speakTTS(text: string): void {
+  ttsQueue.push(text);
+  playNextInQueue();
 }
 
 export function formatAmountForTTS(v: number): string {
@@ -132,5 +148,14 @@ export function buildUnassignmentTTSScript(event: IOrderUnassignedEvent): string
   return (
     `Notice. ${actorName} has removed your assignment on order ${event.trackingNumber}. ` +
     `This order has been returned to the pending pool.`
+  );
+}
+
+export function buildReassignmentRemovedTTSScript(event: IOrderAssignedEvent): string {
+  const actorName = capitalize(event.assignedBy);
+  const newAssigneeName = capitalize(event.assignedTo);
+  return (
+    `Notice. ${actorName} has reassigned order ${event.trackingNumber}, which was previously assigned to you, to ${newAssigneeName}. ` +
+    `The order is no longer in your queue.`
   );
 }

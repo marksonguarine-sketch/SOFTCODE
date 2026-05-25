@@ -1448,6 +1448,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       order.assignedToName = "";
       order.assignedAt = undefined;
       order.assignedBy = "";
+      order.fulfillmentStatus = "pending";
       (order as any).startedAt = undefined;
       (order as any).completedProcessingAt = undefined;
       order.statusHistory.push({
@@ -2367,7 +2368,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { text } = req.body as { text?: string };
       if (!text || !text.trim()) return fail(res, 400, "text is required");
       const settings = await Settings.findOne().lean();
-      const voice = (settings?.ttsVoice as string) || "en-US-AriaNeural";
+      const voice = (settings?.ttsVoice as string) || "en-US-GuyNeural";
       const truncated = text.slice(0, 1000);
 
       const tts = new MsEdgeTTS();

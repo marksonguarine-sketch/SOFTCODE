@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { io, Socket } from "socket.io-client";
-import { speakTTS, buildAssignmentTTSScript, buildUnassignmentTTSScript } from "@/lib/tts";
+import { speakTTS, buildAssignmentTTSScript, buildUnassignmentTTSScript, buildReassignmentRemovedTTSScript } from "@/lib/tts";
 import { useToast } from "@/hooks/use-toast";
 import type { IOrderAssignedEvent, IOrderUnassignedEvent } from "@shared/schema";
 import { queryClient } from "@/lib/queryClient";
@@ -49,13 +49,23 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
       invalidateOrderQueries();
 
       if (data.assignedTo === username) {
+        // This user is the new assignee
         if (isTtsEnabled(username)) {
-          const script = buildAssignmentTTSScript(data);
-          speakTTS(script);
+          speakTTS(buildAssignmentTTSScript(data));
         }
         toast({
           title: `Order ${data.trackingNumber} assigned to you`,
           description: `By ${data.assignedBy}. Customer: ${data.customerName}`,
+        });
+      } else if (data.isReassignment && data.previousAssignedTo === username) {
+        // This user had the order but it was taken and given to someone else
+        if (isTtsEnabled(username)) {
+          speakTTS(buildReassignmentRemovedTTSScript(data));
+        }
+        toast({
+          title: `Order ${data.trackingNumber} reassigned`,
+          description: `${data.assignedBy} moved this order to ${data.assignedTo}`,
+          variant: "destructive",
         });
       }
     });

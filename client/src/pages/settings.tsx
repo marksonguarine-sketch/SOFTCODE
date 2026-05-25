@@ -131,7 +131,7 @@ export default function SettingsPage() {
       storeName: "",
       autoApplyOffers: true,
       showSavingsSummary: true,
-      ttsVoice: "en-US-AriaNeural",
+      ttsVoice: "en-US-GuyNeural",
       dailySalesGoal: 100000,
     },
     values: settings ? {
@@ -147,7 +147,7 @@ export default function SettingsPage() {
       storeName: settings.storeName || "",
       autoApplyOffers: settings.autoApplyOffers ?? true,
       showSavingsSummary: settings.showSavingsSummary ?? true,
-      ttsVoice: settings.ttsVoice || "en-US-AriaNeural",
+      ttsVoice: settings.ttsVoice || "en-US-GuyNeural",
       dailySalesGoal: settings.dailySalesGoal ?? 100000,
     } : undefined,
   });
@@ -183,7 +183,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-6 pb-10">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (
