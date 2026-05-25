@@ -32,7 +32,7 @@ It also lists **every new entity** for the ERD, **every new flowchart figure** t
 | **Real-time sync** | Not mentioned | Socket.io + 1-second TanStack Query refetch |
 | **Data model** | Strict "append-only" | Append-preferred but edits allowed for inventory items, settings, profile fields; immutable audit trail via `SystemLog` and `statusHistory` arrays |
 | **Search** | Hash + Trie | MongoDB regex + indexed text search per page (global search removed from header) |
-| **Forecasting** | ARIMA | Not yet implemented — replaced by Peak Hours heatmap + 7-day productivity charts |
+| **Forecasting** | ARIMA | **✅ Implemented as ARIMA(1, 1, 1)** in `server/lib/arima.ts`. Two new endpoints (`/api/forecast/aggregate`, `/api/forecast/items`) and a dedicated `/forecasting` page with confidence-banded line charts + per-item reorder advice. Peak Hours heatmap and productivity charts remain as complementary descriptive analytics. |
 | **FIFO** | For inventory + order queue | Replaced by `createdAt` indexed sorting + explicit `pool=true` ordering |
 | **Payment** | GCash reference only | GCash QR, GCash send-money, cash, COD, bank transfer — per order type |
 | **Order pool** | Not in original | New: unassigned orders form a pool; employees claim with task-lock |
@@ -152,7 +152,7 @@ Add the following explicit Scope clauses:
 **Soften the "append-only" claim:** the current implementation allows editing for **inventory items**, **settings**, **employee profile fields**, and **non-status order metadata** (notes, scheduled date). The strict append-only constraint applies to **accounting ledger entries** (require Reversing Entries) and **order status transitions** (each transition appends to a `statusHistory` array, never overwrites prior states). State this honestly so a reader doesn't fault you for shipping edit dialogs.
 
 **Add:**
-- The system does not implement ARIMA forecasting (originally proposed); the analytics provided are descriptive (Peak Hours heatmap, KPI tiles, productivity charts) rather than predictive.
+- ARIMA forecasting is now implemented (`server/lib/arima.ts` — ARIMA(1, 1, 1) with default p=1, d=1, q=1). The Analytics Module covers both predictive (ARIMA demand forecast with 95% prediction intervals) and descriptive (Peak Hours heatmap, KPI tiles, productivity charts) intelligence.
 - The system does not include a public customer-facing portal — reservations and orders are entered by employees on behalf of customers.
 
 ---
@@ -589,8 +589,57 @@ Keep the ISO 25010 criteria but add a bullet under each:
 | HSL color interpolation | Peak Hours heatmap export, charts | Custom hslToRgb helper |
 | Best-discount selection | Offer application during order create | O(items × activeOffers) — not a published algorithm but worth naming |
 | `node-cron` scheduling | Auto-backup | Cron-string parser |
+| **ARIMA(1, 1, 1)** | `server/lib/arima.ts` — `/api/forecast/aggregate` + `/api/forecast/items` | Predictive demand forecast. See §5.6.A below for parameter estimation details. |
 
-**Remove ARIMA** from the algorithm list unless the team will actually implement it before defense. If kept, mark it explicitly as "future work."
+### 5.6.A ARIMA(1, 1, 1) implementation — what to write in Chapter 3
+
+The team chose **ARIMA(1, 1, 1)** as the default model order because:
+- **p = 1 (autoregressive lag-1)** — daily retail demand has strong day-to-day momentum; lag-1 captures it without overfitting on short series.
+- **d = 1 (first-difference)** — removes linear trend so the series becomes weakly stationary, the assumption ARIMA's parameter estimation relies on.
+- **q = 1 (moving-average lag-1)** — adjusts for autocorrelated forecast errors (e.g. a stockout day biases the next day's residual).
+
+**Parameter estimation** (no external library, fully auditable):
+
+1. Apply first-differencing: `y[t] = x[t] - x[t-1]` for the input series `x`.
+2. Estimate **φ** (AR coefficient) as the **lag-1 sample autocorrelation** of the differenced series (Yule-Walker order 1, clamped to [-0.99, 0.99] for stability).
+3. Compute residuals `e[t] = y[t] - intercept - φ * y[t-1]` where `intercept = mean(y) * (1 - φ)`.
+4. Estimate **θ** (MA coefficient) as the lag-1 autocorrelation of the residuals, clamped identically.
+5. Compute residual standard deviation **σ** = `stddev(e)`.
+
+**Forecasting** (walk-forward):
+
+```
+ŷ[t+h] = intercept + φ * ŷ[t+h-1] + θ * e[t+h-1]
+```
+
+with `e[t+h] = 0` for h ≥ 1 (future residuals have expected value 0).
+
+The differenced forecast is then **integrated** d times to return to the original scale:
+
+```
+x̂[t+h] = x[t] + Σ ŷ[t+1..t+h]
+```
+
+**Confidence intervals** are computed as `ŷ ± 1.96 * σ * √h`, where the √h scaling reflects that prediction error grows with horizon under the ARIMA model.
+
+**Inputs in this system:**
+- **Per-item demand series** (`/api/forecast/items`): daily `InventoryLog.type=="deduction"` quantities, bucketed by day over a 60-day lookback.
+- **Aggregate orders series** (`/api/forecast/aggregate`): daily count of non-cancelled orders.
+- **Aggregate revenue series** (`/api/forecast/aggregate`): daily sum of `Order.totalAmount` for non-cancelled orders.
+
+**Outputs:**
+- 7/14/30-day forecast (toggleable by horizon button).
+- 95% lower + upper prediction bounds.
+- Per-item reorder advice: **critical** (< 3 days of stock), **high** (< 7), **medium** (< 14), **low** (≥ 14), computed from `daysOfStock = currentStock ÷ avgForecastDemand`.
+- Per-item forecast revenue: `totalForecastDemand × unitPrice`.
+
+**Where to put this in the document:**
+
+- Chapter 3 § 5.6 — replace the old "ARIMA for forecasting" line with the table above; cite `server/lib/arima.ts` as the implementation file.
+- Chapter 2 — add an IPO sheet titled **Demand Forecast IPO** (Inputs: lookback, horizon, item series → Process: difference → estimate (φ, θ, σ) → walk-forward → integrate → confidence bands → Outputs: forecast, prediction intervals, reorder urgency).
+- Chapter 2 — add a procedural flowchart titled **Forecasting Module flowchart** matching the data path above.
+- Chapter 2 — extend the System Architecture diagram to show the ARIMA library as a server-side Logic Tier component that reads from `InventoryLog` + `Order` collections and feeds the `/forecasting` React page.
+- Chapter 3 § 5.3 (Technical Feasibility) — add a sentence: "ARIMA(1, 1, 1) is implemented in pure TypeScript with no statistical-library dependency (see `server/lib/arima.ts`), making the model fully auditable and CPU-light enough to fit on Atlas free-tier infrastructure."
 
 ### 5.7 Algorithm Implementation Visual (Figure 82, page 101)
 
@@ -684,14 +733,15 @@ Figure 66  Messages HIPO   [NEW]
 Figure 67  Employees HIPO   [NEW]
 Figure 68  Pending Payment HIPO   [NEW]
 Figure 69  Report View HIPO
-Figure 70  Analytics HIPO (descriptive — not ARIMA)   [updated]
+Figure 70  Analytics HIPO (predictive ARIMA + descriptive)   [updated]
+Figure 70a Forecasting HIPO   [NEW — ARIMA model fit + reorder advice flow]
 Figure 71-94  Existing IPOs + 8 new IPOs (Reservation Creation, Order Claim, Offer Apply, Request Submit, Request Approval, TTS Announcement, Profile Self-Edit, Settings Update)
 Figure 95  Entity Relationship Diagram   [updated — ~10 new entities]
 Figure 96-110  Updated Screen Designs (Boot loader, Dashboard, Orders Admin, Orders Employee, Order Detail, Reservations Calendar, Pending Payment, Offers, Requests, Employees + Profile Modal, Profile (employee), System Logs Calendar, Settings, Tweaks Panel, About)
 Figure 111  Software Process Model   [unchanged]
 Figure 112  System Architecture   [updated — adds Socket.io broker + Edge TTS subprocess]
 Figure 113  Work Plan
-Figure 114  Algorithm Implementation Visual   [updated — drops ARIMA/Trie/Hash, adds the honest list]
+Figure 114  Algorithm Implementation Visual   [updated — keeps ARIMA (now implemented), drops Trie/Hash claims, adds the honest list]
 ```
 
 ---
@@ -722,7 +772,7 @@ Add a new table immediately after Table 7 (Likert Scale) summarizing the **modul
 
 ### Slide A — What was added beyond Chapter 1 scope
 
-> "Beyond the original 13-module scope, the team shipped 11 additional modules driven by employee workflow needs uncovered during agile sprints: Reservations, Offers, Pending Payment, Requests, Messages, Employees, Profile, TTS, Real-time Sync, Calculator, Tweaks, and Tutorial. Each of these traces back to a specific operational pain point that surfaced during the first sprint review and was prioritized over speculative ARIMA forecasting."
+> "Beyond the original 13-module scope, the team shipped 12 additional modules driven by employee workflow needs uncovered during agile sprints: Reservations, Offers, Pending Payment, Requests, Messages, Employees, Profile, TTS, Real-time Sync, Calculator, Tweaks, Tutorial, and **Forecasting (ARIMA(1, 1, 1))**. Each traces back to a specific operational pain point that surfaced during the first sprint review."
 
 ### Slide B — What changed about the data model
 
@@ -730,7 +780,7 @@ Add a new table immediately after Table 7 (Likert Scale) summarizing the **modul
 
 ### Slide C — What changed about search and forecasting
 
-> "Hash and Trie were replaced with MongoDB indexed regex queries on the high-cardinality fields (`itemName`, `customerName`, `trackingNumber`, `sku`). ARIMA forecasting was deferred to future work; the analytics tier instead delivers descriptive intelligence — Peak Hours heatmap, KPI cards, per-employee productivity charts, and a payment-mix donut — which the owner confirmed during UAT was the more pressing need."
+> "Hash and Trie were replaced with MongoDB indexed regex queries on the high-cardinality fields (`itemName`, `customerName`, `trackingNumber`, `sku`). ARIMA(1, 1, 1) forecasting is fully implemented in `server/lib/arima.ts` — autoregressive coefficient estimated via lag-1 autocorrelation, integrated once for trend removal, moving-average term from residual lag-1 autocorrelation. The model fits both aggregate (orders/day, revenue/day) and per-item daily-demand series, returning 95% prediction intervals derived from residual standard deviation scaled by √h. Reorder urgency (critical/high/medium/low) is derived from `daysOfStock = currentStock ÷ avgForecastDemand`. The analytics tier still ships descriptive intelligence (Peak Hours heatmap, KPI cards, productivity charts, payment-mix donut) as complementary views."
 
 ### Slide D — What changed about realtime
 
@@ -770,7 +820,7 @@ For the writers:
 
 The single biggest narrative thread that needs to land in the defense is this:
 
-> "We started with a 13-module scope and shipped 24. The expansion was not feature creep — every added module corresponds to a problem we observed in the field or to a real-time coordination need the owner described during sprint reviews. The strict append-only constraint from Chapter 1 was softened to a *pragmatic* append-preferred model: immutable for accounting and order status (where audit matters most), editable for everything where edits are part of normal operation. ARIMA was deferred because the descriptive analytics we shipped (Peak Hours heatmap, KPI tiles, productivity charts) satisfied the owner's actual need, which is to *see what's happening now* — not to predict 90 days out."
+> "We started with a 13-module scope and shipped 25. The expansion was not feature creep — every added module corresponds to a problem we observed in the field or to a real-time coordination need the owner described during sprint reviews. The strict append-only constraint from Chapter 1 was softened to a *pragmatic* append-preferred model: immutable for accounting and order status (where audit matters most), editable for everything where edits are part of normal operation. **ARIMA(1, 1, 1) demand forecasting is fully implemented** in `server/lib/arima.ts` and exposed via the `/forecasting` page — it complements the descriptive analytics (Peak Hours heatmap, KPI tiles, productivity charts) with per-item reorder advice and 95% prediction intervals for daily orders + revenue."
 
 Everything in this `marl.md` file traces back to that single thesis. Use it.
 

@@ -963,4 +963,112 @@ Then point a browser at `http://localhost:5000` after `npm run dev`. You should 
 
 ---
 
+---
+
+## 27. Session 6 — Order pool bug fixes, TTS voice lock, ARIMA forecasting
+
+### 27.1 `server/routes.ts` — POST /api/orders/:id/assign with empty username now resets fulfillment
+
+Before this fix the unassign-via-POST path (passing `{username: ""}` to `/assign`) only cleared `assignedTo`/`assignedToName`/`assignedAt`/`assignedBy`. It left `fulfillmentStatus` at whatever the order was in (often `processing` or `ready` because the employee had already started/finished). The pool query (`pool=true`) requires `fulfillmentStatus === "pending"`, so unassigned-via-POST orders were silently missing from the pool table.
+
+The fix:
+
+```ts
+} else {
+  // Unassigning via POST with empty username — return order to pool by
+  // resetting the fulfillment lifecycle.
+  (order as any).startedAt = undefined;
+  (order as any).completedProcessingAt = undefined;
+  order.fulfillmentStatus = "pending";
+  order.currentStatus = "Pending Payment";
+}
+```
+
+The DELETE route was already doing this correctly. Both paths now produce identical post-conditions.
+
+### 27.2 `client/src/pages/orders.tsx` — inline "Return to pool" button + hard refetch
+
+The admin Assigned-Orders table now has a per-row **"Return to pool"** button (visible unless the order is `completed`/`cancelled` or already `completedProcessingAt`). Clicking it calls `DELETE /api/orders/:id/assign` via a new `unassignMutation`. Both this and `assignMutation`/`createMutation` now use `queryClient.refetchQueries({ type: "active" })` instead of just `invalidateQueries` — the active tables in the page refresh **immediately** instead of waiting up to a full second for the global 1-second polling.
+
+This also guarantees the user-reported bug ("create 2 orders, they don't show in the pool") cannot recur regardless of polling timing.
+
+### 27.3 `server/routes.ts` — TTS voice locked to en-US-GuyNeural
+
+The `/api/tts` route previously read `settings?.ttsVoice` from the Settings document. Per project owner directive, the voice is now hard-coded to `"en-US-GuyNeural"` (Guy, US Male) for every TTS call. The Settings model field stays for backwards compatibility but is no longer consulted.
+
+### 27.4 `server/models/Settings.ts` — default voice updated
+
+Schema default for `ttsVoice` changed from `"en-US-AriaNeural"` to `"en-US-GuyNeural"`. New Settings documents start at the canonical voice; existing ones keep whatever value they had (the field is just ignored now).
+
+### 27.5 `client/src/pages/settings.tsx` — voice picker removed
+
+The voice picker `<Select>` was deleted. In its place is a static read-only card explaining that the voice is locked system-wide. The `TTS_VOICES` constant list (10 voices) was removed.
+
+### 27.6 `server/lib/arima.ts` — NEW · ARIMA(1, 1, 1) implementation
+
+A self-contained, dependency-free ARIMA model in TypeScript (~180 lines). Exports `arima(series, cfg)` returning forecast + 95% prediction intervals + fitted parameters, plus a `bucketByDay(events, start, end)` helper that turns timestamped events into a daily-count series.
+
+Parameter estimation:
+- **φ (AR)** — lag-1 sample autocorrelation of the differenced series (clamped to ±0.99 for stability).
+- **θ (MA)** — lag-1 autocorrelation of the residuals.
+- **intercept** — `mean(differenced) × (1 − φ)`.
+- **σ** — `stddev(residuals)`.
+
+Forecast horizons up to 60 days. Falls back to mean+stddev for series too short to fit.
+
+### 27.7 `server/routes.ts` — two new forecast endpoints
+
+`GET /api/forecast/items?horizon=14&lookback=60`
+- Buckets `InventoryLog.type=="deduction"` events by day per item over the lookback window.
+- Fits ARIMA(1, 1, 1) per item; computes forecast, prediction intervals, `daysOfStock`, reorder urgency.
+- Sorts results by urgency (critical → low) then forecast demand.
+
+`GET /api/forecast/aggregate?horizon=14&lookback=60`
+- Aggregates orders/day count and revenue/day sum across non-cancelled orders.
+- Fits two ARIMA models (one for orders, one for revenue).
+- Returns history + forecast labels for chart rendering.
+
+### 27.8 `client/src/pages/forecasting.tsx` — NEW Forecasting page
+
+Two tabs:
+
+1. **Aggregate** — Two side-by-side Recharts ComposedCharts (orders + revenue). Solid line = actuals. Dashed line = ARIMA forecast. Shaded area = 95% prediction interval. A vertical `ReferenceLine` labeled "Today" separates history from forecast. A footnote shows the fitted `φ`, `θ`, intercept, and residual σ for each model.
+
+2. **Per item** — Search + urgency filter chips. Each item row shows urgency pill, name, category badge, days-of-stock, current stock, average daily demand, total forecast, and a mini sparkline (history + forecast). Click to expand a detail card with a full 160px chart and seven stat rows (avg/day, total demand, current stock, days-of-stock, forecast revenue, model fit `φ/θ/σ`, observations count).
+
+KPI tile strip at the top: forecast orders, forecast revenue (₱), items at risk (critical + high), items healthy (low). Horizon toggle (7/14/30 days). Reset-friendly design — no `data-testid` removed from anywhere else.
+
+### 27.9 Sidebar nav + routing
+
+`client/src/App.tsx` adds `import ForecastingPage` and a `<Route path="/forecasting">`. `client/src/components/app-sidebar.tsx` adds a `TrendingUp` icon + nav item between Reports and the admin section.
+
+### 27.10 Verification
+
+Live smoke test against the running dev server confirmed:
+
+```js
+GET /api/forecast/aggregate   → 200 · model "ARIMA(1, 1, 1)" · 61 days of history · 14 days of forecast
+GET /api/forecast/items       → 200 · 11 items analyzed · sample (avgDaily=4.5, daysOfStock=10.2, urgency="medium")
+POST /api/orders/:id/assign {username:""} → 200 · assignedTo="" · fulfillment="pending" · backInPool=true
+POST /api/orders + pool query  → new orders appear immediately in pool=true filter
+```
+
+Build: `npx tsc --noEmit` 0 errors · `npm run build` clean (1.2 MB server bundle).
+
+### 27.11 Files touched in session 6
+
+| File | Why |
+|---|---|
+| `server/routes.ts` | Unassign POST resets fulfillment; TTS voice locked to en-US-GuyNeural; added `/api/forecast/items` + `/api/forecast/aggregate` routes |
+| `server/lib/arima.ts` | **NEW** — ARIMA(1, 1, 1) pure-TypeScript implementation |
+| `server/models/Settings.ts` | Default `ttsVoice` updated to `en-US-GuyNeural` |
+| `client/src/pages/forecasting.tsx` | **NEW** — Forecasting UI (aggregate + per-item) |
+| `client/src/pages/orders.tsx` | Inline "Return to pool" button + hard refetchQueries on assign/unassign/create |
+| `client/src/pages/settings.tsx` | Voice picker removed; `TTS_VOICES` constant deleted |
+| `client/src/App.tsx` | Route registration for `/forecasting` |
+| `client/src/components/app-sidebar.tsx` | Forecasting nav item with TrendingUp icon |
+| `marl.md` | ARIMA moved from "deferred" to "implemented" + new §5.6.A subsection documenting the math |
+
+---
+
 End of code.md.

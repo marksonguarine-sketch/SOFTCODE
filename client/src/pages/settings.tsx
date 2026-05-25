@@ -61,18 +61,7 @@ const GRADIENT_SWATCHES: Record<string, string> = {
   "red-rose":      "linear-gradient(135deg, #dc2626, #e11d48)",
 };
 
-const TTS_VOICES = [
-  { value: "en-US-AriaNeural",    label: "Aria (US Female)" },
-  { value: "en-US-JennyNeural",   label: "Jenny (US Female)" },
-  { value: "en-US-GuyNeural",     label: "Guy (US Male)" },
-  { value: "en-US-DavisNeural",   label: "Davis (US Male)" },
-  { value: "en-GB-SoniaNeural",   label: "Sonia (UK Female)" },
-  { value: "en-GB-RyanNeural",    label: "Ryan (UK Male)" },
-  { value: "en-AU-NatashaNeural", label: "Natasha (AU Female)" },
-  { value: "en-AU-WilliamNeural", label: "William (AU Male)" },
-  { value: "en-PH-RosaNeural",    label: "Rosa (PH Female)" },
-  { value: "en-PH-JamesNeural",   label: "James (PH Male)" },
-];
+// TTS voice list removed — voice is now locked to en-US-GuyNeural on the server.
 
 function loadGoogleFontPreview(fontName: string) {
   if (fontName === "Inter") return;
@@ -475,27 +464,12 @@ export default function SettingsPage() {
                   data-testid="switch-tts-enabled"
                 />
               </div>
-              {isAdmin && (
-                <FormField control={form.control} name="ttsVoice" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Announcement Voice</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger data-testid="select-tts-voice">
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        {TTS_VOICES.map((v) => (
-                          <SelectItem key={v.value} value={v.value}>{v.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormDescription className="text-xs">This voice is used system-wide for all announcements</FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-              )}
+              {/* Voice picker removed per project owner directive — the
+                  announcement voice is now hard-locked to "Guy (US Male)"
+                  (en-US-GuyNeural) on the server. */}
+              <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Voice:</span> Guy (US Male) — locked to a single voice system-wide.
+              </div>
             </CardContent>
           </Card>
 

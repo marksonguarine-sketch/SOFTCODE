@@ -256,7 +256,15 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       const res = await apiRequest("POST", "/api/orders", data);
       return res.json();
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      // Hard refetch (not just invalidate) so the new order shows up in the
+      // pool table immediately. The 1-second global polling would also catch
+      // it, but waiting up to a full second after pressing "Create" felt
+      // broken to the user.
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["/api/orders"], type: "active" }),
+        queryClient.refetchQueries({ queryKey: ["/api/orders?pool=true"], type: "active" }),
+      ]);
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
       const data = form.getValues();
@@ -748,12 +756,31 @@ export default function OrdersPage() {
       const res = await apiRequest("POST", `/api/orders/${orderId}/assign`, { username, displayName });
       return res.json();
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/orders?pool=true"] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["/api/orders"], type: "active" }),
+        queryClient.refetchQueries({ queryKey: ["/api/orders?pool=true"], type: "active" }),
+      ]);
       toast({ title: "Order assigned" });
     },
     onError: (err: Error) => toast({ title: "Assignment failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Inline "Return to pool" — unassigns the order and resets its fulfillment
+  // back to "pending" so it shows up in the Pending Pool below.
+  const unassignMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      const res = await apiRequest("DELETE", `/api/orders/${orderId}/assign`);
+      return res.json();
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["/api/orders"], type: "active" }),
+        queryClient.refetchQueries({ queryKey: ["/api/orders?pool=true"], type: "active" }),
+      ]);
+      toast({ title: "Returned to pool" });
+    },
+    onError: (err: Error) => toast({ title: "Failed to return to pool", description: err.message, variant: "destructive" }),
   });
 
   const claimMutation = useMutation({
@@ -1147,6 +1174,7 @@ export default function OrdersPage() {
                             <TableHead className="text-right">Total</TableHead>
                             <TableHead>Assigned</TableHead>
                             <TableHead>Processing</TableHead>
+                            <TableHead className="w-16">Action</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1166,6 +1194,25 @@ export default function OrdersPage() {
                                   <Badge className="text-xs bg-blue-500 text-white border-transparent">In Progress</Badge>
                                 ) : (
                                   <Badge variant="outline" className="text-xs">Not Started</Badge>
+                                )}
+                              </TableCell>
+                              <TableCell onClick={(e) => e.stopPropagation()}>
+                                {!order.completedProcessingAt && order.fulfillmentStatus !== "completed" && order.fulfillmentStatus !== "cancelled" && (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                                    title="Return to pool"
+                                    disabled={unassignMutation.isPending}
+                                    onClick={() => {
+                                      if (window.confirm(`Return ${order.trackingNumber} to the pool?`)) {
+                                        unassignMutation.mutate(order._id);
+                                      }
+                                    }}
+                                    data-testid={`button-unassign-${order._id}`}
+                                  >
+                                    Return to pool
+                                  </Button>
                                 )}
                               </TableCell>
                             </TableRow>

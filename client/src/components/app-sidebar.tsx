@@ -7,6 +7,7 @@ import {
   CreditCard,
   BookOpen,
   BarChart3,
+  TrendingUp,
   Users,
   Settings,
   Wrench,
@@ -61,6 +62,7 @@ const operationsNav = [
   { title: "Billing", url: "/billing", icon: CreditCard },
   { title: "Accounting", url: "/accounting", icon: BookOpen },
   { title: "Reports", url: "/reports", icon: BarChart3 },
+  { title: "Forecasting", url: "/forecasting", icon: TrendingUp },
 ];
 
 const adminOpsNav = [

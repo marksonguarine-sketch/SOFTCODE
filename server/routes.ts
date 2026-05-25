@@ -48,6 +48,7 @@ import Offer from "./models/Offer";
 import RequestModel from "./models/Request";
 import Message from "./models/Message";
 import EmployeeProfile from "./models/EmployeeProfile";
+import { arima, bucketByDay } from "./lib/arima";
 
 let io: SocketIOServer;
 
@@ -1399,6 +1400,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (username) {
         (order as any).startedAt = undefined;
         (order as any).completedProcessingAt = undefined;
+      } else {
+        // Unassigning via POST with empty username — return order to pool by
+        // resetting the fulfillment lifecycle. Without this reset the pool
+        // query (which requires fulfillmentStatus === "pending") would skip
+        // any order that had already entered "processing" or later.
+        (order as any).startedAt = undefined;
+        (order as any).completedProcessingAt = undefined;
+        order.fulfillmentStatus = "pending";
+        order.currentStatus = "Pending Payment";
       }
       order.statusHistory.push({
         status: username ? "assigned" : "unassigned",
@@ -2367,8 +2377,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const { text } = req.body as { text?: string };
       if (!text || !text.trim()) return fail(res, 400, "text is required");
-      const settings = await Settings.findOne().lean();
-      const voice = (settings?.ttsVoice as string) || "en-US-GuyNeural";
+      // Locked to a single voice per project owner directive — do NOT read
+      // from Settings.ttsVoice anymore. Always use Guy (US Male).
+      const voice = "en-US-GuyNeural";
       const truncated = text.slice(0, 1000);
 
       const tts = new MsEdgeTTS();
@@ -3364,6 +3375,165 @@ ${JSON.stringify(fullData, null, 0)}`;
         profile: profileMap.get(e.username) || null,
       }));
       return ok(res, enriched);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // FORECASTING — ARIMA(1, 1, 1) demand forecast
+  // Inputs: per-item daily outflow series derived from InventoryLog deductions
+  // Outputs: 7/14/30-day forecasts with 95% prediction intervals + reorder advice
+  // ════════════════════════════════════════════════════════════════════════════
+
+  app.get("/api/forecast/items", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const horizon = Math.max(1, Math.min(60, parseInt((req.query.horizon as string) || "14")));
+      const lookbackDays = Math.max(7, Math.min(365, parseInt((req.query.lookback as string) || "60")));
+
+      const now = new Date();
+      const startDate = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+
+      // Pull every inventory deduction within the lookback window — these
+      // represent actual sales velocity per item.
+      const logs = await InventoryLog.find({
+        type: "deduction",
+        createdAt: { $gte: startDate },
+      }).select("itemId itemName quantity createdAt").lean();
+
+      // Group by item
+      const byItem = new Map<string, { itemName: string; events: Array<{ date: Date; qty: number }> }>();
+      for (const log of logs) {
+        const id = String(log.itemId);
+        const existing = byItem.get(id);
+        const ev = { date: new Date(log.createdAt), qty: Math.abs(log.quantity || 0) };
+        if (existing) existing.events.push(ev);
+        else byItem.set(id, { itemName: log.itemName, events: [ev] });
+      }
+
+      // Also pull current inventory levels for reorder advice
+      const items = await Item.find().select("itemName currentQuantity unitPrice category").lean();
+      const stockMap = new Map(items.map((i) => [String(i._id), i]));
+
+      // Build forecast per item
+      const forecasts: any[] = [];
+      for (const [itemId, { itemName, events }] of Array.from(byItem.entries())) {
+        const series = bucketByDay(events, startDate, now);
+        if (series.length < 5) continue; // need at least a few days
+        const result = arima(series, { p: 1, d: 1, q: 1, horizon });
+
+        const totalForecastDemand = result.forecast.reduce((s, v) => s + Math.max(0, v), 0);
+        const avgDailyDemand = totalForecastDemand / horizon;
+        const stock = stockMap.get(itemId);
+        const currentStock = stock?.currentQuantity ?? 0;
+        const daysOfStock = avgDailyDemand > 0 ? currentStock / avgDailyDemand : Infinity;
+        // Reorder advice: if days-of-stock < horizon, suggest reorder
+        const reorderUrgency =
+          daysOfStock < 3 ? "critical" :
+          daysOfStock < 7 ? "high" :
+          daysOfStock < 14 ? "medium" : "low";
+
+        forecasts.push({
+          itemId,
+          itemName,
+          category: stock?.category || "",
+          currentStock,
+          unitPrice: stock?.unitPrice || 0,
+          series,                  // historical daily outflow
+          forecast: result.forecast.map((v) => Math.max(0, Math.round(v * 100) / 100)),
+          lower95: result.lower95.map((v) => Math.max(0, Math.round(v * 100) / 100)),
+          upper95: result.upper95.map((v) => Math.max(0, Math.round(v * 100) / 100)),
+          avgDailyDemand: Math.round(avgDailyDemand * 100) / 100,
+          totalForecastDemand: Math.round(totalForecastDemand * 100) / 100,
+          daysOfStock: Number.isFinite(daysOfStock) ? Math.round(daysOfStock * 10) / 10 : null,
+          reorderUrgency,
+          model: result.params,
+          sigma: Math.round(result.sigma * 100) / 100,
+          observations: result.observations,
+        });
+      }
+
+      // Sort by urgency then by forecast demand descending
+      const urgencyRank: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
+      forecasts.sort((a, b) =>
+        (urgencyRank[a.reorderUrgency] - urgencyRank[b.reorderUrgency]) ||
+        (b.totalForecastDemand - a.totalForecastDemand)
+      );
+
+      return ok(res, {
+        horizon,
+        lookbackDays,
+        generatedAt: now.toISOString(),
+        model: "ARIMA(1, 1, 1)",
+        itemsAnalyzed: byItem.size,
+        forecasts,
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Aggregate forecast across all items — used for dashboard widgets
+  app.get("/api/forecast/aggregate", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const horizon = Math.max(1, Math.min(60, parseInt((req.query.horizon as string) || "14")));
+      const lookbackDays = Math.max(7, Math.min(365, parseInt((req.query.lookback as string) || "60")));
+
+      const now = new Date();
+      const startDate = new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000);
+
+      // Aggregate ORDER count + revenue per day
+      const orders = await Order.find({
+        createdAt: { $gte: startDate },
+        fulfillmentStatus: { $nin: ["cancelled"] },
+      }).select("createdAt totalAmount").lean();
+
+      const orderEvents = orders.map((o) => ({ date: new Date(o.createdAt), qty: 1 }));
+      const revenueEvents = orders.map((o) => ({ date: new Date(o.createdAt), qty: o.totalAmount || 0 }));
+
+      const orderSeries = bucketByDay(orderEvents, startDate, now);
+      const revenueSeries = bucketByDay(revenueEvents, startDate, now);
+
+      const orderForecast = arima(orderSeries, { p: 1, d: 1, q: 1, horizon });
+      const revenueForecast = arima(revenueSeries, { p: 1, d: 1, q: 1, horizon });
+
+      // Build date labels
+      const labels: string[] = [];
+      for (let i = 0; i < horizon; i++) {
+        const d = new Date(now.getTime() + (i + 1) * 24 * 60 * 60 * 1000);
+        labels.push(d.toISOString().slice(0, 10));
+      }
+      const historyLabels: string[] = [];
+      for (let i = 0; i < orderSeries.length; i++) {
+        const d = new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000);
+        historyLabels.push(d.toISOString().slice(0, 10));
+      }
+
+      return ok(res, {
+        horizon,
+        lookbackDays,
+        model: "ARIMA(1, 1, 1)",
+        historyLabels,
+        forecastLabels: labels,
+        orders: {
+          history: orderSeries,
+          forecast: orderForecast.forecast.map((v) => Math.max(0, Math.round(v))),
+          lower95: orderForecast.lower95.map((v) => Math.max(0, Math.round(v))),
+          upper95: orderForecast.upper95.map((v) => Math.max(0, Math.round(v))),
+          totalForecastDemand: orderForecast.forecast.reduce((s, v) => s + Math.max(0, v), 0),
+          sigma: orderForecast.sigma,
+          params: orderForecast.params,
+        },
+        revenue: {
+          history: revenueSeries,
+          forecast: revenueForecast.forecast.map((v) => Math.max(0, Math.round(v))),
+          lower95: revenueForecast.lower95.map((v) => Math.max(0, Math.round(v))),
+          upper95: revenueForecast.upper95.map((v) => Math.max(0, Math.round(v))),
+          totalForecastRevenue: revenueForecast.forecast.reduce((s, v) => s + Math.max(0, v), 0),
+          sigma: revenueForecast.sigma,
+          params: revenueForecast.params,
+        },
+      });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

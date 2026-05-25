@@ -39,7 +39,7 @@ const settingsSchema = new Schema<ISettingsDoc>(
     storeName: { type: String, default: "JOAP Hardware Trading" },
     autoApplyOffers: { type: Boolean, default: true },
     showSavingsSummary: { type: Boolean, default: true },
-    ttsVoice: { type: String, default: "en-US-AriaNeural" },
+    ttsVoice: { type: String, default: "en-US-GuyNeural" },
     dailySalesGoal: { type: Number, default: 100000 },
   },
   { timestamps: true }

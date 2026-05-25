@@ -41,6 +41,7 @@ import BillingPage from "@/pages/billing";
 import UsersPage from "@/pages/users";
 import AccountingPage from "@/pages/accounting";
 import ReportsPage from "@/pages/reports";
+import ForecastingPage from "@/pages/forecasting";
 import SettingsPage from "@/pages/settings";
 import AboutPage from "@/pages/about";
 import HelpPage from "@/pages/help";
@@ -81,6 +82,7 @@ function Router() {
       <Route path="/users" component={UsersPage} />
       <Route path="/accounting" component={AccountingPage} />
       <Route path="/reports" component={ReportsPage} />
+      <Route path="/forecasting" component={ForecastingPage} />
       <Route path="/settings" component={SettingsPage} />
       <Route path="/about" component={AboutPage} />
       <Route path="/help" component={HelpPage} />
