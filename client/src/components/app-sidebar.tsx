@@ -13,7 +13,6 @@ import {
   ScrollText,
   HelpCircle,
   Info,
-  Hammer,
   Tag,
   CalendarCheck,
   Clock,
@@ -40,6 +39,7 @@ import { useSettings, GRADIENT_OPTIONS } from "@/lib/settings-context";
 import { useQuery } from "@tanstack/react-query";
 import type { DashboardStats } from "@shared/schema";
 import { cn } from "@/lib/utils";
+import { JoapLogo } from "@/components/joap-logo";
 
 /* ============================================================================
  * Sidebar — matches the JOAP prototype design:
@@ -193,16 +193,7 @@ export function AppSidebar() {
       {/* ── Brand header ───────────────────────────────────────────────── */}
       <SidebarHeader className="px-3 pt-3.5 pb-2">
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-8 h-8 rounded-md grid place-items-center shrink-0 shadow-sm"
-            style={{
-              background:
-                "linear-gradient(135deg, hsl(38 92% 58%) 0%, hsl(38 92% 45%) 100%)",
-              color: "hsl(28 50% 12%)",
-            }}
-          >
-            <Hammer className="h-4 w-4" />
-          </div>
+          <JoapLogo size={32} className="shrink-0 rounded-md shadow-sm" />
           <div className="flex flex-col leading-tight min-w-0">
             <span className="text-[13px] font-bold tracking-tight whitespace-nowrap" data-testid="text-brand-name">
               JOAP Hardware

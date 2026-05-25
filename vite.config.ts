@@ -1,24 +1,21 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
+/**
+ * Vite config for JOAP Hardware Trading.
+ *
+ * Root is `client/`, build output goes to `dist/public/`. The express
+ * server (`server/index.ts`) mounts the build output in production via
+ * `serveStatic`, and proxies through Vite middleware in dev.
+ *
+ * Aliases:
+ *   @         → client/src
+ *   @shared   → shared/        (Zod + TypeScript types shared with server)
+ *   @assets   → attached_assets (gitignored — local-only image drops)
+ */
 export default defineConfig({
-  plugins: [
-    react(),
-    runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
-      ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer(),
-          ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
-        ]
-      : []),
-  ],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(import.meta.dirname, "client", "src"),
@@ -36,8 +33,9 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    // Use the actual server port for HMR so the websocket can connect
     hmr: {
-      clientPort: 443,
+      clientPort: 5000,
     },
     allowedHosts: true,
   },

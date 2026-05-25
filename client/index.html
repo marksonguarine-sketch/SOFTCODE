@@ -2,14 +2,264 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=yes" />
+    <meta name="theme-color" content="#f5a623" />
+    <meta name="description" content="JOAP Hardware Trading — ERP system for a Tarlac hardware store. Inventory, orders, billing, reservations, accounting, and reporting in one place." />
+    <title>JOAP Hardware Trading</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" type="image/png" href="/favicon.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Fira+Code:wght@300..700&family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400..700;1,400..700&family=Manrope:wght@200..800&family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&family=Montserrat:ital,wght@0,100..900;1,100..900&family=Open+Sans:ital,wght@0,300..800;1,300..800&family=Outfit:wght@100..900&family=Oxanium:wght@200..800&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Roboto+Mono:ital,wght@0,100..700;1,100..700&family=Roboto:ital,wght@0,100..900;1,100..900&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Architects+Daughter&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Fira+Code:wght@300..700&family=Geist+Mono:wght@100..900&family=Geist:wght@100..900&family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&family=IBM+Plex+Sans:ital,wght@0,100..700;1,100..700&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400..700;1,400..700&family=Manrope:wght@200..800&family=Merriweather:ital,opsz,wght@0,18..144,300..900;1,18..144,300..900&family=Montserrat:ital,wght@0,100..900;1,100..900&family=Open+Sans:ital,wght@0,300..800;1,300..800&family=Outfit:wght@100..900&family=Oxanium:wght@200..800&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&family=Roboto+Mono:ital,wght@0,100..700;1,100..700&family=Roboto:ital,wght@0,100..900;1,100..900&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&family=Source+Serif+4:ital,opsz,wght@0,8..60,200..900;1,8..60,200..900&family=Space+Grotesk:wght@300..700&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&display=swap" rel="stylesheet">
+
+    <!--
+      JOAP boot loader — shown until React has mounted AND the hammer-guy
+      has finished hammering every letter (J → O → A → P). Animation cycle
+      is 5s; we wait one full cycle before fading the loader out, so the
+      letters always finish their bounce.
+    -->
+    <style>
+      /* ─── Boot loader (inline so it shows before JS/CSS bundles load) ─── */
+      html,body { margin:0; padding:0; }
+      body { background:#f4ede1; }
+      #joap-loader {
+        position: fixed; inset: 0; z-index: 10000;
+        background: #f4ede1;
+        display: flex; align-items: center; justify-content: center;
+        font-family: 'Inter', system-ui, sans-serif; color: #1a1a1a;
+        --pos-j:-200px; --pos-o:-125px; --pos-a:-50px; --pos-p:25px; --cycle: 5s;
+        opacity: 1; transition: opacity 480ms ease-out, visibility 0s linear 480ms;
+      }
+      #joap-loader.is-hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+      #joap-loader .gridbg { position: absolute; inset: 0;
+        background-image: linear-gradient(to right, rgba(26,26,26,0.045) 1px, transparent 1px), linear-gradient(to bottom, rgba(26,26,26,0.045) 1px, transparent 1px);
+        background-size: 30px 30px;
+        -webkit-mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
+                mask-image: radial-gradient(ellipse at center, black 40%, transparent 75%);
+      }
+      #joap-loader .glow { position: absolute; inset: 0;
+        background: radial-gradient(circle at 25% 30%, rgba(245,166,35,0.12), transparent 40%), radial-gradient(circle at 75% 70%, rgba(214,90,42,0.10), transparent 45%);
+        pointer-events: none; }
+      #joap-loader .stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 22px; transform: scale(0.95); }
+      @media (min-width: 768px) { #joap-loader .stage { transform: scale(1.05); } }
+      #joap-loader .zone { position: relative; width: 560px; height: 340px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; padding-bottom: 4px; }
+      #joap-loader .walker { position: absolute; left: 50%; top: 0; width: 220px; height: 260px; margin-left: -110px; z-index: 2; filter: drop-shadow(0 8px 16px rgba(26,26,26,0.12));
+        animation: jw var(--cycle) cubic-bezier(.65,.05,.36,1) infinite; }
+      @keyframes jw {
+        0%,18% { transform: translateX(var(--pos-j)); opacity:1; }
+        25%,43%{ transform: translateX(var(--pos-o)); }
+        50%,68%{ transform: translateX(var(--pos-a)); }
+        75%,93%{ transform: translateX(var(--pos-p)); opacity:1; }
+        96%    { transform: translateX(var(--pos-p)); opacity:0; }
+        97%    { transform: translateX(var(--pos-j)); opacity:0; }
+        100%   { transform: translateX(var(--pos-j)); opacity:1; }
+      }
+      #joap-loader .figure { width: 220px; height: 260px; animation: jbob var(--cycle) ease-in-out infinite; }
+      @keyframes jbob {
+        0%,18%,25%,43%,50%,68%,75%,93%,100% { transform: translateY(0); }
+        21.5%,46.5%,71.5%,96.5% { transform: translateY(-5px); }
+      }
+      #joap-loader .leg-l, #joap-loader .boot-l { transform-origin: 86px 200px; transform-box: fill-box; animation: jsl var(--cycle) ease-in-out infinite; }
+      #joap-loader .leg-r, #joap-loader .boot-r { transform-origin: 134px 210px; transform-box: fill-box; animation: jsr var(--cycle) ease-in-out infinite; }
+      @keyframes jsl { 0%,18%,25%,43%,50%,68%,75%,93%,100%{transform:rotate(0)} 21.5%,46.5%,71.5%,96.5%{transform:rotate(-12deg)} }
+      @keyframes jsr { 0%,18%,25%,43%,50%,68%,75%,93%,100%{transform:rotate(0)} 21.5%,46.5%,71.5%,96.5%{transform:rotate(12deg)} }
+      #joap-loader .swing { transform-origin: 150px 140px; transform-box: fill-box; animation: jsw var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      @keyframes jsw {
+        0%{transform:rotate(-65deg)} 4%{transform:rotate(-78deg)} 10%{transform:rotate(15deg)}
+        14%,25%{transform:rotate(-65deg)}
+        29%{transform:rotate(-78deg)} 35%{transform:rotate(15deg)}
+        39%,50%{transform:rotate(-65deg)}
+        54%{transform:rotate(-78deg)} 60%{transform:rotate(15deg)}
+        64%,75%{transform:rotate(-65deg)}
+        79%{transform:rotate(-78deg)} 85%{transform:rotate(15deg)}
+        89%,100%{transform:rotate(-65deg)}
+      }
+      #joap-loader .hat { transform-origin: 110px 78px; transform-box: fill-box; animation: jhat var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      @keyframes jhat {
+        0%,8%,16%,33%,41%,58%,66%,83%,91%,100%{transform:rotate(0)}
+        10%,35%,60%,85%{transform:rotate(-3deg) translateY(-1px)}
+        13%,38%,63%,88%{transform:rotate(1deg)}
+      }
+      #joap-loader .ground { position: absolute; left: 50%; bottom: 8px; width: 160px; height: 12px; transform: translateX(-50%); background: radial-gradient(ellipse, rgba(26,26,26,0.22), transparent 70%); z-index: 1; animation: jgr var(--cycle) ease-in-out infinite; }
+      @keyframes jgr {
+        0%,8%,14%,33%,39%,58%,64%,83%,89%,100% { transform: translateX(-50%) scaleX(1); opacity: 0.85; }
+        10%,35%,60%,85% { transform: translateX(-50%) scaleX(1.1); opacity: 1; }
+      }
+      #joap-loader .sparks { position: absolute; left: 197px; top: 65px; width: 0; height: 0; pointer-events: none; z-index: 3; }
+      #joap-loader .flash { position: absolute; left: -40px; top: -40px; width: 80px; height: 80px; border-radius: 50%; background: radial-gradient(circle, rgba(255,220,120,0.9), rgba(255,180,60,0) 60%); opacity: 0; animation: jfl var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      @keyframes jfl {
+        0%,8%,13%,33%,38%,58%,63%,83%,88%,100% { opacity: 0; transform: scale(0.4); }
+        10%,35%,60%,85% { opacity: 1; transform: scale(1.2); }
+      }
+      #joap-loader .sp { position: absolute; left: -2px; top: -2px; width: 4px; height: 4px; border-radius: 1px; background: #f5a623; opacity: 0; animation: jsp var(--cycle) cubic-bezier(.2,.6,.4,1) infinite; }
+      #joap-loader .sp:nth-child(2){--dx:-60px;--dy:-34px}
+      #joap-loader .sp:nth-child(3){--dx:-40px;--dy:-50px;background:#d65a2a}
+      #joap-loader .sp:nth-child(4){--dx:-18px;--dy:-58px}
+      #joap-loader .sp:nth-child(5){--dx:12px;--dy:-60px;background:#d65a2a}
+      #joap-loader .sp:nth-child(6){--dx:38px;--dy:-52px}
+      #joap-loader .sp:nth-child(7){--dx:56px;--dy:-32px;background:#d65a2a}
+      #joap-loader .sp:nth-child(8){--dx:-72px;--dy:-12px}
+      #joap-loader .sp:nth-child(9){--dx:70px;--dy:-10px;background:#d65a2a}
+      @keyframes jsp {
+        0%,8% { transform: translate(0,0) scale(0.4); opacity: 0; }
+        10% { transform: translate(calc(var(--dx)*0.4),calc(var(--dy)*0.4)) scale(1.2); opacity: 1; }
+        14% { transform: translate(var(--dx),var(--dy)) scale(0.6); opacity: 0.6; }
+        17% { transform: translate(calc(var(--dx)*1.1),calc(var(--dy)*1.1 + 16px)) scale(0.2); opacity: 0; }
+        18%,33% { transform: translate(0,0) scale(0.4); opacity: 0; }
+        35% { transform: translate(calc(var(--dx)*0.4),calc(var(--dy)*0.4)) scale(1.2); opacity: 1; }
+        39% { transform: translate(var(--dx),var(--dy)) scale(0.6); opacity: 0.6; }
+        42% { transform: translate(calc(var(--dx)*1.1),calc(var(--dy)*1.1 + 16px)) scale(0.2); opacity: 0; }
+        43%,58% { transform: translate(0,0) scale(0.4); opacity: 0; }
+        60% { transform: translate(calc(var(--dx)*0.4),calc(var(--dy)*0.4)) scale(1.2); opacity: 1; }
+        64% { transform: translate(var(--dx),var(--dy)) scale(0.6); opacity: 0.6; }
+        67% { transform: translate(calc(var(--dx)*1.1),calc(var(--dy)*1.1 + 16px)) scale(0.2); opacity: 0; }
+        68%,83% { transform: translate(0,0) scale(0.4); opacity: 0; }
+        85% { transform: translate(calc(var(--dx)*0.4),calc(var(--dy)*0.4)) scale(1.2); opacity: 1; }
+        89% { transform: translate(var(--dx),var(--dy)) scale(0.6); opacity: 0.6; }
+        92% { transform: translate(calc(var(--dx)*1.1),calc(var(--dy)*1.1 + 16px)) scale(0.2); opacity: 0; }
+        93%,100% { transform: translate(0,0) scale(0.4); opacity: 0; }
+      }
+      #joap-loader .word { position: relative; display: flex; font-family: 'Archivo Black','Inter',sans-serif; font-size: 90px; line-height: 1; letter-spacing: -0.04em; color: #1a1a1a; z-index: 1; }
+      #joap-loader .ltr { display: inline-block; width: 75px; text-align: center; transform-origin: 50% 100%; text-shadow: 2px 2px 0 #f5a623, 4px 4px 0 #d65a2a; }
+      #joap-loader .ltr-j { animation: jrj var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      #joap-loader .ltr-o { animation: jro var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      #joap-loader .ltr-a { animation: jra var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      #joap-loader .ltr-p { animation: jrp var(--cycle) cubic-bezier(.4,.0,.2,1) infinite; }
+      @keyframes jrj { 0%,8%{transform:translateY(0) scaleY(1)} 10%{transform:translateY(6px) scaleY(0.86)} 12%{transform:translateY(-2px) scaleY(1.04)} 14%,100%{transform:translateY(0) scaleY(1)} }
+      @keyframes jro { 0%,33%{transform:translateY(0) scaleY(1)} 35%{transform:translateY(6px) scaleY(0.86)} 37%{transform:translateY(-2px) scaleY(1.04)} 39%,100%{transform:translateY(0) scaleY(1)} }
+      @keyframes jra { 0%,58%{transform:translateY(0) scaleY(1)} 60%{transform:translateY(6px) scaleY(0.86)} 62%{transform:translateY(-2px) scaleY(1.04)} 64%,100%{transform:translateY(0) scaleY(1)} }
+      @keyframes jrp { 0%,83%{transform:translateY(0) scaleY(1)} 85%{transform:translateY(6px) scaleY(0.86)} 87%{transform:translateY(-2px) scaleY(1.04)} 89%,100%{transform:translateY(0) scaleY(1)} }
+      #joap-loader .tag { display: flex; align-items: center; gap: 14px; font-family: 'Space Mono',monospace; font-size: 12px; font-weight: 700; letter-spacing: 0.32em; text-transform: uppercase; color: #4a4a4a; }
+      #joap-loader .tline { width: 30px; height: 1px; background: #4a4a4a; opacity: 0.5; }
+      #joap-loader .ttext { position: relative; padding-left: 4px; }
+      #joap-loader .ttext::before { content: ''; position: absolute; left: -8px; top: 50%; width: 4px; height: 4px; background: #d65a2a; border-radius: 50%; transform: translateY(-50%); animation: jdot 1.4s ease-in-out infinite; }
+      @keyframes jdot { 0%,48%{opacity:0.3; transform:translateY(-50%) scale(1)} 52%{opacity:1; transform:translateY(-50%) scale(1.6)} 100%{opacity:0.3; transform:translateY(-50%) scale(1)} }
+      #joap-loader .prog { width: 200px; height: 2px; background: #d8cdb8; border-radius: 1px; overflow: hidden; }
+      #joap-loader .prog-bar { width: 40%; height: 100%; background: linear-gradient(90deg, #f5a623, #d65a2a); animation: jpr 2.2s ease-in-out infinite; }
+      @keyframes jpr { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+      /* Hide React mount until loader is gone, then fade in */
+      #root { opacity: 0; transition: opacity 280ms ease-out; }
+      #root.is-ready { opacity: 1; }
+      /* Respect prefers-reduced-motion: stop animations and let JS hide immediately */
+      @media (prefers-reduced-motion: reduce) {
+        #joap-loader * { animation: none !important; }
+      }
+    </style>
   </head>
   <body>
+    <div id="joap-loader" aria-label="Loading JOAP Hardware Trading" role="status">
+      <div class="gridbg"></div>
+      <div class="glow"></div>
+      <div class="stage">
+        <div class="zone">
+          <div class="walker">
+            <div class="ground"></div>
+            <svg class="figure" viewBox="0 0 220 260" xmlns="http://www.w3.org/2000/svg">
+              <path class="leg-l" d="M70 200 L70 240 Q70 246 76 246 L96 246 Q102 246 102 240 L102 210 Z" fill="#1b4a7a"/>
+              <path class="leg-r" d="M118 210 L118 240 Q118 246 124 246 L144 246 Q150 246 150 240 L150 200 Z" fill="#1b4a7a"/>
+              <rect class="boot-l" x="68" y="240" width="36" height="10" rx="2" fill="#1a1a1a"/>
+              <rect class="boot-r" x="116" y="240" width="36" height="10" rx="2" fill="#1a1a1a"/>
+              <path d="M60 140 Q60 130 70 128 L150 128 Q160 130 160 140 L160 210 Q160 216 154 216 L66 216 Q60 216 60 210 Z" fill="#22568a"/>
+              <rect x="84" y="128" width="10" height="40" fill="#1b4a7a"/>
+              <rect x="126" y="128" width="10" height="40" fill="#1b4a7a"/>
+              <rect x="82" y="166" width="14" height="10" rx="1" fill="#d4a23a"/>
+              <rect x="124" y="166" width="14" height="10" rx="1" fill="#d4a23a"/>
+              <path d="M96 128 L110 144 L124 128 Z" fill="#b8472f"/>
+              <rect x="118" y="178" width="22" height="18" rx="1" fill="#1b4a7a"/>
+              <rect x="100" y="112" width="20" height="20" fill="#e6b894"/>
+              <ellipse cx="110" cy="98" rx="28" ry="30" fill="#f0c39e"/>
+              <ellipse cx="82" cy="100" rx="4" ry="6" fill="#e6b894"/>
+              <circle cx="100" cy="96" r="2.4" fill="#1a1a1a"/>
+              <circle cx="120" cy="96" r="2.4" fill="#1a1a1a"/>
+              <path d="M94 88 L106 90" stroke="#1a1a1a" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M114 90 L126 88" stroke="#1a1a1a" stroke-width="2.2" stroke-linecap="round"/>
+              <path d="M104 110 Q110 114 116 110" stroke="#1a1a1a" stroke-width="2" stroke-linecap="round" fill="none"/>
+              <path d="M100 106 Q110 108 120 106" stroke="#5a3a22" stroke-width="3" stroke-linecap="round" fill="none"/>
+              <g class="hat">
+                <ellipse cx="110" cy="78" rx="36" ry="6" fill="#e09a1f"/>
+                <path d="M80 78 Q80 52 110 52 Q140 52 140 78 Z" fill="#f5a623"/>
+                <rect x="108" y="54" width="4" height="24" fill="#c47e10"/>
+                <path d="M88 74 Q92 60 108 56" stroke="#ffd07a" stroke-width="2.4" stroke-linecap="round" fill="none"/>
+                <rect x="100" y="64" width="20" height="8" rx="1" fill="#1a1a1a"/>
+                <text x="110" y="70.6" text-anchor="middle" font-family="'Space Mono', monospace" font-size="6" font-weight="700" fill="#f5a623">JOAP</text>
+              </g>
+              <path d="M62 144 Q52 160 56 184 Q58 196 70 196 L74 184 Q70 168 76 152 Z" fill="#22568a"/>
+              <ellipse cx="64" cy="196" rx="8" ry="7" fill="#f0c39e"/>
+              <g class="swing">
+                <path d="M148 140 Q170 138 178 120 Q182 110 174 104 Q166 100 158 110 Q150 124 144 138 Z" fill="#22568a"/>
+                <ellipse cx="176" cy="108" rx="8" ry="9" fill="#f0c39e"/>
+                <rect x="172" y="60" width="8" height="56" rx="2" fill="#8a5a2b"/>
+                <line x1="174" y1="68" x2="178" y2="108" stroke="#6b4220" stroke-width="1"/>
+                <rect x="156" y="44" width="40" height="22" rx="2" fill="#5a6470"/>
+                <rect x="156" y="44" width="40" height="6" fill="#7a8694"/>
+                <rect x="156" y="60" width="40" height="6" fill="#3e4651"/>
+                <path d="M156 50 L148 54 L148 60 L156 64 Z" fill="#5a6470"/>
+                <rect x="160" y="48" width="20" height="2" fill="#aab4c0"/>
+              </g>
+            </svg>
+            <div class="sparks">
+              <span class="flash"></span>
+              <span class="sp"></span><span class="sp"></span><span class="sp"></span><span class="sp"></span>
+              <span class="sp"></span><span class="sp"></span><span class="sp"></span><span class="sp"></span>
+            </div>
+          </div>
+          <div class="word">
+            <span class="ltr ltr-j">J</span>
+            <span class="ltr ltr-o">O</span>
+            <span class="ltr ltr-a">A</span>
+            <span class="ltr ltr-p">P</span>
+          </div>
+        </div>
+        <div class="tag">
+          <span class="tline"></span>
+          <span class="ttext">Hardware for all</span>
+          <span class="tline"></span>
+        </div>
+        <div class="prog"><div class="prog-bar"></div></div>
+      </div>
+    </div>
+
     <div id="root"></div>
+
+    <script>
+      // Wait for ONE full hammer cycle (5s) AND for the React root to render
+      // its first child before dismissing the loader.
+      (function () {
+        var loader = document.getElementById('joap-loader');
+        var root = document.getElementById('root');
+        if (!loader || !root) return;
+        var animationDone = false;
+        var reactReady = false;
+        var startedAt = performance.now();
+        var MIN_DURATION = 5000;  // one full hammer cycle
+        var MAX_DURATION = 12000; // bail out if React stalls
+
+        function maybeHide() {
+          if (!animationDone || !reactReady) return;
+          loader.classList.add('is-hidden');
+          root.classList.add('is-ready');
+          setTimeout(function () { loader.remove(); }, 600);
+        }
+
+        // Watch the React root for its first painted child
+        var observer = new MutationObserver(function () {
+          if (root.children.length > 0) {
+            reactReady = true;
+            observer.disconnect();
+            maybeHide();
+          }
+        });
+        observer.observe(root, { childList: true });
+
+        // Time the animation cycle
+        setTimeout(function () { animationDone = true; maybeHide(); }, MIN_DURATION);
+
+        // Safety: never block the app indefinitely
+        setTimeout(function () {
+          animationDone = true; reactReady = true; maybeHide();
+        }, MAX_DURATION);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

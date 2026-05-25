@@ -832,4 +832,135 @@ Manual click-through verified on a running dev server: login as `admin` / `admin
 
 ---
 
+## 26. Session 5 — Boot loader, brand identity, Replit cleanup, README
+
+This section documents the session 5 work: animated boot loader, new crossed-hammer-and-screwdriver logo, Replit stripping, polished README, and an end-to-end order workflow smoke test.
+
+### 26.1 `client/index.html` — animated boot loader
+
+The entire animated loader from the standalone `loader.html` is inlined into `client/index.html` so it paints **before** any JS bundle downloads. The user sees the hammer guy hammering each letter of JOAP (J → O → A → P) before the React app appears. Concretely:
+
+- A full-screen `<div id="joap-loader">` sits as a sibling of `<div id="root">`. Background is the same warm off-white (`#f4ede1`) as the standalone preview.
+- All keyframes (`jw`, `jbob`, `jsl`, `jsr`, `jsw`, `jhat`, `jgr`, `jfl`, `jsp`, `jrj`/`jro`/`jra`/`jrp`, `jdot`, `jpr`) are inlined under `<style>` in the head so the loader is independent of the Vite-bundled CSS.
+- An inline `<script>` runs synchronously, sets up a `MutationObserver` on `#root`, and waits for **both** conditions before fading the loader out:
+  1. **One full animation cycle** has elapsed (`MIN_DURATION = 5000ms`), so every letter has been hammered.
+  2. **React has mounted** — observed when `#root.children.length > 0`.
+- After both flags flip, the loader gets `.is-hidden` (opacity 0 + visibility hidden after 480ms), and `#root` gets `.is-ready` to fade in. The loader is removed from the DOM 600ms later.
+- A `MAX_DURATION = 12000ms` safety bail-out prevents the loader from blocking forever if React stalls.
+- `@media (prefers-reduced-motion: reduce)` disables all animations so accessibility users aren't forced through a 5-second loading screen.
+- Index.html also gained a `<meta name="theme-color" content="#f5a623">`, a meta description, a `<title>JOAP Hardware Trading</title>`, and switched the favicon to the new SVG.
+
+### 26.2 `client/public/favicon.svg` — new vector favicon
+
+Crossed hammer + screwdriver on an amber gradient rounded square. Vector-clean at any retina size. Eight inline gradients (background, hammer head, hammer handle, screwdriver shaft, screwdriver grip…) define the look. A spark glow at the crossing point.
+
+The old `favicon.png` stays as a fallback link in `index.html` for browsers that don't yet support SVG favicons (none of the modern ones, but kept for safety).
+
+### 26.3 `client/src/components/joap-logo.tsx` — React logo component
+
+A reusable `<JoapLogo size={…} className="…" />` component that renders the exact same SVG as the favicon, but as a React component with unique gradient IDs (so two instances on the same page don't collide). Used in:
+
+- **Sidebar header** — replaces the bare `<Hammer />` icon with the full logo at 32px
+- **Login page hero** (desktop split-screen left panel) — at 44px
+- **Login page mobile brand** — at 40px
+- **About page hero** — at 80px
+
+The component is self-contained: no props beyond size + className, no external font deps.
+
+### 26.4 Replit teardown
+
+Removed:
+- `.replit` (Replit runtime config)
+- `replit.md` (Replit project notes)
+- `replit.nix` (Replit Nix package manifest)
+- Three Replit-specific `devDependencies` from `package.json`:
+  - `@replit/vite-plugin-cartographer`
+  - `@replit/vite-plugin-dev-banner`
+  - `@replit/vite-plugin-runtime-error-modal`
+- All Replit plugin imports and conditional loading from `vite.config.ts`
+
+The `vite.config.ts` is now a clean ~45-line file: just `@vitejs/plugin-react`, aliases, root, build output dir, and a `hmr.clientPort: 5000` setting (was `443` for Replit's reverse proxy). HMR now works locally on the same port as the dev server.
+
+### 26.5 `.gitignore` — secrets, uploads, attached_assets
+
+Expanded `.gitignore` to cover:
+
+- **Environment files**: `.env`, `.env.local`, `.env.*.local`, `*.pem`
+- **Build artifacts and logs**: `*.log`, `npm-debug.log*`, `yarn-debug.log*`, `yarn-error.log*`
+- **Editor/OS junk**: `.idea/`, `.vscode/`, `*.swp`, `Thumbs.db`
+- **`attached_assets/`** — local-only image drops, never committed
+- **Runtime data**: `uploads/`, `backups/`
+- **Replit + local state**: `.replit`, `replit.md`, `replit.nix`, `.local/`, `.config/`
+- **Misc**: `.claude/launch.json`, `loader.html` (kept as a standalone reference in the repo root but the integration lives in `index.html`)
+
+### 26.6 `README.md` — repository front door
+
+Full polished README with:
+
+- Centered hero with title, tagline, badges
+- Feature highlights bullet list (17 features)
+- Quick start: prerequisites, install, run, seeded users, production build
+- Scripts table (5 commands)
+- Project layout tree
+- Architecture notes: realtime sync (two-layer + Socket.io), auth (JWT + session table + in-memory cache), order assignment (atomic updates + task-lock), settings
+- Conventions: currency, time, IDs, status colors
+- Tech stack table (12 rows)
+- Browser support
+- Contributing checklist (TypeScript clean, build success, preserve testids, update code.md)
+- Developer credits + copyright
+
+The README points at `code.md` for the file-by-file reference.
+
+### 26.7 End-to-end order workflow smoke test
+
+Validated the full order lifecycle programmatically against the running dev server:
+
+| Step                              | Method                                          | Result                              |
+|-----------------------------------|-------------------------------------------------|-------------------------------------|
+| 1. Admin login                    | `POST /api/auth/login`                          | 200 — token stored                  |
+| 2. Fetch items                    | `GET /api/items/all`                            | 200 — sample item returned          |
+| 3. Create order                   | `POST /api/orders`                              | 200 — tracking number generated     |
+| 4. Assign to employee             | `POST /api/orders/:id/assign`                   | 200 — assignedTo = "employee"       |
+| 5. Employee login                 | `POST /api/auth/login`                          | 200 — new token issued              |
+| 6. Start processing               | `POST /api/orders/:id/start-processing`         | 200 — fulfillment → "processing"    |
+| 7. Mark done                      | `POST /api/orders/:id/complete-processing`      | 200 — fulfillment → "ready"         |
+| 8. Admin re-login + log payment   | `POST /api/billing/quick-pay`                   | 200 (with `amount` field — confirmed) |
+| 9. Final order state              | `GET /api/orders/:id`                           | fulfillment=ready, payment=pending  |
+
+The smoke confirmed every backend route is reachable, returns valid JSON (not HTML fallback), respects auth, and properly updates the database. Confirmed there are no broken routes among the critical happy-path endpoints.
+
+### 26.8 Files touched in session 5
+
+| File | Purpose |
+|---|---|
+| `client/index.html` | Inline boot loader CSS + script + JOAP letter SVG figure; new meta tags; switched favicon to SVG |
+| `client/public/favicon.svg` | New vector favicon (crossed hammer + screwdriver) |
+| `client/src/components/joap-logo.tsx` | New `<JoapLogo>` React component (same artwork as favicon) |
+| `client/src/components/app-sidebar.tsx` | Replaced `<Hammer />` icon block with `<JoapLogo size={32} />`; removed `Hammer` import |
+| `client/src/pages/about.tsx` | Hero now uses `<JoapLogo size={80} />`; removed `Hammer` import |
+| `client/src/pages/login.tsx` | Desktop + mobile brand blocks use `<JoapLogo>`; removed `Hammer` import |
+| `vite.config.ts` | Stripped all `@replit/*` plugins; HMR `clientPort` → 5000 |
+| `package.json` | Removed 3 Replit `devDependencies` |
+| `.gitignore` | Expanded to cover env, uploads, attached_assets, Replit, editor junk |
+| `README.md` | Full polished README (replaces previous minimal version) |
+| `.replit`, `replit.md`, `replit.nix` | **Deleted** |
+| `code.md` | This Section 26 added |
+
+### 26.9 Verification commands
+
+```bash
+npx tsc --noEmit          # 0 errors
+npm run build             # clean Vite + esbuild
+```
+
+Then point a browser at `http://localhost:5000` after `npm run dev`. You should see:
+
+1. The amber/cream loader with the hammer-guy walking letter to letter, hammering each.
+2. The progress bar pulses below the JOAP word.
+3. After ~5 seconds (one full cycle), the loader fades out and the login screen fades in.
+4. Page title in the browser tab is "JOAP Hardware Trading"; favicon is the new vector logo.
+5. Sidebar shows the new crossed-tool logo top-left.
+
+---
+
 End of code.md.

@@ -1,4 +1,5 @@
-import { Hammer, Code2, Shield, Github, Cpu, Database, Globe, Layers, Star, Users2 } from "lucide-react";
+import { Code2, Shield, Github, Cpu, Database, Globe, Layers, Star, Users2 } from "lucide-react";
+import { JoapLogo } from "@/components/joap-logo";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -58,9 +59,7 @@ export default function AboutPage() {
         <div className="text-center space-y-4 py-6">
           <div className="flex justify-center">
             <div className="relative">
-              <div className="w-20 h-20 rounded-2xl bg-primary flex items-center justify-center shadow-lg">
-                <Hammer className="h-10 w-10 text-primary-foreground" />
-              </div>
+              <JoapLogo size={80} className="rounded-2xl shadow-lg" />
               <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-green-500 border-2 border-background flex items-center justify-center">
                 <Star className="h-3 w-3 text-white fill-white" />
               </div>

@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Hammer, Loader2, AlertTriangle, ArrowRight } from "lucide-react";
+import { Loader2, AlertTriangle, ArrowRight } from "lucide-react";
+import { JoapLogo } from "@/components/joap-logo";
 import { loginSchema, type LoginInput } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -93,16 +94,7 @@ export default function LoginPage() {
 
         {/* Brand */}
         <div className="relative flex items-center gap-3">
-          <div
-            className="w-11 h-11 rounded-lg grid place-items-center shadow-md"
-            style={{
-              background:
-                "linear-gradient(135deg, hsl(38 92% 60%) 0%, hsl(38 92% 45%) 100%)",
-              color: "hsl(28 50% 12%)",
-            }}
-          >
-            <Hammer className="h-5 w-5" />
-          </div>
+          <JoapLogo size={44} className="rounded-lg shadow-md" />
           <div>
             <div className="text-[15px] font-bold tracking-tight">JOAP Hardware</div>
             <div className="text-[12px] text-slate-400">Trading · Tarlac</div>
@@ -149,9 +141,7 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           {/* Mobile brand */}
           <div className="md:hidden flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-lg grid place-items-center bg-primary text-primary-foreground">
-              <Hammer className="h-5 w-5" />
-            </div>
+            <JoapLogo size={40} className="rounded-lg" />
             <div>
               <div className="text-[14px] font-bold tracking-tight">JOAP Hardware</div>
               <div className="text-[11px] text-muted-foreground">Trading · Tarlac</div>
