@@ -86,8 +86,18 @@ function loadGoogleFont(fontName: string) {
 export function applySettings(settings: ISettings) {
   const root = document.documentElement;
 
-  // Dark / light mode
-  if (settings.theme === "dark") {
+  // Dark / light mode — tweaks panel takes priority over DB setting
+  let isDark = settings.theme === "dark";
+  try {
+    const tweaksRaw = localStorage.getItem("joap-tweaks-v1");
+    if (tweaksRaw) {
+      const tweaks = JSON.parse(tweaksRaw);
+      if (typeof tweaks.dark === "boolean") {
+        isDark = tweaks.dark;
+      }
+    }
+  } catch {}
+  if (isDark) {
     root.classList.add("dark");
   } else {
     root.classList.remove("dark");

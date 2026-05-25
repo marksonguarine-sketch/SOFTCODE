@@ -31,9 +31,13 @@ export async function speakTTS(text: string): Promise<void> {
       await ctx.resume();
     }
 
+    const token = localStorage.getItem("token");
     const res = await fetch("/api/tts", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       credentials: "include",
       body: JSON.stringify({ text }),
     });
