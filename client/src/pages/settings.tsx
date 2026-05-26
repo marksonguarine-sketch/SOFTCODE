@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Settings, Loader2, Save, Type, Palette, Layers, Store, Volume2,
-  Calculator, Lock, Sliders, Moon, Sun, AlignJustify,
+  Calculator, Lock, Sliders, AlignJustify,
 } from "lucide-react";
 import { settingsSchema, type SettingsInput, type ISettings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -548,6 +548,7 @@ export default function SettingsPage() {
       </Form>
 
       {/* ── APPEARANCE TWEAKS (device-local, no server save) ────── */}
+      <div className="max-w-2xl">
       <Card data-testid="card-appearance-tweaks">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -631,6 +632,7 @@ export default function SettingsPage() {
           </button>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

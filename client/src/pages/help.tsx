@@ -217,10 +217,10 @@ const MODULES = [
     name: "Floating Calculator",
     color: "text-amber-600",
     bg: "bg-amber-500/10",
-    summary: "A Casio-style floating calculator available on every page, with memory keys.",
+    summary: "A Casio-style floating calculator fixed at the bottom-right of every page, with memory keys.",
     tips: [
-      "Toggle the calculator on or off in Settings — preference saved per account.",
-      "Drag the calculator bubble anywhere on screen for convenience.",
+      "Toggle the calculator on or off in Settings — preference saved per user account.",
+      "The calculator is fixed at the bottom-right corner and always stays in place.",
       "Memory keys: MC (clear), MR (recall), M+ (add to memory), M- (subtract from memory).",
       "Full keyboard support: type numbers and operators directly when the calc is open.",
     ],
@@ -325,7 +325,7 @@ const faqs = [
   },
   {
     question: "How do I change the interface appearance?",
-    answer: "Go to Settings → Appearance Tweaks at the bottom. Toggle dark mode, change the density (Compact / Balanced / Comfortable), and pick an accent color. Changes apply instantly and are saved to your device.",
+    answer: "Go to Settings → Appearance Tweaks at the bottom. Change the density (Compact / Balanced / Comfortable), and pick an accent color. Changes apply instantly and are saved only to your device — other users are not affected.",
   },
   {
     question: "How do I handle refunds?",
@@ -394,6 +394,98 @@ const faqs = [
   {
     question: "How do I search the system logs?",
     answer: "On the System Logs page, use the search box to filter by keyword (e.g. username, action type, or item name). You can also filter by date range and action category to narrow down the audit trail.",
+  },
+  {
+    question: "How do I process a GCash payment?",
+    answer: "On the order detail page, select 'GCash' as the payment method. A reference number field will appear — enter the 13-digit GCash reference number from the customer's transaction screenshot. Enter the amount paid and submit. The payment is recorded with the reference number for reconciliation.",
+  },
+  {
+    question: "How do I cancel an order?",
+    answer: "Only admin users can cancel orders. Open the order detail page and click the 'Cancel Order' button. You will be prompted for a cancellation reason. Cancelled orders are logged and removed from the active queue, but their history remains visible in the Orders page under the 'Cancelled' filter.",
+  },
+  {
+    question: "What does 'Dead Stock' mean?",
+    answer: "Dead Stock refers to items that have had zero sales movement in an extended period (typically 90+ days). These items tie up capital without generating revenue. The Dashboard KPI strip shows the dead stock count so you can take action — consider running a promotion or returning them to the supplier.",
+  },
+  {
+    question: "How does the reorder threshold work?",
+    answer: "The reorder threshold is set per item in the Inventory page. When an item's current quantity falls at or below its threshold, it is flagged as 'Critical' and appears in the red alert strip on the Dashboard and the Inventory KPI. The Forecasting page also highlights these items with a red urgency color.",
+  },
+  {
+    question: "How do I use TTS voice insights on the dashboard?",
+    answer: "Double-click any KPI card on the Dashboard (such as Revenue Today or Orders Today) to trigger an AI voice insight. The system will speak an analysis of that metric using the built-in TTS engine. You can enable or disable TTS narration from the Settings page.",
+  },
+  {
+    question: "How do I view per-employee revenue?",
+    answer: "Go to the Employees page and click on any employee card. Their profile modal shows KPI charts with total revenue generated, orders created, and average order value for their account. You can export this as a PDF for performance review or payroll documentation.",
+  },
+  {
+    question: "Why does the Forecasting chart show no data?",
+    answer: "The ARIMA forecasting model requires at least a few days of historical order data to generate predictions. If you have fewer than 5 data points in the selected lookback period, the chart may show empty or flat lines. Create some orders and wait for data to accumulate for accurate forecasts.",
+  },
+  {
+    question: "How do I add a new account type to Accounting?",
+    answer: "On the Accounting page, click the 'Add Account' button at the top of the Chart of Accounts panel. Enter the account name, type (Asset, Liability, Equity, Revenue, or Expense), and account code. New accounts can then be selected when posting manual journal entries.",
+  },
+  {
+    question: "How do I print an order receipt?",
+    answer: "Open the order detail page and look for the print or receipt button. This generates a formatted receipt with the order tracking number, items, amounts, payment details, and store contact information. The receipt can be printed directly or saved as a PDF.",
+  },
+  {
+    question: "What is the Order Pool?",
+    answer: "The Order Pool is the tab in Orders that shows all unassigned orders — orders that were created but not yet assigned to any employee. Admin users can view the Pool and click 'Assign to…' to delegate each order to a staff member. Once assigned, the order disappears from the Pool and appears on the employee's order list.",
+  },
+  {
+    question: "How do I transfer an order to another employee?",
+    answer: "As an employee, go to the Requests page and submit a Transfer Order request. Select the order tracking number and the target employee username. Your admin will see the request, review it, and either accept (which moves the order) or decline it. The process is audited and both employees are notified.",
+  },
+  {
+    question: "How do I create a reservation?",
+    answer: "Go to the Reservations page and click 'New Reservation'. Fill in the customer name, phone number, scheduled date and time, sales channel, and add items. You can set a fulfillment status and assign it to an employee. The reservation auto-links to an order when fulfilled so payment can be processed.",
+  },
+  {
+    question: "How does stock deduction work?",
+    answer: "Stock is NOT deducted when an order is created or paid. Stock is only deducted when you click 'Release Items' on an order in 'Pending Release' status. This ensures physical items match the system count — you only deduct stock when items physically leave the store.",
+  },
+  {
+    question: "How do I set up offers or discounts?",
+    answer: "Go to the Offers & Promotions page and click 'Create Offer'. Choose the offer type (percentage discount, fixed amount, or BOGO), set the discount value, select eligible items, and set start and end dates. Enable the offer with the Active toggle. If 'Auto-Apply Offers' is on in Settings, it will automatically apply to matching new orders.",
+  },
+  {
+    question: "What is the difference between admin and employee roles?",
+    answer: "Admins have full access to all modules including Users, System Logs, Maintenance, Requests, Accounting, Forecasting, and all Settings. Employees can access Orders (their own), Inventory, Billing, Reservations, Requests (to submit), Profile, and Help. Employees cannot see other users' data or perform admin actions.",
+  },
+  {
+    question: "How do I update my profile photo?",
+    answer: "Go to your Profile page and click the camera icon on your avatar. Select an image file from your device. The photo is saved and displayed in your employee card in the directory, visible to the admin and in the Employees page.",
+  },
+  {
+    question: "How do I know if an order is overdue for payment?",
+    answer: "The Dashboard shows an 'Overdue Payments' banner when there are orders that have been in 'Pending Payment' status for more than 24 hours. Click the banner to go directly to the Pending Payment page. The sidebar badge also shows a live count of all unpaid orders.",
+  },
+  {
+    question: "Can I restore a deleted item?",
+    answer: "Deleted inventory items cannot be automatically restored, but if you have a system backup, you can restore the full database from the Maintenance page. Alternatively, you can create a new item with the same details. All deletion events are recorded in System Logs for reference.",
+  },
+  {
+    question: "How do I schedule an automatic backup?",
+    answer: "On the Maintenance page (admin only), look for the 'Schedule Backup' section. Set the time you want the backup to run daily and enable the schedule. The system will automatically export a full data backup at that time every day.",
+  },
+  {
+    question: "How do I filter the Activity Feed on the Dashboard?",
+    answer: "The Activity Feed on the Dashboard automatically shows the most recent store events. Scroll down to see older entries. The feed updates in real time as new orders, payments, and inventory events happen. There is no manual filter — all recent events are shown in chronological order.",
+  },
+  {
+    question: "What happens if I accidentally mark an order as Released?",
+    answer: "Releasing an order deducts stock and marks it Completed — this is a final step. Contact your admin to cancel the order if it was a mistake and then create a new order. The admin can also post a manual inventory adjustment to correct the stock count, and log a journal entry to correct the accounting.",
+  },
+  {
+    question: "How do I see which items are low in stock right now?",
+    answer: "The Dashboard KPI strip shows a 'Low Stock' count with a red badge. Click it to jump to the Inventory page filtered to show only Critical items. You can also check the Forecasting page's per-item table — items with 'CRITICAL' urgency need to be reordered immediately.",
+  },
+  {
+    question: "How is revenue calculated in the Accounting module?",
+    answer: "Revenue is posted to the Sales Revenue account automatically when an order payment is logged. Cash is posted to the Cash (or GCash) asset account. The General Ledger tab shows all entries. The Summary tab shows the net balance per account. Totals update in real time as payments are processed.",
   },
 ];
 

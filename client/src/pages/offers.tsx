@@ -445,7 +445,7 @@ export default function OffersPage() {
   }).length;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden" data-testid="page-offers">
       <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>

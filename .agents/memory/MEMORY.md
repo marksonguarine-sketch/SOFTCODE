@@ -1,0 +1,3 @@
+- [Tutorial system](tutorial-system.md) — spotlight + animated cursor + word-by-word narration; component at `client/src/components/tutorial.tsx`, mounted in App.tsx lines 192-195.
+- [Forecasting PDF chart capture](forecasting-pdf.md) — uses html2canvas (installed); chartRef on first CardContent of aggregate tab; exportForecastPDF signature now accepts `chartEl: HTMLElement | null`.
+- [Settings tweaks layout](settings-tweaks.md) — Appearance Tweaks card must stay in `max-w-2xl` wrapper to match form width; no dark mode toggle rendered (only density + accent hue).

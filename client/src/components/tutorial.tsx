@@ -2,943 +2,596 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
-import { X, SkipForward, Volume2, VolumeX, ChevronRight } from "lucide-react";
-
-// ╔══════════════════════════════════════════════════════════════════════════════╗
-// ║  TUTORIAL OVERHAUL GUIDE — READ task.txt FOR FULL INSTRUCTIONS             ║
-// ║                                                                            ║
-// ║  CURRENT STATE: Tutorial uses Gemini TTS API calls (POST /api/voice-insight)║
-// ║  GOAL: Replace with local MP3 files from /tutorial_mp3/tut1.mp3 to tut17.mp3║
-// ║                                                                            ║
-// ║  MP3 FILES: Served via GET /api/tutorial-audio/:filename                   ║
-// ║  (route needs to be added in server/routes.ts — see comments there)         ║
-// ║                                                                            ║
-// ║  PHASE 2 — "ALIVE CURSOR" SYSTEM:                                         ║
-// ║  Each step needs a "choreography" array of timed actions that sync with    ║
-// ║  the MP3 narration. The cursor should move, click, hover, type, switch     ║
-// ║  tabs, etc. based on keyword timestamps in each MP3.                       ║
-// ║                                                                            ║
-// ║  See the `actions` field in each step below for choreography instructions. ║
-// ║  See task.txt for the full specification.                                  ║
-// ╚══════════════════════════════════════════════════════════════════════════════╝
+import { X, ChevronLeft, ChevronRight, SkipForward, Volume2, VolumeX } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface TutorialStep {
   path: string;
   target: string;
   title: string;
   narration: string;
-  // FUTURE: Add these fields for the alive cursor system:
-  // mp3File: string;        — e.g. "tut1.mp3"
-  // actions: CursorAction[] — timed choreography array, see task.txt
+  highlightPadding?: number;
 }
 
+// ─── ADMIN STEPS ──────────────────────────────────────────────────────────────
 const ADMIN_STEPS: TutorialStep[] = [
-  // ── TUT1: tut1.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Start: full-screen highlight on dashboard
-  // 2. On "sidebar toggle" → move cursor to sidebar toggle, click it (expand sidebar)
-  // 3. On "expand or collapse" → click it again (collapse sidebar)
-  // 4. End: small-circle focus on sidebar toggle
   {
     path: "/",
     target: "[data-testid='button-sidebar-toggle']",
     title: "Welcome to JOAP Hardware Trading",
-    narration: "Welcome to JOAP Hardware Trading management system! I'll guide you through all the features. This is the sidebar toggle. You can click it to expand or collapse the navigation menu on the left side.",
+    narration: "Welcome to JOAP Hardware Trading management system! I will guide you through every feature. This is the sidebar toggle button. Click it to expand or collapse the navigation menu on the left side. The sidebar gives you access to every module in the system.",
   },
-  // ── TUT2: Breadcrumbs + live clock ─────────────────────────────────
-  // The global search was removed in favor of contextual per-page search.
-  // Now the header shows breadcrumbs and a live PHT clock.
   {
     path: "/",
     target: "[data-testid='breadcrumbs']",
     title: "Header & Navigation",
-    narration: "The header shows your current location as a breadcrumb trail — JOAP, then the section you're in. To the right you'll see a live Philippine Time clock that ticks every second. Each page has its own search bar built in, so you can always find what you need contextually.",
+    narration: "The header always shows your current location as a breadcrumb trail. To the right you will see a live Philippine Time clock that updates every second. Your username is displayed so you always know which account is active. Use the logout button on the far right to sign out safely.",
   },
-  // ── TUT3: tut3.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Full-screen highlight on dashboard area
-  // 2. On "earnings" → move cursor to earnings card, hover highlight
-  // 3. On "orders" → move cursor to orders card
-  // 4. On "customers" → move cursor to customers card
-  // 5. On "pending" → move cursor to pending balance card
-  // 6. On "filter" → click a period dropdown on earnings card, select "weekly"
-  // 7. End: small-circle focus on earnings card
   {
     path: "/",
     target: "[data-testid='card-earnings']",
-    title: "Dashboard Overview",
-    narration: "This is your dashboard. It shows summary cards with total earnings, orders, customers, and pending balance. Each card has a trend badge showing percentage change compared to the previous period. You can filter each card by daily, weekly, monthly, or yearly.",
+    title: "Dashboard — KPI Cards",
+    narration: "This is your dashboard. At the top you see four key performance indicator cards showing Revenue Today, Orders Today, Gross Margin, and Low-stock Items. Each card has a sparkline trend chart and a percentage badge showing change versus the prior period. The data updates automatically every 30 seconds.",
   },
-  // ── TUT4: tut4.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Full-screen highlight on revenue chart section
-  // 2. On "revenue" → move cursor over the chart bars slowly
-  // 3. On "double-click" → double-click on a chart bar (trigger voice insight)
-  // 4. Wait briefly to show the voice insight bubble appearing
-  // 5. Close the voice insight bubble
-  // 6. End: small-circle focus on revenue section
   {
     path: "/",
     target: "[data-testid='section-revenue']",
-    title: "Revenue Chart & Voice Insight",
-    narration: "This is the revenue chart showing your revenue and order trends. You can double-click on any chart or summary card to get AI-powered voice insights about that data point. Try it after the tutorial!",
+    title: "Revenue Trend Chart",
+    narration: "This is the revenue trend chart. It shows your daily revenue and order volume over the selected period. Use the period buttons — 7 days, 14 days, 30 days, or 90 days — to zoom in or out. Hover over any data point to see the exact revenue and order count for that day.",
   },
-  // ── TUT5: tut5.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Scroll down to map section, full-screen highlight
-  // 2. On "colored dots" → move cursor to a city dot on the map
-  // 3. On "Click a dot" → click the dot (show info panel with order count + revenue)
-  // 4. On "double-click" → double-click the dot (trigger Gemini AI query)
-  // 5. Show AI response appearing, then close it
-  // 6. On "activity" → type "how many sales did we have based on this?" in the Gemini input
-  // 7. End: small-circle focus on map card
   {
     path: "/",
-    target: "[data-testid='card-customer-map']",
-    title: "Customer Distribution Map",
-    narration: "This is the customer distribution map. It shows where your orders are coming from across the Philippines. Colored dots represent cities with orders. Click a dot to see details, or double-click to ask the AI assistant about that city's activity.",
+    target: "[data-testid='page-dashboard']",
+    title: "Daily Sales Goal Ring",
+    narration: "The daily sales goal ring shows how close you are to your revenue target for today. The ring fills up as revenue comes in. The target is set by the admin in the Settings page. When you hit the goal, the ring turns green. Below the ring you see the achieved amount, target, and remaining gap.",
   },
-  // ── TUT6: tut6.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Inventory" nav link
-  // 2. Full-screen highlight on inventory page
-  // 3. On "Add Item" → move cursor to Add Item button, hover it
-  // 4. On "click" → click Add Item button (open dialog)
-  // 5. Show the dialog briefly, then close it
-  // 6. End: small-circle focus on Add Item button
+  {
+    path: "/",
+    target: "[data-testid='page-dashboard']",
+    title: "Activity Feed & Payment Mix",
+    narration: "Below the charts you see the Activity Feed showing the most recent orders in real time with a green Live badge. Next to it is the Payment Mix donut chart showing the split between Cash, GCash, COD, and Bank payments this week. Click any order in the activity feed to open its full detail page.",
+  },
+  {
+    path: "/",
+    target: "[data-testid='button-export-dashboard']",
+    title: "Export Dashboard PDF",
+    narration: "This Export PDF button generates a complete dashboard summary report as a PDF file. It includes all KPI values, revenue by day, top items, and a timestamp. Click it now to download a copy. This is useful for daily morning stand-ups or management briefings.",
+  },
   {
     path: "/inventory",
     target: "[data-testid='button-add-item']",
-    title: "Inventory Management",
-    narration: "This is the Inventory page. Here you can manage all your products. Click the Add Item button to add a new product with its name, category, price, quantity, and an optional image. As an admin, you can upload images directly.",
+    title: "Inventory — Adding Items",
+    narration: "This is the Inventory page. All your products are listed here with SKU, price, quantity, and stock health. Click the Add Item button to create a new product. You will enter the item name, category, supplier, unit price, current quantity, and reorder level. Admin users can upload product images directly.",
   },
-  // ── TUT7: tut7.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Move cursor to search bar, click it
-  // 2. On "search" → type "ply" letter by letter
-  // 3. On "filter by category" → click category dropdown, hover over options
-  // 4. On "grid view" → click grid/list toggle button
-  // 5. On "list view" → click toggle again
-  // 6. On "actions menu" → move to an item's actions button, click it, show dropdown
-  // 7. End: small-circle focus on search bar
   {
     path: "/inventory",
-    target: "[data-testid='input-search-items']",
+    target: "[data-testid='input-inventory-search']",
     title: "Search & Filter Inventory",
-    narration: "You can search for items by name using this search bar. You can also filter by category and switch between grid view and list view. To adjust prices or deduct stock, click the actions menu on any item.",
-  },
-  // ── TUT8: tut8.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Orders" nav link
-  // 2. Full-screen highlight on orders page
-  // 3. On "Create Order" → move cursor to Create Order button, click it (open dialog)
-  // 4. On "customer name" → type "Juan" in customer name field
-  // 5. On "sales channel" → click channel dropdown, hover options
-  // 6. On "delivery address" → check delivery address checkbox
-  // 7. Close dialog
-  // 8. End: small-circle focus on Create Order button
-  {
-    path: "/orders",
-    target: "[data-testid='button-create-order']",
-    title: "Order Management",
-    narration: "This is the Orders page. Click Create Order to place a new order. You'll need to enter the customer name, select items and quantities, choose a sales channel, and optionally add a delivery address. The total amount calculates automatically.",
-  },
-  // ── TUT9: tut9.mp3 ─────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Move cursor across the status tabs one by one
-  // 2. On "Pending Payment" → click Pending Payment tab
-  // 3. On "Paid" → click Paid tab
-  // 4. On "Released" → click Released tab
-  // 5. On "All" → click All tab back
-  // 6. On "click on any order" → click first order row (navigate to detail)
-  // 7. Wait briefly, then navigate back to orders
-  // 8. End: small-circle focus on All tab
-  {
-    path: "/orders",
-    target: "[data-testid='tab-all']",
-    title: "Order Tabs",
-    narration: "Orders are organized by status tabs. You can view All orders, Pending Payment, Paid, Pending Release, Released, or Cancelled orders. Click on any order to see its full details, log payments, and update its status.",
-  },
-  // ── TUT10: tut10.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Billing" nav link
-  // 2. Full-screen highlight on billing page
-  // 3. On "search button" → move cursor to search toggle, click it (expand search panel)
-  // 4. On "date range" → click Date tab in search
-  // 5. On "GCash" → click GCash tab
-  // 6. On "reference" → click Reference tab
-  // 7. On "click on any payment" → hover over a payment row
-  // 8. Close search panel
-  // 9. End: small-circle focus on search toggle
-  {
-    path: "/billing",
-    target: "[data-testid='button-toggle-search']",
-    title: "Billing & Payments",
-    narration: "The Billing page shows all payment records. Click the search button to search by date range, order ID, GCash number, or reference number. Click on any payment to see the full order details.",
-  },
-  // ── TUT11: tut11.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Accounting" nav link
-  // 2. Full-screen highlight on accounting page
-  // 3. On "Chart of Accounts" → highlight chart of accounts section
-  // 4. On "General Ledger" → click General Ledger tab/section
-  // 5. On "add new" → move cursor to Add Entry button, hover it
-  // 6. End: small-circle focus on Add Entry button
-  {
-    path: "/accounting",
-    target: "[data-testid='button-add-entry']",
-    title: "Accounting",
-    narration: "The Accounting page has the Chart of Accounts and General Ledger. You can add new ledger entries with debit and credit amounts. The system tracks all financial transactions automatically when orders are paid.",
-  },
-  // ── TUT12: tut12.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Reports" nav link
-  // 2. Full-screen highlight on reports page
-  // 3. On "sales" → click Sales tab
-  // 4. On "inventory" → click Inventory tab
-  // 5. On "financial" → click Financial tab
-  // 6. On "export" → move cursor to export/download button, hover it
-  // 7. End: small-circle focus on Sales tab
-  {
-    path: "/reports",
-    target: "[data-testid='tab-sales']",
-    title: "Reports",
-    narration: "The Reports page lets you generate sales reports, inventory reports, and financial summaries. You can filter by date range and export reports for your records.",
-  },
-  // ── TUT13: tut13.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Users" nav link
-  // 2. Full-screen highlight on users page
-  // 3. On "Create" → move cursor to Create User button, click it (open dialog)
-  // 4. Show dialog briefly, close it
-  // 5. On "green dot" → move cursor to a user's online status dot
-  // 6. On "roles" → hover over a user's role badge
-  // 7. End: small-circle focus on Create User button
-  {
-    path: "/users",
-    target: "[data-testid='button-create-user']",
-    title: "User Management (Admin Only)",
-    narration: "As an admin, you can manage users here. Create new accounts, change roles between Admin and Employee, reset passwords, and deactivate accounts. The green dot shows who is currently online. Note: you cannot deactivate the last admin account.",
-  },
-  // ── TUT14: tut14.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Settings" nav link
-  // 2. Full-screen highlight on settings page
-  // 3. On "fonts" → click font dropdown, hover over font options
-  // 4. On "color themes" → move to color theme selector, pick a random color
-  // 5. On "gradient" → move to gradient selector, pick a random gradient, click apply
-  // 6. IMPORTANT: Show the preview (theme changes visually) BUT revert all
-  //    settings changes when tutorial ends — save original settings at start,
-  //    restore them in onComplete callback
-  // 7. End: small-circle focus on theme selector
-  {
-    path: "/settings",
-    target: "[data-testid='select-theme']",
-    title: "System Settings",
-    narration: "In Settings, you can customize the system appearance. Choose from different fonts, color themes, and gradient options for the sidebar. Changes apply instantly across the entire system.",
-  },
-  // ── TUT15: tut15.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Maintenance" nav link
-  // 2. Full-screen highlight on maintenance page
-  // 3. On "export" → move cursor to Export Backup button, hover it
-  // 4. On "upload" → move cursor to Upload area
-  // 5. On "automatic" → move cursor to auto-backup toggle
-  // 6. End: small-circle focus on Export Backup button
-  // TRANSITION TO TUT16: cursor moves to sidebar, hovers "System Logs",
-  //   then clicks it — page navigates while still in focus
-  {
-    path: "/maintenance",
-    target: "[data-testid='button-export-backup']",
-    title: "Maintenance & Backup",
-    narration: "The Maintenance page lets you export backups, upload and restore from previous backups, and set up automatic scheduled backups. As an admin, you have full control over system maintenance.",
-  },
-  // ── TUT16: tut16.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Full-screen highlight on system logs page
-  // 2. On "search" → move cursor to search box, click it, type "login" letter by letter
-  // 3. On "filter" → move to filter area/controls
-  // 4. On "who did what" → hover over a log entry row
-  // 5. On "Click any log" → click a log entry (open detail dialog)
-  // 6. Show detail dialog briefly, close it
-  // 7. Clear search text
-  // 8. End: small-circle focus on search box
-  {
-    path: "/system-logs",
-    target: "[data-testid='input-search-logs']",
-    title: "System Logs",
-    narration: "System Logs show every action taken in the system with timestamps and descriptions. You can search and filter logs to track who did what and when. Click any log entry for full details.",
-  },
-  // ── TUT17: tut17.mp3 ────────────────────────────────────────────────
-  // ALIVE CURSOR CHOREOGRAPHY:
-  // 1. Cursor moves to sidebar, clicks "Help" nav link
-  // 2. Full-screen highlight on help page
-  // 3. On "frequently asked" → scroll through FAQ list, expand one FAQ
-  // 4. On "send feedback" → move cursor to message/feedback section
-  // 5. On "That completes" → full-screen celebration highlight
-  // 6. End: show completion message/animation
-  {
-    path: "/help",
-    target: "[data-testid='text-help-title']",
-    title: "Help & Support",
-    narration: "The Help page is where you'll find FAQs and where employees send you messages.",
-  },
-  // ── NEW: Pending Payment ─────────────────────────────────────────
-  {
-    path: "/pending-payment",
-    target: "[data-testid='text-pending-payment-title']",
-    title: "Pending Payment Dashboard",
-    narration: "This dedicated page lists every order that's waiting on payment. Each row shows the tracking number, customer, type, payment method, amount due, and the date. Click any row to jump straight to the order detail and log the payment.",
-  },
-  // ── NEW: Requests ────────────────────────────────────────────────
-  {
-    path: "/requests",
-    target: "[data-testid='text-requests-title']",
-    title: "Employee Requests",
-    narration: "Employees can request new inventory items, transfer one of their orders to another employee, or file a leave request. They all land here for your approval. Click any pending request to see the full payload, the history, and the Accept or Decline buttons.",
-  },
-  // ── NEW: Reservations ────────────────────────────────────────────
-  {
-    path: "/reservations",
-    target: "[data-testid='text-reservations-title']",
-    title: "Reservations",
-    narration: "The Reservations page lets you book scheduled pickup or delivery orders. Each reservation shows the customer, scheduled date, status, and assigned employee. You can confirm, complete, or cancel reservations as they progress.",
-  },
-  // ── NEW: Employees ───────────────────────────────────────────────
-  {
-    path: "/employees",
-    target: "[data-testid='text-employees-title']",
-    title: "Employee Directory",
-    narration: "This is your team. Each card shows a photo, employee ID, online status, and contact info. Click an employee to open their profile modal with KPIs, productivity charts, recent orders and reservations, an activity timeline, and an Export PDF button.",
-  },
-  // ── NEW: Forecasting ─────────────────────────────────────────────
-  {
-    path: "/forecasting",
-    target: "[data-testid='button-export-forecast']",
-    title: "Demand Forecasting",
-    narration: "The Forecasting page uses an ARIMA model to predict future order volume and revenue over 7, 14, or 30 days. The shaded band shows the confidence interval. Per-item colors show urgency: red means reorder now, amber means reorder soon. Export the full report as a PDF for your supplier meetings.",
-  },
-  // ── NEW: Settings — Daily Sales Goal ─────────────────────────────
-  {
-    path: "/settings",
-    target: "[data-testid='input-daily-sales-goal']",
-    title: "Daily Sales Goal",
-    narration: "Set the daily revenue target here. Every dashboard — yours and every employee's — reads this value and shows it as a progress ring. Only admins can change it.",
-  },
-  // ── NEW: Floating Calculator ─────────────────────────────────────
-  {
-    path: "/",
-    target: "[data-testid='calc-bubble']",
-    title: "Floating Calculator",
-    narration: "A Casio-style calculator floats in the bottom-right of every page. Click the bubble to expand it. Drag it anywhere. It has memory keys MC, MR, M-plus, and M-minus. Each user can toggle it on or off in Settings — your preference persists across logins.",
-  },
-  // ── NEW: Appearance Tweaks (now in Settings) ─────────────────────
-  {
-    path: "/settings",
-    target: "[data-testid='card-appearance-tweaks']",
-    title: "Appearance Tweaks",
-    narration: "Inside Settings, the Appearance Tweaks card lets you change the accent color, font, and interface density on the fly. Your preferences are saved in this browser per device. That completes the admin tutorial — you're ready to run the store!",
-  },
-];
-
-const EMPLOYEE_STEPS: TutorialStep[] = [
-  {
-    path: "/",
-    target: "[data-testid='button-sidebar-toggle']",
-    title: "Welcome to JOAP Hardware Trading",
-    narration: "Welcome to JOAP Hardware Trading! I'll show you how to use the system as an employee. This is the sidebar toggle for navigation.",
-  },
-  {
-    path: "/",
-    target: "[data-testid='breadcrumbs']",
-    title: "Header & Navigation",
-    narration: "The header shows breadcrumbs of where you are. Next to your name on the right is a live Philippine Time clock. Each page has its own search bar — no global search needed.",
-  },
-  {
-    path: "/",
-    target: "[data-testid='card-earnings']",
-    title: "Dashboard",
-    narration: "Your dashboard shows key business metrics: earnings, orders, customers, and pending balances. Each card can be filtered by time period.",
-  },
-  {
-    path: "/",
-    target: "[data-testid='section-revenue']",
-    title: "Charts & Voice Insight",
-    narration: "You can double-click on any chart or card to get AI-powered voice insights about that data. A voice bubble will appear with the AI analysis.",
-  },
-  {
-    path: "/inventory",
-    target: "[data-testid='button-add-item']",
-    title: "Inventory Management",
-    narration: "Here you manage inventory. You can add items, update quantities, and adjust prices. Note: when you upload an image for an item, it needs admin approval before it appears.",
-  },
-  {
-    path: "/inventory",
-    target: "[data-testid='input-search-items']",
-    title: "Search Inventory",
-    narration: "Search for items by name, filter by category, and switch between grid and list views. Use the actions menu to deduct stock or adjust prices.",
+    narration: "Use this search bar to find items by name or SKU. Below the search bar are category pills — click any category to filter the list. On the right is a toggle to switch between Table view and Grid view. The KPI strip at the top shows Total Stocks, Stock Value, Low-stock items, and Dead Stock at a glance.",
   },
   {
     path: "/orders",
     target: "[data-testid='button-create-order']",
     title: "Creating Orders",
-    narration: "Create new orders here. Enter the customer name, add items with quantities, choose the sales channel, and optionally add a delivery address. The system calculates totals automatically.",
+    narration: "This is the Orders page — the heart of your daily operations. Click Create Order to start a new transaction. You will enter the customer name, add items with quantities, choose the sales channel such as walk-in or delivery, and optionally add a delivery address. The system calculates the total automatically and can auto-apply active discount offers.",
   },
   {
     path: "/orders",
     target: "[data-testid='tab-all']",
-    title: "Order Status",
-    narration: "View orders by status using these tabs. Click any order to see details, log payments, or update the order status as it progresses.",
+    title: "Order Status Tabs",
+    narration: "Orders are organized by status tabs at the top. You can view All orders, Pending Payment, Paid, Pending Release, Released, or Cancelled. The Pool tab shows unassigned orders that need to be assigned to an employee. Click any order row to open its full detail page where you can log payments and update status.",
+  },
+  {
+    path: "/orders",
+    target: "[data-testid='page-orders']",
+    title: "Assigning Orders to Staff",
+    narration: "In the Pool tab, each unassigned order has a professional Assign button. Click it to open a dropdown list of all staff members with their avatar initials. Select a staff member to assign the order — they will hear a voice announcement immediately and the order appears in their queue.",
   },
   {
     path: "/billing",
     target: "[data-testid='button-toggle-search']",
-    title: "Billing",
-    narration: "The Billing page shows all payments. Click the search button to search by date, order ID, GCash number, or reference number. Click any record to see the full order.",
+    title: "Billing & Payment Records",
+    narration: "The Billing page shows all payment records across the store. Click the search button to filter by date range, order tracking number, GCash reference number, or customer name. Each row shows the payment method, amount, and timestamp. Click any row to jump straight to the full order detail.",
+  },
+  {
+    path: "/pending-payment",
+    target: "[data-testid='text-pending-payment-title']",
+    title: "Pending Payment Dashboard",
+    narration: "This dedicated page lists every order that is waiting on payment. The table shows tracking number, customer name, order type, payment method, amount due, and date created. The sidebar badge shows the live count of unpaid orders. Click any row to open the order and log the payment immediately.",
   },
   {
     path: "/accounting",
     target: "[data-testid='button-add-entry']",
-    title: "Accounting",
-    narration: "View the Chart of Accounts and General Ledger here. These show all financial records and transactions in the system.",
+    title: "Accounting — General Ledger",
+    narration: "The Accounting page has two sections — the Chart of Accounts on the left and the General Ledger on the right. Every time an order is paid, the system automatically posts entries to Cash and Sales Revenue. You can also add manual journal entries for expenses, corrections, or other transactions using this Add Entry button.",
   },
   {
     path: "/reports",
     target: "[data-testid='tab-sales']",
-    title: "Reports",
-    narration: "Generate and export sales, inventory, and financial reports filtered by date range.",
+    title: "Reports — Sales Analytics",
+    narration: "The Reports page gives you deep analytics with date-range filters. The Sales tab shows total orders, revenue, completed versus cancelled orders, and a top customers table. The Inventory tab shows stock movements. The Financial tab shows payment method breakdown. You can export any report as a PDF or CSV spreadsheet.",
   },
   {
-    path: "/help",
-    target: "[data-testid='text-help-title']",
-    title: "Help & Messages",
-    narration: "Check the FAQs and send messages to your admin here. Any reply from admin shows in your inbox above the message form.",
-  },
-  // ── NEW EMPLOYEE STEPS ──────────────────────────────────────────
-  {
-    path: "/pending-payment",
-    target: "[data-testid='text-pending-payment-title']",
-    title: "Pending Payment",
-    narration: "This page lists every order that still owes money. Click a row to log the payment.",
+    path: "/forecasting",
+    target: "[data-testid='button-export-forecast']",
+    title: "Demand Forecasting",
+    narration: "The Forecasting page uses an ARIMA statistical model to predict future order volume and revenue. Choose a 7, 14, or 30-day horizon. The blue line shows actual historical data. The dashed orange line shows the forecast. The shaded band is the 95 percent confidence interval. Per-item urgency colors show Red for reorder now and Amber for reorder soon. Export the full report as a PDF for supplier meetings.",
   },
   {
     path: "/reservations",
     target: "[data-testid='text-reservations-title']",
     title: "Reservations",
-    narration: "The Reservations page shows all scheduled pickups and deliveries assigned to you. Check the date and status, then update each reservation as you complete it.",
+    narration: "The Reservations page lets you book scheduled pickup or delivery orders for a future date. Each reservation shows the customer name, scheduled date, assigned employee, and current status. You can confirm, complete, or cancel reservations as the pickup date approaches. Reservations automatically link to an order for payment processing.",
   },
   {
-    path: "/profile",
-    target: "[data-testid='text-profile-title']",
-    title: "My Profile",
-    narration: "Update your photo, email, and contact number here. You can also request leave — your admin will see it under Requests and approve or decline.",
+    path: "/requests",
+    target: "[data-testid='text-requests-title']",
+    title: "Employee Requests",
+    narration: "Employees can submit three types of requests — Add Item requests to add a new product to inventory, Transfer Order requests to hand off an order to another staff member, and Leave Requests. All pending requests appear here with a badge count. Click any pending request to see the full details and use the Accept or Decline buttons.",
   },
   {
-    path: "/",
-    target: "[data-testid='calc-bubble']",
-    title: "Floating Calculator",
-    narration: "A calculator floats at the bottom-right of every page. Click to expand. Toggle it off in Settings if you don't want it.",
+    path: "/employees",
+    target: "[data-testid='text-employees-title']",
+    title: "Employee Directory",
+    narration: "This is your team directory. Each card shows the employee photo, ID, account status indicator, email, and a link to their full profile. The green dot means the account is active. Gray means deactivated. Click any card to open a full modal with KPI charts, productivity metrics, recent orders, activity timeline, and an Export PDF button for payroll or performance reviews.",
+  },
+  {
+    path: "/users",
+    target: "[data-testid='button-create-user']",
+    title: "User Management",
+    narration: "As an admin, you manage all user accounts here. Click Create User to add a new staff member with a username, password, and role. You can change roles between Admin and Employee, reset passwords, and deactivate accounts to prevent login without deleting any history. Note that you cannot deactivate the last remaining admin account for safety.",
+  },
+  {
+    path: "/offers",
+    target: "[data-testid='page-offers']",
+    title: "Offers & Discounts",
+    narration: "The Offers page lets you create promotional discounts that automatically apply to new orders. You can set percentage discounts, fixed amount discounts, or buy-one-get-one offers. Each offer has a start and end date, a minimum order amount, and can be limited to specific items or categories. Active offers show a green status badge.",
+  },
+  {
+    path: "/settings",
+    target: "[data-testid='input-daily-sales-goal']",
+    title: "System Settings — Daily Goal",
+    narration: "In Settings, you can configure the entire system. The Daily Sales Goal here sets the revenue target shown on every dashboard as a progress ring — both yours and every employee's dashboard reads this value. Only admins can change it. Below you will also find company information, store address for receipts, font choices, and color themes.",
   },
   {
     path: "/settings",
     target: "[data-testid='card-appearance-tweaks']",
     title: "Appearance Tweaks",
-    narration: "In Settings, find the Appearance Tweaks card to change accent colors, adjust density, and pick your preferred font. Your choices are saved per device. Tutorial complete — happy selling!",
+    narration: "The Appearance Tweaks section at the bottom of Settings lets you personalize the interface. Choose a density — Compact, Balanced, or Comfortable — and pick an accent color. These preferences are saved in your browser per device so they only apply to you, not to other users. Changes apply instantly with no save needed.",
+  },
+  {
+    path: "/maintenance",
+    target: "[data-testid='button-export-backup']",
+    title: "Maintenance & Backup",
+    narration: "The Maintenance page lets you export a full system backup, upload and restore from a previous backup, and schedule automatic daily backups. Always create a backup before any major data change. The system health panel shows MongoDB connection status and server memory usage.",
+  },
+  {
+    path: "/system-logs",
+    target: "[data-testid='input-search-logs']",
+    title: "System Logs",
+    narration: "System Logs record every single action taken in the system with the actor username, action type, timestamp, and full details. Use this search bar to find specific events. Filter by user, date, or action type. Logs are immutable — they cannot be edited or deleted. This is your complete audit trail for accountability.",
+  },
+  {
+    path: "/help",
+    target: "[data-testid='text-help-title']",
+    title: "Help & Support",
+    narration: "The Help page has a comprehensive module guide, frequently asked questions, and keyboard shortcuts. Employees can also send messages directly to you from here. Unread messages show a badge count on the Help link in the sidebar. That completes the full admin tutorial — you are now ready to run the store like a professional!",
   },
 ];
 
-interface TutorialProps {
-  isAdmin: boolean;
-  onComplete: () => void;
+// ─── EMPLOYEE STEPS ───────────────────────────────────────────────────────────
+const EMPLOYEE_STEPS: TutorialStep[] = [
+  {
+    path: "/",
+    target: "[data-testid='button-sidebar-toggle']",
+    title: "Welcome — Employee Guide",
+    narration: "Welcome to JOAP Hardware Trading! I will show you everything you need to operate the system as an employee. This sidebar toggle opens and closes the navigation menu. Use the sidebar to jump between Inventory, Orders, Reservations, Billing, and Reports.",
+  },
+  {
+    path: "/",
+    target: "[data-testid='breadcrumbs']",
+    title: "Header & Your Identity",
+    narration: "The header always shows your breadcrumb location. Your username is displayed on the right so you always know which account is logged in. The live Philippine Time clock ticks every second. Use the logout button on the far right to sign out when your shift ends.",
+  },
+  {
+    path: "/",
+    target: "[data-testid='card-earnings']",
+    title: "Your Dashboard",
+    narration: "Your dashboard shows the store's key metrics. At the top are four cards showing Revenue Today, Orders Today, Gross Margin, and Low-stock Items. These numbers update in real time. The daily sales goal ring shows how close the store is to today's revenue target set by your admin.",
+  },
+  {
+    path: "/",
+    target: "[data-testid='page-dashboard']",
+    title: "Activity Feed",
+    narration: "Scroll down to see the Activity Feed showing the most recent orders across the store in real time. You can see which orders were just placed, which are pending payment, and which have been completed. Click any order in the feed to open it directly.",
+  },
+  {
+    path: "/inventory",
+    target: "[data-testid='input-inventory-search']",
+    title: "Searching Inventory",
+    narration: "The Inventory page shows all products. Use this search bar to find any item by name or SKU code. Click the category pills to filter by type. Switch between Table and Grid views using the toggle on the right. The KPI strip shows Total Stocks, Stock Value, and how many items are running low.",
+  },
+  {
+    path: "/inventory",
+    target: "[data-testid='button-add-item']",
+    title: "Adding Inventory Items",
+    narration: "Click Add Item to add a new product. Fill in the item name, category, supplier, price, and current quantity. When you upload an image, it goes to your admin for approval before it appears publicly. You can request to add items that are not yet in the system using the Requests module.",
+  },
+  {
+    path: "/orders",
+    target: "[data-testid='button-create-order']",
+    title: "Creating an Order",
+    narration: "The Orders page is where you will spend most of your time. Click Create Order to start. Enter the customer name, then add items by searching and selecting quantities. Choose the sales channel — walk-in, delivery, or pickup. If delivery, check the delivery address box and fill in the address. The total calculates automatically.",
+  },
+  {
+    path: "/orders",
+    target: "[data-testid='tab-all']",
+    title: "Managing Your Orders",
+    narration: "You can see all orders assigned to you in the All tab. Use the status tabs to filter — Pending Payment, Paid, Pending Release, Released, and Cancelled. Click any order row to open its detail page. From there you can start processing it, log the payment when the customer pays, and release the items when fulfilled.",
+  },
+  {
+    path: "/orders",
+    target: "[data-testid='page-orders']",
+    title: "Processing an Order",
+    narration: "When you open an order detail page, you will see the full order information. First click Start to claim the order. Then log the payment by selecting the payment method and entering the reference number if paying by GCash. After payment is confirmed, release the items to complete the order. Each step is logged with your name and a timestamp.",
+  },
+  {
+    path: "/billing",
+    target: "[data-testid='button-toggle-search']",
+    title: "Billing Records",
+    narration: "The Billing page shows payment records. You can search for a specific payment by date range, customer name, or GCash reference number. Click any payment row to open the linked order. This page helps you verify that payments were recorded correctly.",
+  },
+  {
+    path: "/pending-payment",
+    target: "[data-testid='text-pending-payment-title']",
+    title: "Pending Payments",
+    narration: "This page shows every order waiting for payment. The sidebar badge counts unpaid orders so you never miss one. When a customer comes to pay, find their order here, click it to open the detail, and log the payment. The system will post the entry to accounting automatically.",
+  },
+  {
+    path: "/reservations",
+    target: "[data-testid='text-reservations-title']",
+    title: "Reservations",
+    narration: "The Reservations page shows bookings for future orders. When a reservation is assigned to you, you will receive a voice announcement. On the scheduled date, open the reservation, confirm the customer has arrived, and process it like a regular order. You can also create new reservations for customers who want to schedule pickup.",
+  },
+  {
+    path: "/requests",
+    target: "[data-testid='text-requests-title']",
+    title: "Submitting Requests",
+    narration: "As an employee, you can submit three types of requests from this page. An Add Item request asks your admin to add a new product to inventory. A Transfer Order request lets you hand off one of your orders to another staff member. A Leave Request files a leave application for your admin to review. Your admin will be notified immediately.",
+  },
+  {
+    path: "/profile",
+    target: "[data-testid='text-profile-title']",
+    title: "Your Profile",
+    narration: "The My Profile page shows your personal information and account details. You can update your contact number and email address. Upload a professional photo by clicking the camera icon — it will be visible to the admin and in the employee directory. Your KPI stats show your order count and productivity metrics.",
+  },
+  {
+    path: "/settings",
+    target: "[data-testid='card-appearance-tweaks']",
+    title: "Personalizing Your View",
+    narration: "In Settings, scroll to the Appearance Tweaks section. You can change the interface density and accent color. These are saved per device and only affect your view — not other users. You can also toggle the floating calculator on or off. The calculator supports full keyboard input — type numbers directly when it is open.",
+  },
+  {
+    path: "/help",
+    target: "[data-testid='text-help-title']",
+    title: "Help & Sending Messages",
+    narration: "The Help page is always here when you need it. Browse the module guide, search the FAQs, and check the keyboard shortcuts. You can also send a direct message to your admin using the Message form at the bottom. Your admin will see a badge notification immediately. That completes the employee tutorial — you are ready to work!",
+  },
+];
+
+// ─── TYPES ─────────────────────────────────────────────────────────────────────
+interface SpotlightRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
 }
 
-type StepPhase = "loading" | "playing" | "ready";
-
-function CircularProgress({ progress }: { progress: number }) {
-  const radius = 16;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (progress / 100) * circumference;
-
+// ─── CURSOR SVG ─────────────────────────────────────────────────────────────────
+function CursorIcon({ className }: { className?: string }) {
   return (
-    <svg width="40" height="40" viewBox="0 0 40 40" className="shrink-0">
-      <circle
-        cx="20" cy="20" r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        className="text-muted-foreground/20"
+    <svg
+      width="28"
+      height="28"
+      viewBox="0 0 28 28"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.4))" }}
+    >
+      <path
+        d="M4 2L22 14L13.5 15.5L9 24L4 2Z"
+        fill="white"
+        stroke="hsl(var(--primary))"
+        strokeWidth="2"
+        strokeLinejoin="round"
       />
-      <circle
-        cx="20" cy="20" r={radius}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3"
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        className="text-primary transition-all duration-300"
-        transform="rotate(-90 20 20)"
-      />
-      <text
-        x="20" y="20"
-        textAnchor="middle"
-        dominantBaseline="central"
-        className="text-[8px] font-semibold fill-primary"
-      >
-        {Math.round(progress)}%
-      </text>
+      <circle cx="22" cy="22" r="4" fill="hsl(var(--primary))" opacity="0.85" />
     </svg>
   );
 }
 
-export function Tutorial({ isAdmin, onComplete }: TutorialProps) {
-  const [, navigate] = useLocation();
-  const [currentStep, setCurrentStep] = useState(0);
-  const [spotlightRect, setSpotlightRect] = useState<DOMRect | null>(null);
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
-  const [narrationText, setNarrationText] = useState("");
-  const [displayedWords, setDisplayedWords] = useState("");
-  const [phase, setPhase] = useState<StepPhase>("loading");
-  const [loadProgress, setLoadProgress] = useState(0);
-  const [isMuted, setIsMuted] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const wordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const loadTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isMountedRef = useRef(true);
-  const targetElRef = useRef<HTMLElement | null>(null);
-  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingHighlightRef = useRef<string | null>(null);
-
+// ─── MAIN COMPONENT ───────────────────────────────────────────────────────────
+export function Tutorial({
+  isAdmin,
+  onComplete,
+}: {
+  isAdmin: boolean;
+  onComplete: () => void;
+}) {
   const steps = isAdmin ? ADMIN_STEPS : EMPLOYEE_STEPS;
+  const [currentStep, setCurrentStep] = useState(0);
+  const [wordIndex, setWordIndex] = useState(-1);
+  const [cursorPos, setCursorPos] = useState({
+    x: typeof window !== "undefined" ? window.innerWidth / 2 : 400,
+    y: typeof window !== "undefined" ? window.innerHeight / 2 : 300,
+  });
+  const [spotlightRect, setSpotlightRect] = useState<SpotlightRect | null>(null);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [isNavigating, setIsNavigating] = useState(false);
+  const [, navigate] = useLocation();
+  const wordTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const targetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ttsAbortRef = useRef<AbortController | null>(null);
+
   const step = steps[currentStep];
+  const words = step.narration.split(" ");
+  const totalSteps = steps.length;
 
-  const cleanup = useCallback(() => {
-    if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; }
-    if (wordTimerRef.current) { clearInterval(wordTimerRef.current); wordTimerRef.current = null; }
-    if (loadTimerRef.current) { clearInterval(loadTimerRef.current); loadTimerRef.current = null; }
-    if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
-    pendingHighlightRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => { isMountedRef.current = false; cleanup(); };
-  }, [cleanup]);
-
-  const showHighlight = useCallback((selector: string, attempt = 0) => {
-    const el = document.querySelector(selector) as HTMLElement | null;
-    targetElRef.current = el;
+  // ── Find target and update spotlight + cursor ───────────────────────────────
+  const focusTarget = useCallback(() => {
+    const pad = step.highlightPadding ?? 12;
+    const el = document.querySelector(step.target);
     if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
       setTimeout(() => {
-        if (!isMountedRef.current) return;
-        if (pendingHighlightRef.current !== selector) return;
         const rect = el.getBoundingClientRect();
-        setSpotlightRect(rect);
-        // Start cursor from viewport center then animate smoothly to target
-        setCursorPos({ x: window.innerWidth / 2, y: window.innerHeight * 0.4 });
-        setTimeout(() => {
-          if (!isMountedRef.current) return;
-          setCursorPos({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
-        }, 120);
-      }, 500);
-    } else if (attempt < 8) {
-      retryTimerRef.current = setTimeout(() => {
-        if (isMountedRef.current && pendingHighlightRef.current === selector) {
-          showHighlight(selector, attempt + 1);
-        }
-      }, 400);
+        setSpotlightRect({
+          top: rect.top - pad,
+          left: rect.left - pad,
+          width: rect.width + pad * 2,
+          height: rect.height + pad * 2,
+        });
+        setCursorPos({
+          x: rect.left + rect.width * 0.7,
+          y: rect.top + rect.height * 0.6,
+        });
+      }, 300);
     } else {
       setSpotlightRect(null);
-      setCursorPos(null);
     }
-  }, []);
+  }, [step.target, step.highlightPadding]);
 
-  const advanceStep = useCallback(() => {
-    if (currentStep < steps.length - 1) {
-      setCurrentStep(prev => prev + 1);
-    } else {
-      onComplete();
-    }
-  }, [currentStep, steps.length, onComplete]);
-
-  const startLoadingAnimation = useCallback(() => {
-    setLoadProgress(0);
-    let prog = 0;
-    loadTimerRef.current = setInterval(() => {
-      prog += Math.random() * 8 + 2;
-      if (prog > 90) prog = 90;
-      if (!isMountedRef.current) return;
-      setLoadProgress(prog);
-    }, 200);
-  }, []);
-
-  const stopLoadingAnimation = useCallback(() => {
-    if (loadTimerRef.current) { clearInterval(loadTimerRef.current); loadTimerRef.current = null; }
-    setLoadProgress(100);
-  }, []);
-
-  // ╔══════════════════════════════════════════════════════════════════════════╗
-  // ║  playStep() — THIS IS THE MAIN FUNCTION TO OVERHAUL                    ║
-  // ║                                                                        ║
-  // ║  CURRENT: Calls POST /api/voice-insight (Gemini TTS API) each step     ║
-  // ║  REPLACE WITH: Load local MP3 from /api/tutorial-audio/tut{N}.mp3      ║
-  // ║    where N = currentStep + 1 (tut1.mp3 through tut17.mp3)              ║
-  // ║                                                                        ║
-  // ║  STEP 1: Remove the apiRequest("POST", "/api/voice-insight"...) call   ║
-  // ║  STEP 2: Instead, create Audio(`/api/tutorial-audio/tut${N}.mp3`)      ║
-  // ║  STEP 3: No loading animation needed — MP3 loads near-instantly        ║
-  // ║                                                                        ║
-  // ║  PHASE 2 — ALIVE CURSOR:                                               ║
-  // ║  After MP3 starts playing, execute the choreography actions array       ║
-  // ║  from the step definition. Each action has a triggerTime (seconds)      ║
-  // ║  relative to audio start. Use audio.currentTime + setTimeout to        ║
-  // ║  schedule cursor movements, clicks, typing, tab switches, etc.         ║
-  // ║  See task.txt for the full CursorAction interface spec.                ║
-  // ╚══════════════════════════════════════════════════════════════════════════╝
-  const playStep = useCallback(async () => {
-    if (!step || !isMountedRef.current) return;
-    cleanup();
-    setPhase("loading");
-    setNarrationText(step.narration);
-    setDisplayedWords("");
-    setSpotlightRect(null);
-    setCursorPos(null);
-    startLoadingAnimation();
+  // ── Navigate + focus on step change ────────────────────────────────────────
+  useEffect(() => {
+    setWordIndex(-1);
+    setIsNavigating(true);
+    if (wordTimerRef.current) clearInterval(wordTimerRef.current);
+    if (targetTimerRef.current) clearTimeout(targetTimerRef.current);
+    if (ttsAbortRef.current) ttsAbortRef.current.abort();
 
     navigate(step.path);
 
-    pendingHighlightRef.current = step.target;
+    targetTimerRef.current = setTimeout(() => {
+      focusTarget();
+      setIsNavigating(false);
 
-    const words = step.narration.split(" ");
-    let wordIndex = 0;
-
-    const revealHighlight = () => {
-      if (pendingHighlightRef.current === step.target) {
-        showHighlight(step.target);
-      }
-    };
-
-    // TODO: REPLACE THIS ENTIRE TRY BLOCK — remove Gemini TTS API call,
-    // use local MP3 instead:
-    //   const audio = new Audio(`/api/tutorial-audio/tut${currentStep + 1}.mp3`);
-    //   audioRef.current = audio;
-    //   await audio.play();
-    // Then schedule choreography actions based on audio.currentTime
-    try {
-      if (!isMuted) {
-        const res = await apiRequest("POST", "/api/voice-insight", {
-          question: `Narrate this tutorial step naturally: ${step.narration}`,
-          clickedPoint: { tutorialStep: currentStep + 1, title: step.title },
-        });
-        const data = await res.json();
-        if (!isMountedRef.current) return;
-
-        stopLoadingAnimation();
-        setPhase("playing");
-        revealHighlight();
-
-        if (data.data?.audioBase64) {
-          const audio = new Audio(`data:audio/wav;base64,${data.data.audioBase64}`);
-          audioRef.current = audio;
-
-          const audioDuration = await new Promise<number>((resolve) => {
-            audio.addEventListener("loadedmetadata", () => resolve(audio.duration), { once: true });
-            setTimeout(() => resolve(words.length * 0.35), 3000);
-          });
-
-          const msPerWord = Math.max(150, (audioDuration * 1000) / words.length);
-
-          wordTimerRef.current = setInterval(() => {
-            if (!isMountedRef.current) return;
-            if (wordIndex < words.length) {
-              setDisplayedWords(words.slice(0, wordIndex + 1).join(" "));
-              wordIndex++;
-            } else {
-              if (wordTimerRef.current) clearInterval(wordTimerRef.current);
-            }
-          }, msPerWord);
-
-          audio.onended = () => {
-            if (!isMountedRef.current) return;
-            setDisplayedWords(step.narration);
-            if (wordTimerRef.current) clearInterval(wordTimerRef.current);
-            setPhase("ready");
-          };
-
-          audio.play().catch(() => {
-            if (wordTimerRef.current) clearInterval(wordTimerRef.current);
-            setDisplayedWords(step.narration);
-            setPhase("ready");
-          });
+      // Start word animation
+      let idx = 0;
+      setWordIndex(0);
+      wordTimerRef.current = setInterval(() => {
+        idx += 1;
+        if (idx >= words.length) {
+          if (wordTimerRef.current) clearInterval(wordTimerRef.current);
           return;
         }
-      }
-    } catch {
-      if (!isMountedRef.current) return;
-    }
+        setWordIndex(idx);
+      }, 220);
 
-    stopLoadingAnimation();
-    setPhase("playing");
-    revealHighlight();
-    const msPerWord = 200;
-    wordTimerRef.current = setInterval(() => {
-      if (!isMountedRef.current) return;
-      if (wordIndex < words.length) {
-        setDisplayedWords(words.slice(0, wordIndex + 1).join(" "));
-        wordIndex++;
-      } else {
-        if (wordTimerRef.current) clearInterval(wordTimerRef.current);
-        setPhase("ready");
+      // TTS narration
+      if (ttsEnabled) {
+        ttsAbortRef.current = new AbortController();
+        apiRequest("POST", "/api/voice-insight", { text: step.narration })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data?.audioUrl) {
+              const audio = new Audio(data.audioUrl);
+              audio.play().catch(() => {});
+            }
+          })
+          .catch(() => {});
       }
-    }, msPerWord);
-  }, [step, currentStep, isMuted, navigate, showHighlight, cleanup, startLoadingAnimation, stopLoadingAnimation]);
+    }, 700);
 
-  useEffect(() => {
-    playStep();
+    return () => {
+      if (wordTimerRef.current) clearInterval(wordTimerRef.current);
+      if (targetTimerRef.current) clearTimeout(targetTimerRef.current);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStep]);
 
-  const skipStep = () => {
-    cleanup();
-    advanceStep();
-  };
+  // ── Navigation ──────────────────────────────────────────────────────────────
+  const goNext = useCallback(() => {
+    if (currentStep < totalSteps - 1) setCurrentStep((s) => s + 1);
+    else onComplete();
+  }, [currentStep, totalSteps, onComplete]);
 
-  const handleNext = () => {
-    cleanup();
-    advanceStep();
-  };
+  const goPrev = useCallback(() => {
+    if (currentStep > 0) setCurrentStep((s) => s - 1);
+  }, [currentStep]);
 
-  const handleSpotlightClick = () => {
-    if (phase === "ready" && targetElRef.current) {
-      targetElRef.current.click();
+  // ── Keyboard shortcut ───────────────────────────────────────────────────────
+  useEffect(() => {
+    function handler(e: KeyboardEvent) {
+      if (e.key === "ArrowRight" || e.key === "Enter") { e.preventDefault(); goNext(); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); goPrev(); }
+      if (e.key === "Escape") { e.preventDefault(); onComplete(); }
     }
-  };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [goNext, goPrev, onComplete]);
 
-  const overallProgress = ((currentStep + 1) / steps.length) * 100;
-  const isLastStep = currentStep === steps.length - 1;
-  const showSpotlight = phase !== "loading" && spotlightRect;
+  // ── Dialog positioning: avoid covering the spotlight ───────────────────────
+  const dialogStyle: React.CSSProperties = (() => {
+    if (!spotlightRect) return { bottom: 32, left: "50%", transform: "translateX(-50%)" };
+    const spBottom = spotlightRect.top + spotlightRect.height;
+    const spTop = spotlightRect.top;
+    const spRight = spotlightRect.left + spotlightRect.width;
+    const winH = window.innerHeight;
+    const winW = window.innerWidth;
+    const dlgH = 240;
+    const dlgW = Math.min(480, winW - 32);
+
+    if (spBottom < winH - dlgH - 40) {
+      // Place below spotlight
+      return { top: spBottom + 20, left: Math.max(16, Math.min(winW - dlgW - 16, spotlightRect.left)), width: dlgW };
+    }
+    if (spTop > dlgH + 40) {
+      // Place above spotlight
+      return { bottom: winH - spTop + 20, left: Math.max(16, Math.min(winW - dlgW - 16, spotlightRect.left)), width: dlgW };
+    }
+    if (spRight < winW - dlgW - 40) {
+      // Place to the right
+      return { top: Math.max(16, spTop), left: spRight + 20, width: dlgW };
+    }
+    // Fallback: bottom center
+    return { bottom: 24, left: "50%", transform: "translateX(-50%)", width: dlgW };
+  })();
+
+  const progress = ((currentStep + 1) / totalSteps) * 100;
 
   return (
-    <div className="fixed inset-0 z-[9999]" data-testid="tutorial-overlay">
-      <svg
-        className="fixed inset-0 w-full h-full pointer-events-none"
-        style={{ zIndex: 9999 }}
-      >
-        <defs>
-          <mask id="tutorial-mask">
-            <rect x="0" y="0" width="100%" height="100%" fill="white" />
-            {showSpotlight && (
-              <ellipse
-                cx={spotlightRect.left + spotlightRect.width / 2}
-                cy={spotlightRect.top + spotlightRect.height / 2}
-                rx={Math.max(spotlightRect.width, 60) / 2 + 20}
-                ry={Math.max(spotlightRect.height, 40) / 2 + 20}
-                fill="black"
-              />
-            )}
-          </mask>
-        </defs>
-        <rect
-          x="0" y="0" width="100%" height="100%"
-          fill="rgba(0,0,0,0.75)"
-          mask="url(#tutorial-mask)"
-        />
-      </svg>
-
-      {showSpotlight && phase === "ready" && (
-        <div
-          className="fixed cursor-pointer"
-          style={{
-            left: spotlightRect.left - 20,
-            top: spotlightRect.top - 20,
-            width: spotlightRect.width + 40,
-            height: spotlightRect.height + 40,
-            zIndex: 10001,
-            borderRadius: "50%",
-          }}
-          onClick={handleSpotlightClick}
-          data-testid="tutorial-spotlight-clickable"
-        />
-      )}
-
-      {/* ── Lightning focus rings ────────────────────────────────────────
-          A stack of 3 expanding rings + a soft conic-gradient halo that
-          gives a "lightning lock-on" feel. Each ring uses a slightly larger
-          inset and opacity so the focus visibly emanates outward.
-      */}
-      {showSpotlight && (
-        <>
-          {/* Outer pulsing halo */}
-          <div
-            className="fixed pointer-events-none rounded-full"
-            style={{
-              left: spotlightRect.left - 36,
-              top: spotlightRect.top - 36,
-              width: spotlightRect.width + 72,
-              height: spotlightRect.height + 72,
-              zIndex: 9999,
-              background:
-                "radial-gradient(circle, hsl(var(--primary) / 0.35) 0%, transparent 70%)",
-              animation: "tutorialHalo 2s ease-in-out infinite",
-            }}
-          />
-          {/* Mid-glow ring */}
-          <div
-            className="fixed pointer-events-none rounded-full"
-            style={{
-              left: spotlightRect.left - 28,
-              top: spotlightRect.top - 28,
-              width: spotlightRect.width + 56,
-              height: spotlightRect.height + 56,
-              zIndex: 10000,
-              border: "2px solid hsl(var(--primary) / 0.5)",
-              boxShadow: "0 0 38px 6px hsl(var(--primary) / 0.4)",
-              animation: "tutorialRingExpand 1.6s ease-out infinite",
-            }}
-          />
-          {/* Crisp focus ring */}
-          <div
-            className="fixed pointer-events-none rounded-full border-2"
-            style={{
-              left: spotlightRect.left - 18,
-              top: spotlightRect.top - 18,
-              width: spotlightRect.width + 36,
-              height: spotlightRect.height + 36,
-              zIndex: 10001,
-              borderColor: "hsl(var(--primary))",
-              boxShadow:
-                "inset 0 0 12px hsl(var(--primary) / 0.5), 0 0 20px hsl(var(--primary) / 0.7)",
-            }}
-          />
-          {/* Inline keyframes — keep them next to the rings so they ship
-              together with the component. */}
-          <style>{`
-            @keyframes tutorialRingExpand {
-              0%   { transform: scale(0.97); opacity: 1;   }
-              70%  { transform: scale(1.05); opacity: 0.55; }
-              100% { transform: scale(1.10); opacity: 0;   }
-            }
-            @keyframes tutorialHalo {
-              0%, 100% { opacity: 0.55; transform: scale(0.98); }
-              50%      { opacity: 1;    transform: scale(1.04); }
-            }
-          `}</style>
-        </>
-      )}
-
-      {showSpotlight && cursorPos && (
-        <div
-          className="fixed pointer-events-none hidden sm:block"
-          style={{
-            left: cursorPos.x - 12,
-            top: cursorPos.y - 4,
-            zIndex: 10002,
-            transition: "left 700ms cubic-bezier(.4, .0, .2, 1), top 700ms cubic-bezier(.4, .0, .2, 1)",
-            filter: "drop-shadow(0 0 6px hsl(var(--primary) / 0.7)) drop-shadow(0 4px 8px rgba(0,0,0,.35))",
-          }}
-        >
-          <svg width="26" height="30" viewBox="0 0 24 28" fill="none">
-            <defs>
-              <linearGradient id="tutCursorGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="white" />
-                <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity={0.95} />
-              </linearGradient>
-            </defs>
-            <path
-              d="M5 2L5 20L9.5 16L13 24L16 22.5L12.5 15L18 14L5 2Z"
-              fill="url(#tutCursorGrad)"
-              stroke="black"
-              strokeWidth="1.5"
-            />
-          </svg>
-          {/* Trailing ripple — pings out from the cursor tip */}
-          <div className="absolute top-0 left-0 w-9 h-9 rounded-full bg-primary/40 animate-ping" />
-          <div className="absolute top-2 left-2 w-5 h-5 rounded-full bg-primary/60 animate-pulse" />
-        </div>
-      )}
-
+    <>
+      {/* ── Dark overlay ─────────────────────────────────────────────────────── */}
       <div
-        className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-md border-t shadow-2xl"
-        style={{ zIndex: 10003 }}
-        data-testid="tutorial-narration-panel"
+        className="fixed inset-0 z-[9980] pointer-events-none"
+        style={{ background: "rgba(0,0,0,0.62)" }}
+        aria-hidden
+      />
+
+      {/* ── Spotlight hole ────────────────────────────────────────────────────── */}
+      {spotlightRect && !isNavigating && (
+        <div
+          className="fixed z-[9981] pointer-events-none transition-all duration-500"
+          style={{
+            top: spotlightRect.top,
+            left: spotlightRect.left,
+            width: spotlightRect.width,
+            height: spotlightRect.height,
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.62)",
+            borderRadius: 10,
+            border: "2px solid hsl(var(--primary) / 0.7)",
+            outline: "4px solid hsl(var(--primary) / 0.18)",
+          }}
+          aria-hidden
+        />
+      )}
+
+      {/* ── Animated cursor ──────────────────────────────────────────────────── */}
+      {!isNavigating && (
+        <div
+          className="fixed z-[9990] pointer-events-none"
+          style={{
+            left: cursorPos.x,
+            top: cursorPos.y,
+            transition: "left 0.9s cubic-bezier(0.4,0,0.2,1), top 0.9s cubic-bezier(0.4,0,0.2,1)",
+            transform: "translate(-4px, -4px)",
+          }}
+          aria-hidden
+        >
+          {/* Cursor ripple */}
+          <span className="absolute -inset-3 rounded-full bg-primary/20 animate-ping pointer-events-none" />
+          <CursorIcon />
+        </div>
+      )}
+
+      {/* ── Tutorial dialog ───────────────────────────────────────────────────── */}
+      <div
+        className="fixed z-[9995] bg-card/98 backdrop-blur-sm border border-border rounded-2xl shadow-2xl flex flex-col"
+        style={{ ...dialogStyle, maxWidth: 480, minWidth: 300 }}
+        role="dialog"
+        aria-label="Tutorial"
       >
-        <div className="h-1.5 bg-muted">
+        {/* Progress bar */}
+        <div className="h-1 w-full bg-muted rounded-t-2xl overflow-hidden">
           <div
-            className="h-full bg-primary transition-all duration-500"
-            style={{ width: `${overallProgress}%` }}
+            className="h-full bg-primary transition-all duration-500 rounded-t-2xl"
+            style={{ width: `${progress}%` }}
           />
         </div>
 
-        <div className="max-w-3xl mx-auto px-3 py-3 sm:p-4">
-          <div className="flex items-center justify-between mb-1.5 sm:mb-2">
-            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <span className="text-[10px] sm:text-xs font-bold text-primary">{currentStep + 1}/{steps.length}</span>
-              </div>
-              <h3 className="font-semibold text-xs sm:text-sm truncate" data-testid="text-tutorial-title">{step?.title}</h3>
-            </div>
-            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => setIsMuted(!isMuted)}
-                title={isMuted ? "Unmute" : "Mute"}
-                data-testid="button-tutorial-mute"
-              >
-                {isMuted ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs px-1.5 sm:px-2"
-                onClick={skipStep}
-                data-testid="button-tutorial-skip"
-              >
-                <SkipForward className="h-3 w-3 sm:mr-1" />
-                <span className="hidden sm:inline">Skip</span>
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0"
-                onClick={() => { cleanup(); onComplete(); }}
-                data-testid="button-tutorial-end"
-              >
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-3 pb-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+              {currentStep + 1} / {totalSteps}
+            </span>
+            <span className="text-[13px] font-semibold text-foreground truncate">{step.title}</span>
           </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setTtsEnabled((v) => !v)}
+              className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-accent transition-colors"
+              title={ttsEnabled ? "Mute narration" : "Unmute narration"}
+            >
+              {ttsEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+            </button>
+            <button
+              onClick={onComplete}
+              className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+              title="Close tutorial (Esc)"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
 
-          <div className="min-h-[40px] sm:min-h-[48px] flex items-center gap-2 sm:gap-3" data-testid="text-tutorial-narration">
-            {phase === "loading" ? (
-              <div className="flex items-center gap-2 sm:gap-3 w-full justify-center py-1">
-                <CircularProgress progress={loadProgress} />
-                <span className="text-xs sm:text-sm text-muted-foreground">Preparing...</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2 sm:gap-3 w-full">
-                <p className="text-xs sm:text-sm leading-relaxed text-foreground/90 flex-1">
-                  {displayedWords}
-                  {phase === "playing" && (
-                    <span className="inline-block w-0.5 h-3.5 sm:h-4 bg-primary ml-0.5 animate-pulse" />
-                  )}
-                </p>
-                {phase === "ready" && (
-                  <Button
-                    size="sm"
-                    className="shrink-0 gap-1 text-xs sm:text-sm h-8"
-                    onClick={handleNext}
-                    data-testid="button-tutorial-next"
-                  >
-                    {isLastStep ? "Finish" : "Next"} <ChevronRight className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            )}
-          </div>
+        {/* Narration with word-by-word highlight */}
+        <div className="px-4 py-2 text-[13px] leading-relaxed text-foreground/90 min-h-[72px]">
+          {words.map((word, i) => (
+            <span
+              key={i}
+              className={cn(
+                "transition-all duration-100 inline",
+                i <= wordIndex
+                  ? "text-foreground font-medium"
+                  : "text-muted-foreground/50"
+              )}
+            >
+              {word}{" "}
+            </span>
+          ))}
+        </div>
+
+        {/* Footer: navigation */}
+        <div className="flex items-center gap-2 px-4 pb-3 pt-1 border-t border-border">
+          <button
+            onClick={onComplete}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors mr-auto flex items-center gap-1"
+          >
+            <SkipForward className="h-3 w-3" />
+            Skip tutorial
+          </button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={goPrev}
+            disabled={currentStep === 0}
+            className="h-8 px-3 text-xs"
+          >
+            <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+            Back
+          </Button>
+          <Button
+            size="sm"
+            onClick={goNext}
+            className="h-8 px-4 text-xs"
+          >
+            {currentStep === totalSteps - 1 ? "Finish" : "Next"}
+            {currentStep < totalSteps - 1 && <ChevronRight className="h-3.5 w-3.5 ml-1" />}
+          </Button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

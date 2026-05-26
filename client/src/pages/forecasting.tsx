@@ -11,7 +11,7 @@
  *   GET /api/forecast/aggregate?horizon=14&lookback=60
  *   GET /api/forecast/items?horizon=14&lookback=60
  */
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   TrendingUp,
@@ -90,7 +90,12 @@ interface ItemForecast {
   observations: number;
 }
 
-async function exportForecastPDF(agg: AggregateData | undefined, items: ItemForecast[] | undefined, horizon: number) {
+async function exportForecastPDF(
+  agg: AggregateData | undefined,
+  items: ItemForecast[] | undefined,
+  horizon: number,
+  chartEl: HTMLElement | null,
+) {
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
@@ -111,6 +116,21 @@ async function exportForecastPDF(agg: AggregateData | undefined, items: ItemFore
   doc.setTextColor(0);
 
   let curY = 90;
+
+  // Capture chart image using html2canvas
+  let chartImgData: string | null = null;
+  if (chartEl) {
+    try {
+      const { default: html2canvas } = await import("html2canvas");
+      const canvas = await html2canvas(chartEl, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#ffffff",
+        logging: false,
+      });
+      chartImgData = canvas.toDataURL("image/png");
+    } catch { /* chart capture failed — continue without image */ }
+  }
 
   // Aggregate KPIs
   if (agg) {
@@ -142,6 +162,20 @@ async function exportForecastPDF(agg: AggregateData | undefined, items: ItemFore
       doc.text(k.value, x + 8, curY + 34);
     });
     curY += cardH + 20;
+
+    // Chart image (if captured)
+    if (chartImgData) {
+      if (curY > 350) { doc.addPage(); curY = 40; }
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(20, 30, 48);
+      doc.text("Demand Forecast Chart", 40, curY);
+      curY += 8;
+      const imgW = 762;
+      const imgH = 220;
+      doc.addImage(chartImgData, "PNG", 40, curY, imgW, imgH);
+      curY += imgH + 18;
+    }
 
     // Forecast table (first 14 rows)
     const forecastRows = agg.forecastLabels.slice(0, horizon).map((label, i) => [
@@ -221,6 +255,7 @@ export default function ForecastingPage() {
   const [search, setSearch] = useState("");
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
   const [exportingPDF, setExportingPDF] = useState(false);
+  const chartRef = useRef<HTMLDivElement>(null);
 
   const { data: aggData, isLoading: aggLoading } = useQuery<{ success: boolean; data: AggregateData }>({
     queryKey: ["/api/forecast/aggregate", horizon],
@@ -344,7 +379,7 @@ export default function ForecastingPage() {
             disabled={exportingPDF || aggLoading}
             onClick={async () => {
               setExportingPDF(true);
-              try { await exportForecastPDF(agg, items, horizon); }
+              try { await exportForecastPDF(agg, items, horizon, chartRef.current); }
               finally { setExportingPDF(false); }
             }}
             data-testid="button-export-forecast"
@@ -416,7 +451,7 @@ export default function ForecastingPage() {
                 Solid amber = actual orders per day. Dashed amber = ARIMA forecast. Shaded band = 95% prediction interval.
               </CardDescription>
             </CardHeader>
-            <CardContent className="pt-5 pb-2 px-3 sm:px-5">
+            <CardContent className="pt-5 pb-2 px-3 sm:px-5" ref={chartRef}>
               {aggLoading ? (
                 <Skeleton className="h-72 w-full" />
               ) : chartData.length === 0 ? (
