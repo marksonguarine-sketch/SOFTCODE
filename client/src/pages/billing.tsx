@@ -155,7 +155,7 @@ export default function BillingPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
         <h1 className="text-xl sm:text-2xl font-bold">Billing</h1>
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -177,7 +177,7 @@ export default function BillingPage() {
   const paidToday = todayPayments.reduce((sum, p) => sum + p.amountPaid, 0);
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
       <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-billing-title">
           Billing & Payments

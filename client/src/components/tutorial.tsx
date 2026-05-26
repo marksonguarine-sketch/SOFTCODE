@@ -297,12 +297,26 @@ const ADMIN_STEPS: TutorialStep[] = [
     title: "Employee Requests",
     narration: "Employees can request new inventory items, transfer one of their orders to another employee, or file a leave request. They all land here for your approval. Click any pending request to see the full payload, the history, and the Accept or Decline buttons.",
   },
+  // ── NEW: Reservations ────────────────────────────────────────────
+  {
+    path: "/reservations",
+    target: "[data-testid='text-reservations-title']",
+    title: "Reservations",
+    narration: "The Reservations page lets you book scheduled pickup or delivery orders. Each reservation shows the customer, scheduled date, status, and assigned employee. You can confirm, complete, or cancel reservations as they progress.",
+  },
   // ── NEW: Employees ───────────────────────────────────────────────
   {
     path: "/employees",
     target: "[data-testid='text-employees-title']",
     title: "Employee Directory",
     narration: "This is your team. Each card shows a photo, employee ID, online status, and contact info. Click an employee to open their profile modal with KPIs, productivity charts, recent orders and reservations, an activity timeline, and an Export PDF button.",
+  },
+  // ── NEW: Forecasting ─────────────────────────────────────────────
+  {
+    path: "/forecasting",
+    target: "[data-testid='button-export-forecast']",
+    title: "Demand Forecasting",
+    narration: "The Forecasting page uses an ARIMA model to predict future order volume and revenue over 7, 14, or 30 days. The shaded band shows the confidence interval. Per-item colors show urgency: red means reorder now, amber means reorder soon. Export the full report as a PDF for your supplier meetings.",
   },
   // ── NEW: Settings — Daily Sales Goal ─────────────────────────────
   {
@@ -323,7 +337,7 @@ const ADMIN_STEPS: TutorialStep[] = [
     path: "/settings",
     target: "[data-testid='card-appearance-tweaks']",
     title: "Appearance Tweaks",
-    narration: "Inside Settings, the Appearance Tweaks card lets you switch between light and dark mode, change the accent color, font, and density on the fly. Your preferences are saved in this browser. That completes the admin tutorial — you're ready to run the store!",
+    narration: "Inside Settings, the Appearance Tweaks card lets you change the accent color, font, and interface density on the fly. Your preferences are saved in this browser per device. That completes the admin tutorial — you're ready to run the store!",
   },
 ];
 
@@ -408,6 +422,12 @@ const EMPLOYEE_STEPS: TutorialStep[] = [
     narration: "This page lists every order that still owes money. Click a row to log the payment.",
   },
   {
+    path: "/reservations",
+    target: "[data-testid='text-reservations-title']",
+    title: "Reservations",
+    narration: "The Reservations page shows all scheduled pickups and deliveries assigned to you. Check the date and status, then update each reservation as you complete it.",
+  },
+  {
     path: "/profile",
     target: "[data-testid='text-profile-title']",
     title: "My Profile",
@@ -423,7 +443,7 @@ const EMPLOYEE_STEPS: TutorialStep[] = [
     path: "/settings",
     target: "[data-testid='card-appearance-tweaks']",
     title: "Appearance Tweaks",
-    narration: "In Settings, find the Appearance Tweaks card to switch dark mode, change accent colors, and adjust density. Your choices are saved per browser. Tutorial complete — happy selling!",
+    narration: "In Settings, find the Appearance Tweaks card to change accent colors, adjust density, and pick your preferred font. Your choices are saved per device. Tutorial complete — happy selling!",
   },
 ];
 
@@ -515,7 +535,12 @@ export function Tutorial({ isAdmin, onComplete }: TutorialProps) {
         if (pendingHighlightRef.current !== selector) return;
         const rect = el.getBoundingClientRect();
         setSpotlightRect(rect);
-        setCursorPos({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        // Start cursor from viewport center then animate smoothly to target
+        setCursorPos({ x: window.innerWidth / 2, y: window.innerHeight * 0.4 });
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
+          setCursorPos({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        }, 120);
       }, 500);
     } else if (attempt < 8) {
       retryTimerRef.current = setTimeout(() => {

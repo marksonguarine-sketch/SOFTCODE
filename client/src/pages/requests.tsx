@@ -117,7 +117,7 @@ export default function RequestsPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 pb-10">
         <h1 className="text-xl sm:text-2xl font-bold">Requests</h1>
         <Skeleton className="h-64 w-full" />
       </div>
@@ -125,7 +125,7 @@ export default function RequestsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 pb-10">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
           <Inbox className="h-5 w-5 text-amber-600" />

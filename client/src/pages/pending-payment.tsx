@@ -40,7 +40,7 @@ export default function PendingPaymentPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 pb-10">
         <h1 className="text-xl sm:text-2xl font-bold">Pending Payment</h1>
         <Skeleton className="h-64 w-full" />
       </div>
@@ -48,7 +48,7 @@ export default function PendingPaymentPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 pb-10">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-yellow-500/10 flex items-center justify-center">

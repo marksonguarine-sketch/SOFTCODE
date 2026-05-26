@@ -52,7 +52,7 @@ const FEATURES = [
 
 export default function AboutPage() {
   return (
-    <div className="p-3 sm:p-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 pb-10">
       <div className="max-w-3xl mx-auto space-y-8">
 
         {/* Hero */}

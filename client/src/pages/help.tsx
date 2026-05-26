@@ -28,6 +28,12 @@ import {
   Wrench,
   Lightbulb,
   Star,
+  UserCheck,
+  CalendarDays,
+  ClipboardList,
+  ScrollText,
+  Calculator,
+  Reply,
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -156,15 +162,80 @@ const MODULES = [
     ],
   },
   {
+    icon: UserCheck,
+    name: "Employees",
+    color: "text-pink-500",
+    bg: "bg-pink-500/10",
+    summary: "View employee profiles, KPIs, activity timelines, and export employee PDFs.",
+    tips: [
+      "Click any employee card to open their full profile with performance metrics.",
+      "The green dot indicates an active (enabled) account; gray means deactivated.",
+      "Export a per-employee PDF for payroll or performance review records.",
+      "KPI charts show orders created, revenue generated, and shift activity.",
+    ],
+  },
+  {
+    icon: CalendarDays,
+    name: "Reservations",
+    color: "text-violet-500",
+    bg: "bg-violet-500/10",
+    summary: "Book and manage customer reservations with scheduled pickup or delivery dates.",
+    tips: [
+      "Reservations are linked to orders — mark them fulfilled when the customer arrives.",
+      "Use the calendar view to spot scheduling conflicts.",
+      "Employees receive a notification when a reservation is assigned to them.",
+    ],
+  },
+  {
+    icon: ClipboardList,
+    name: "Requests",
+    color: "text-teal-500",
+    bg: "bg-teal-500/10",
+    summary: "Employees submit inventory requests, order transfers, and leave requests here.",
+    tips: [
+      "Pending requests show a badge count in the sidebar navigation.",
+      "Accept or decline from the request detail view — the employee is notified instantly.",
+      "Order transfer requests let an employee hand off an order to another staff member.",
+      "Leave requests are stored and can be referenced for payroll purposes.",
+    ],
+  },
+  {
+    icon: ScrollText,
+    name: "System Logs",
+    color: "text-gray-500",
+    bg: "bg-gray-500/10",
+    summary: "Full audit trail of every action taken in the system with actor and timestamp.",
+    tips: [
+      "Search logs by actor, action type, or keyword to investigate incidents.",
+      "Click any log entry to see the full payload and context.",
+      "Logs are immutable — they cannot be deleted or edited.",
+      "Use date filters to narrow down events to a specific shift or day.",
+    ],
+  },
+  {
+    icon: Calculator,
+    name: "Floating Calculator",
+    color: "text-amber-600",
+    bg: "bg-amber-500/10",
+    summary: "A Casio-style floating calculator available on every page, with memory keys.",
+    tips: [
+      "Toggle the calculator on or off in Settings — preference saved per account.",
+      "Drag the calculator bubble anywhere on screen for convenience.",
+      "Memory keys: MC (clear), MR (recall), M+ (add to memory), M- (subtract from memory).",
+      "Full keyboard support: type numbers and operators directly when the calc is open.",
+    ],
+  },
+  {
     icon: Settings,
     name: "Settings",
     color: "text-slate-500",
     bg: "bg-slate-500/10",
     summary: "Company info, thresholds, fonts, gradients, TTS, calculator, and appearance tweaks.",
     tips: [
-      "Appearance Tweaks (Dark Mode, Density, Accent Color) are saved per device — no save button needed.",
-      "Daily Sales Goal sets the target on the dashboard ring.",
-      "The TTS voice is locked to Guy (US Male) system-wide.",
+      "Density, Accent Color, and Font are saved per device — changes apply instantly.",
+      "Daily Sales Goal sets the target on the dashboard ring for all users.",
+      "Reorder Threshold controls when items show as Critical in inventory.",
+      "Gradient and font changes apply across the entire sidebar immediately.",
     ],
   },
   {
@@ -177,6 +248,7 @@ const MODULES = [
       "Create a full backup before any major data change.",
       "Restore replaces all current data — use with caution.",
       "System health shows MongoDB connection and memory usage.",
+      "Schedule automatic backups to run at a fixed time every day.",
     ],
   },
 ];
@@ -263,6 +335,66 @@ const faqs = [
     question: "How do I contact the admin?",
     answer: "Employees can use the 'Send Message to Admin' form on this Help page. The admin will see your message in their Employee Messages section.",
   },
+  {
+    question: "How do I submit a leave request?",
+    answer: "Go to your Profile page and scroll to the Leave Requests section. Fill in the start and end date, add a reason, and submit. The admin will see it under the Requests page and approve or decline.",
+  },
+  {
+    question: "How do employee requests work?",
+    answer: "Employees can submit three types of requests: (1) Inventory Item Request — ask for a new item to be added to inventory; (2) Order Transfer — hand an order off to another employee; (3) Leave Request — filed from the Profile page. All requests appear on the admin Requests page with full details.",
+  },
+  {
+    question: "How do I view the activity on the Dashboard?",
+    answer: "The Dashboard has a real-time Activity Feed on the right side. It shows the latest order, payment, and inventory events as they happen. It auto-refreshes every 30 seconds.",
+  },
+  {
+    question: "How do I see who is currently on shift?",
+    answer: "The Dashboard 'On Shift Now' section shows all employees with an active shift. A green animated dot next to their name means they are currently logged in and active.",
+  },
+  {
+    question: "What is the Pending Payment page?",
+    answer: "The Pending Payment page (accessible from the sidebar) lists every order that has been created but not yet paid. It shows the tracking number, customer, type, amount, and date. Click any row to jump to the order detail and log the payment.",
+  },
+  {
+    question: "How do I use the floating calculator?",
+    answer: "Click the calculator bubble in the bottom-right corner of any page. You can drag it anywhere on screen. The calculator supports all basic arithmetic, memory keys (MC, MR, M+, M-), and full keyboard input. Toggle it on or off from Settings.",
+  },
+  {
+    question: "How do I view employee performance?",
+    answer: "Go to the Employees page and click on any employee card. This opens a profile modal with KPI metrics (orders created, revenue generated), productivity charts, recent orders, and an activity timeline. You can also export a PDF summary.",
+  },
+  {
+    question: "How do I view the system audit trail?",
+    answer: "Go to System Logs (admin only). Every action — orders, payments, inventory changes, user updates — is recorded with the actor's username and a timestamp. You can search by keyword, filter by action type, and click any entry for full details.",
+  },
+  {
+    question: "How do orders get assigned to employees?",
+    answer: "When an order is created without an assigned employee, it goes into the Pool. Admins see all pool orders and can click the 'Assign to…' button to assign the order to any staff member. The assigned employee then sees the order on their Orders page.",
+  },
+  {
+    question: "How do I reset an employee's password?",
+    answer: "Go to the Users page (admin only), find the employee, and click the actions menu on their row. Select 'Reset Password'. You can set a new temporary password for them.",
+  },
+  {
+    question: "What happens to stock when an order is released?",
+    answer: "When you click 'Release Items' on an order in Pending Release status, the system automatically deducts the ordered quantities from inventory. The stock count updates in real time and an inventory adjustment log entry is created.",
+  },
+  {
+    question: "How do I handle partial payments?",
+    answer: "On the order detail page, you can log multiple payments. Each payment is recorded with its own method, reference number, and amount. The remaining balance updates automatically after each payment entry.",
+  },
+  {
+    question: "How does the forecasting model work?",
+    answer: "The Forecasting module uses ARIMA(1,1,1) — a statistical time series model — on the last 60 days of order history to predict future demand. It outputs daily forecast values with 95% confidence intervals for both order count and revenue.",
+  },
+  {
+    question: "How do I change the daily sales goal?",
+    answer: "Go to Settings and find the 'Daily Sales Goal' field. Enter the target revenue amount and save. This value is displayed as a progress ring on the Dashboard for all users.",
+  },
+  {
+    question: "How do I search the system logs?",
+    answer: "On the System Logs page, use the search box to filter by keyword (e.g. username, action type, or item name). You can also filter by date range and action category to narrow down the audit trail.",
+  },
 ];
 
 // ─── TIPS ─────────────────────────────────────────────────────────────────────
@@ -271,11 +403,19 @@ const QUICK_TIPS = [
   { icon: Zap, tip: "The floating calculator supports full keyboard input — just open it and start typing numbers.", },
   { icon: Star, tip: "The Activity Feed on the Dashboard updates in real time as orders are created, paid, and released.", },
   { icon: Lightbulb, tip: "Use the 30-day forecast horizon to plan weekly purchasing runs before stock runs out.", },
-  { icon: Zap, tip: "Employees can only see orders assigned to them — use the Admin Pool view to manage assignment.", },
-  { icon: Star, tip: "The Daily Sales Goal ring on the Dashboard turns green when the target is met.", },
-  { icon: Lightbulb, tip: "Appearance Tweaks (dark mode, density, accent) persist per device with no save needed.", },
+  { icon: Zap, tip: "Employees can only see orders assigned to them — use the Admin Pool view to manage assignments.", },
+  { icon: Star, tip: "The Daily Sales Goal ring on the Dashboard turns green when the revenue target is met.", },
+  { icon: Lightbulb, tip: "Appearance Tweaks (density, accent color, font) persist per device with no save button needed.", },
   { icon: Zap, tip: "Use Export PDF on the Forecasting page to create printable reorder lists for suppliers.", },
   { icon: Star, tip: "All inventory adjustments are logged with actor, timestamp, and reason for full auditability.", },
+  { icon: Lightbulb, tip: "Double-click any chart card on the Dashboard to get an AI voice insight about that data.", },
+  { icon: Zap, tip: "The Billing page search supports GCash reference numbers, tracking numbers, and customer names.", },
+  { icon: Star, tip: "System Logs capture every login, order change, and inventory update — nothing is ever hidden.", },
+  { icon: Lightbulb, tip: "Employee requests (inventory, transfer, leave) show a live badge count in the sidebar nav.", },
+  { icon: Zap, tip: "Reservations can be linked to existing orders to track scheduled pickup or delivery dates.", },
+  { icon: Star, tip: "The per-item urgency colors in Forecasting help you prioritize which items to reorder first.", },
+  { icon: Lightbulb, tip: "Export the Accounting PDF to get a full ledger report with pie charts and KPI summaries.", },
+  { icon: Zap, tip: "Admin can reply to employee messages directly from the Help page's Support tab.", },
 ];
 
 export default function HelpPage() {
@@ -284,6 +424,8 @@ export default function HelpPage() {
   const qc = useQueryClient();
   const [expandedFaq, setExpandedFaq] = useState<number | null>(null);
   const [faqSearch, setFaqSearch] = useState("");
+  const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
+  const [replyText, setReplyText] = useState("");
 
   const form = useForm<FeedbackInput>({
     resolver: zodResolver(feedbackSchema),
@@ -337,6 +479,23 @@ export default function HelpPage() {
     onError: (err: Error) => toast({ title: "Failed to mark as read", description: err.message, variant: "destructive" }),
   });
 
+  const replyMutation = useMutation({
+    mutationFn: async ({ toUsername, body }: { toUsername: string; body: string }) => {
+      const res = await apiRequest("POST", "/api/messages", {
+        toUsername,
+        subject: "Re: Admin Reply",
+        body,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      setReplyTo(null);
+      setReplyText("");
+      toast({ title: "Reply sent", description: "Your reply has been sent to the employee." });
+    },
+    onError: (err: Error) => toast({ title: "Failed to send reply", description: err.message, variant: "destructive" }),
+  });
+
   const messages = messagesQuery.data?.data || [];
   const isEmployee = user?.role === "EMPLOYEE";
 
@@ -348,7 +507,7 @@ export default function HelpPage() {
     : faqs;
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 overflow-auto h-full" data-testid="page-help">
+    <div className="p-3 sm:p-6 space-y-6 pb-10" data-testid="page-help">
 
       {/* ── HEADER ────────────────────────────────────────────────────── */}
       <div className="flex items-start gap-3">
@@ -625,7 +784,7 @@ export default function HelpPage() {
                         </Badge>
                       )}
                     </CardTitle>
-                    <CardDescription>Messages from staff members.</CardDescription>
+                    <CardDescription>Messages from staff members. Click Reply to respond directly.</CardDescription>
                   </CardHeader>
                   <CardContent>
                     {messagesQuery.isLoading ? (
@@ -635,9 +794,9 @@ export default function HelpPage() {
                     ) : messages.length === 0 ? (
                       <p className="text-sm text-muted-foreground text-center py-4">No messages yet.</p>
                     ) : (
-                      <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
+                      <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
                         {messages.map((msg: any) => (
-                          <div key={msg._id} className={`border rounded-lg p-3.5 space-y-1.5 transition-colors ${!msg.metadata?.read ? "border-primary/30 bg-primary/5" : ""}`}>
+                          <div key={msg._id} className={`border rounded-lg p-3.5 space-y-2 transition-colors ${!msg.metadata?.read ? "border-primary/30 bg-primary/5" : ""}`}>
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-semibold" data-testid={`text-msg-sender-${msg._id}`}>{msg.actor}</span>
@@ -645,15 +804,11 @@ export default function HelpPage() {
                                   <Badge variant="outline" className="text-xs">{msg.metadata.subject}</Badge>
                                 )}
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs text-muted-foreground">
                                   {new Date(msg.createdAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                                 </span>
-                                {msg.metadata?.read ? (
-                                  <Badge variant="secondary" className="text-xs">
-                                    <CheckCircle className="h-3 w-3 mr-1" /> Read
-                                  </Badge>
-                                ) : (
+                                {!msg.metadata?.read && (
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -665,11 +820,59 @@ export default function HelpPage() {
                                     <Clock className="h-3 w-3 mr-1" /> Mark Read
                                   </Button>
                                 )}
+                                {msg.metadata?.read && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    <CheckCircle className="h-3 w-3 mr-1" /> Read
+                                  </Badge>
+                                )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700"
+                                  onClick={() => {
+                                    setReplyTo({ id: msg._id, username: msg.actor });
+                                    setReplyText("");
+                                  }}
+                                  data-testid={`button-reply-${msg._id}`}
+                                >
+                                  <Reply className="h-3 w-3 mr-1" /> Reply
+                                </Button>
                               </div>
                             </div>
                             <p className="text-sm text-muted-foreground leading-relaxed" data-testid={`text-msg-body-${msg._id}`}>
                               {msg.metadata?.message}
                             </p>
+                            {replyTo?.id === msg._id && (
+                              <div className="mt-2 pt-2 border-t space-y-2">
+                                <Textarea
+                                  placeholder={`Reply to ${msg.actor}…`}
+                                  className="min-h-[80px] text-sm"
+                                  value={replyText}
+                                  onChange={(e) => setReplyText(e.target.value)}
+                                  data-testid={`input-reply-${msg._id}`}
+                                />
+                                <div className="flex gap-2 justify-end">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    onClick={() => { setReplyTo(null); setReplyText(""); }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    className="h-7 text-xs"
+                                    disabled={!replyText.trim() || replyMutation.isPending}
+                                    onClick={() => replyMutation.mutate({ toUsername: msg.actor, body: replyText })}
+                                    data-testid={`button-send-reply-${msg._id}`}
+                                  >
+                                    {replyMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Send className="h-3 w-3 mr-1" />}
+                                    Send Reply
+                                  </Button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

@@ -227,7 +227,7 @@ export default function SettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 pb-10">
         <h1 className="text-2xl font-bold">Settings</h1>
         <Skeleton className="h-64 w-full max-w-2xl" />
       </div>
@@ -235,7 +235,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-10 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-6 pb-10">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (
@@ -558,22 +558,6 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
-
-          {/* Dark mode */}
-          <div className="flex items-center justify-between rounded-md border p-3">
-            <div className="flex items-center gap-3">
-              {tweaks.dark ? <Moon className="h-4 w-4 text-primary" /> : <Sun className="h-4 w-4 text-amber-500" />}
-              <div>
-                <p className="text-sm font-medium">Dark Mode</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Toggle between light and dark interface</p>
-              </div>
-            </div>
-            <Switch
-              checked={tweaks.dark}
-              onCheckedChange={(v) => updateTweak("dark", v)}
-              data-testid="switch-dark-mode"
-            />
-          </div>
 
           {/* Density */}
           <div>

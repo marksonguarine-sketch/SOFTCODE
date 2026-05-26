@@ -934,7 +934,7 @@ export default function OrdersPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 pb-10">
         <h1 className="text-xl sm:text-2xl font-bold">Orders</h1>
         <Skeleton className="h-10 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -946,7 +946,7 @@ export default function OrdersPage() {
   if (!isAdmin) {
     const { text: greetText, Icon: GreetIcon } = getGreeting();
     return (
-      <div className="p-3 sm:p-6 space-y-6 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-6 pb-10">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <div className="flex items-center gap-2 text-muted-foreground text-sm mb-1">
@@ -1137,7 +1137,7 @@ export default function OrdersPage() {
 
   // ─── ADMIN VIEW ──────────────────────────────────────────────────
   return (
-    <div className="p-3 sm:p-6 space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-6 pb-10">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-orders-title">Orders</h1>
         <Button onClick={() => setCreateOpen(true)} data-testid="button-create-order">

@@ -96,7 +96,7 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 pb-10">
         <h1 className="text-xl sm:text-2xl font-bold">Profile</h1>
         <Skeleton className="h-64 w-full" />
       </div>
@@ -104,7 +104,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 pb-10">
       <div className="max-w-2xl mx-auto space-y-5">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">

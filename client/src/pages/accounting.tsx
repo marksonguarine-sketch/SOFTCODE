@@ -536,7 +536,7 @@ export default function AccountingPage() {
 
   if (accountsLoading || ledgerLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
         <h1 className="text-xl sm:text-2xl font-bold">Accounting</h1>
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -547,7 +547,7 @@ export default function AccountingPage() {
   // ─── RENDER ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
         <div>
@@ -716,13 +716,13 @@ export default function AccountingPage() {
       )}
 
       {/* Tabs */}
-      <Tabs defaultValue="accounts">
+      <Tabs defaultValue="ledger">
         <TabsList>
-          <TabsTrigger value="accounts" data-testid="tab-accounts">
-            Chart of Accounts
-          </TabsTrigger>
           <TabsTrigger value="ledger" data-testid="tab-ledger">
             General Ledger
+          </TabsTrigger>
+          <TabsTrigger value="accounts" data-testid="tab-accounts">
+            Chart of Accounts
           </TabsTrigger>
         </TabsList>
 

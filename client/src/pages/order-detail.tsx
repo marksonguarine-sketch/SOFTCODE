@@ -849,7 +849,7 @@ export default function OrderDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
         <Skeleton className="h-8 w-48" />
         <Skeleton className="h-64 w-full" />
       </div>
@@ -870,7 +870,7 @@ export default function OrderDetailPage() {
   const isLockedByOther = lockInfo?.locked && lockInfo.lockedBy !== user?.username;
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
 
       {/* Payment Processing Modal */}
       {paymentModalOpen && (

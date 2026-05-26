@@ -174,7 +174,7 @@ export default function MaintenancePage() {
   const hasMore = historyPage * 5 < totalHistory;
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
       <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-maintenance-title">Maintenance</h1>
 
       <div className="max-w-2xl space-y-6">

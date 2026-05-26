@@ -360,7 +360,7 @@ export default function SystemLogsPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
         <h1 className="text-2xl font-bold">System Logs</h1>
         <Skeleton className="h-64 w-full" />
       </div>
@@ -368,7 +368,7 @@ export default function SystemLogsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
       <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-logs-title">System Logs</h1>
 
       <Tabs value={tab} onValueChange={(v) => { setTab(v as "all" | "user-log"); setPage(1); }}>

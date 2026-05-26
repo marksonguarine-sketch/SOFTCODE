@@ -302,7 +302,7 @@ export default function ForecastingPage() {
   }, [items]);
 
   return (
-    <div className="p-3 sm:p-6 space-y-5 overflow-auto h-full" data-testid="page-forecasting">
+    <div className="p-3 sm:p-6 space-y-5 pb-10" data-testid="page-forecasting">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-start gap-3">

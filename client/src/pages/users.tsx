@@ -252,7 +252,7 @@ export default function UsersPage() {
 
   if (isLoading) {
     return (
-      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 overflow-auto h-full">
+      <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
         <h1 className="text-2xl font-bold">Users</h1>
         <Skeleton className="h-64 w-full" />
       </div>
@@ -260,7 +260,7 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 overflow-auto h-full">
+    <div className="p-3 sm:p-6 space-y-6 pb-10">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-users-title">User Management</h1>
         <Button onClick={() => setCreateOpen(true)} data-testid="button-create-user">

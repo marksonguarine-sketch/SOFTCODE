@@ -382,7 +382,7 @@ export default function DashboardPage() {
               disabled={exportingPDF}
               onClick={async () => {
                 setExportingPDF(true);
-                try { await exportDashboardPDF(stats, advData); }
+                try { await exportDashboardPDF(stats, adv); }
                 finally { setExportingPDF(false); }
               }}
               data-testid="button-export-dashboard"
