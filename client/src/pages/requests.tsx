@@ -146,15 +146,21 @@ export default function RequestsPage() {
           </TabsTrigger>
           <TabsTrigger value="ADD_ITEM" className="gap-1.5">
             <Package className="h-3.5 w-3.5" />Add Item
-            <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.filter((r) => r.requestType === "ADD_ITEM").length}</Badge>
+            {requests.filter((r) => r.requestType === "ADD_ITEM" && r.status === "pending").length > 0 && (
+              <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.filter((r) => r.requestType === "ADD_ITEM" && r.status === "pending").length}</Badge>
+            )}
           </TabsTrigger>
           <TabsTrigger value="TRANSFER_ORDER" className="gap-1.5">
             <ArrowRightLeft className="h-3.5 w-3.5" />Transfer
-            <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.filter((r) => r.requestType === "TRANSFER_ORDER").length}</Badge>
+            {requests.filter((r) => r.requestType === "TRANSFER_ORDER" && r.status === "pending").length > 0 && (
+              <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.filter((r) => r.requestType === "TRANSFER_ORDER" && r.status === "pending").length}</Badge>
+            )}
           </TabsTrigger>
           <TabsTrigger value="LEAVE" className="gap-1.5">
             <CalendarOff className="h-3.5 w-3.5" />Leave
-            <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.filter((r) => r.requestType === "LEAVE").length}</Badge>
+            {requests.filter((r) => r.requestType === "LEAVE" && r.status === "pending").length > 0 && (
+              <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.filter((r) => r.requestType === "LEAVE" && r.status === "pending").length}</Badge>
+            )}
           </TabsTrigger>
         </TabsList>
 

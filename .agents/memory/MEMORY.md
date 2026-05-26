@@ -1,3 +1,6 @@
 - [Tutorial system](tutorial-system.md) — spotlight + animated cursor + word-by-word narration; component at `client/src/components/tutorial.tsx`, mounted in App.tsx lines 192-195.
 - [Forecasting PDF chart capture](forecasting-pdf.md) — uses html2canvas (installed); chartRef on first CardContent of aggregate tab; exportForecastPDF signature now accepts `chartEl: HTMLElement | null`.
 - [Settings tweaks layout](settings-tweaks.md) — Appearance Tweaks card must stay in `max-w-2xl` wrapper to match form width; no dark mode toggle rendered (only density + accent hue).
+- [Requests tab badges](requests-badges.md) — Tab badges (Add Item, Transfer, Leave) only show count when > 0 pending; accepted/declined requests do NOT increment the tab badge.
+- [Accounting financial cards](accounting-cards.md) — Financial position cards (Assets/Liabilities/Revenue/Expenses) always render even when zero; show a hint line when value is ₱0.00 explaining what populates them.
+- [Address canonically Antipolo](address-antipolo.md) — All visible text uses "Antipolo"; code comment in app-sidebar.tsx line 50 also updated.

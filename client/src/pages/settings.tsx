@@ -235,7 +235,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-10">
+    <div className="p-3 sm:p-6 space-y-6 pb-20">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (

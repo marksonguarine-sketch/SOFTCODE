@@ -2,7 +2,7 @@
  * Inventory page — JOAP Hardware Trading (matches prototype design)
  *
  *   ┌─ PageHeader: Inventory / N items across M categories · actions
- *   ├─ KPI strip: Total SKUs · Stock Value · Low-stock · Dead stock
+ *   ├─ KPI strip: Total Stocks · Stock Value · Low-stock · Dead stock
  *   ├─ Filter row: search · category pills · Table/Grid toggle
  *   └─ Items table (or grid)
  *

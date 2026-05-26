@@ -357,7 +357,7 @@ const faqs = [
   },
   {
     question: "How do I use the floating calculator?",
-    answer: "Click the calculator bubble in the bottom-right corner of any page. You can drag it anywhere on screen. The calculator supports all basic arithmetic, memory keys (MC, MR, M+, M-), and full keyboard input. Toggle it on or off from Settings.",
+    answer: "Click the calculator button fixed at the bottom-right corner of any page. The calculator supports all basic arithmetic, memory keys (MC, MR, M+, M-), and full keyboard input — just open it and start typing. Toggle it on or off from Settings. Press Esc to close it.",
   },
   {
     question: "How do I view employee performance?",

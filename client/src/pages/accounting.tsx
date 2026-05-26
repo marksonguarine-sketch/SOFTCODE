@@ -721,26 +721,27 @@ export default function AccountingPage() {
         </div>
       )}
 
-      {/* Financial Position Mini Summary */}
-      {accounts.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: "Assets", value: assetTotal, color: "text-blue-600" },
-            { label: "Liabilities", value: liabilityTotal, color: "text-red-600" },
-            { label: "Revenue", value: revenueTotal, color: "text-emerald-600" },
-            { label: "Expenses", value: expenseTotal, color: "text-amber-600" },
-          ].map((item) => (
-            <Card key={item.label}>
-              <CardContent className="p-3 sm:p-4">
-                <p className="text-xs text-muted-foreground mb-1">{item.label}</p>
-                <p className={`text-base sm:text-lg font-bold truncate ${item.color}`}>
-                  {formatCurrency(item.value)}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      {/* Financial Position Mini Summary — always shown */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Assets", value: assetTotal, color: "text-blue-600", hint: "Cash + AR from paid orders" },
+          { label: "Liabilities", value: liabilityTotal, color: "text-red-600", hint: "Payables and obligations" },
+          { label: "Revenue", value: revenueTotal, color: "text-emerald-600", hint: "Posted when orders are paid" },
+          { label: "Expenses", value: expenseTotal, color: "text-amber-600", hint: "COGS + operating costs" },
+        ].map((item) => (
+          <Card key={item.label}>
+            <CardContent className="p-3 sm:p-4">
+              <p className="text-xs text-muted-foreground mb-1">{item.label}</p>
+              <p className={`text-base sm:text-lg font-bold truncate ${item.color}`}>
+                {formatCurrency(item.value)}
+              </p>
+              {item.value === 0 && (
+                <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{item.hint}</p>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
 
       {/* General Ledger (only tab) */}
       <div className="space-y-4">

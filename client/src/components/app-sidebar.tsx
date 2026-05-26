@@ -44,7 +44,7 @@ import { JoapLogo } from "@/components/joap-logo";
 
 /* ============================================================================
  * Sidebar — matches the JOAP prototype design:
- *   ┌─ Brand: amber tile (hammer) + "JOAP Hardware / Trading · Tarlac"
+ *   ┌─ Brand: amber tile (hammer) + "JOAP Hardware / Trading · Antipolo"
  *   ├─ OPERATIONS section (Dashboard, Inventory, Orders, Reservations, …)
  *   ├─ ADMIN section (Offers, Requests, Employees) — admin only
  *   ├─ SYSTEM section (Users, Settings, Maintenance, System Logs) — admin only
