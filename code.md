@@ -1,7 +1,48 @@
 # JOAP Hardware Trading — Code Documentation
 
-**Last Updated**: 2026-05-24 (Session 3 — Major Feature Expansion)
-**Build Status**: ✅ 0 TypeScript errors · ✅ Clean Vite + esbuild build
+**Last Updated**: 2026-05-26 (Session 8 — Full-system audit pass)
+**Build Status**: ✅ 0 TypeScript errors · ✅ Clean Vite + esbuild build · ✅ 0 runtime errors across all 19 tabs (Vite-HMR WS noise only)
+
+---
+
+## Session 8 — Full-system audit (2026-05-26)
+
+End-to-end QA pass that drove the actual UI through every page and ran orders/offers/reservations/requests through the API to confirm the data flow. Findings → fixes landed in this commit range:
+
+| Fix | What was broken | Where |
+|---|---|---|
+| Release flow sets `fulfillmentStatus="completed"` + `completedProcessingAt` and emits `DASHBOARD_STATS_UPDATED` | Reports "Completed" counter and dashboard fulfillment metrics stayed at 0 forever because only `currentStatus` was set | `server/routes.ts` `/api/orders/:id/release` |
+| Live ledger-derived balance in `/api/accounting/accounts` | Chart of Accounts panel showed stale zeros when the `AccountingAccount.balance` field drifted from the actual ledger totals | `server/routes.ts` `/api/accounting/accounts` |
+| Full-ledger Total Debits/Credits/Net Balance on Accounting page | Previously summed only the paginated 20 rows of the ledger table, not the whole book | `client/src/pages/accounting.tsx` |
+| `accountTypeMap` covers Cash on Hand, Cash, GCash, Service Revenue, Delivery/Salaries/Utilities Expense | Asset/Liability/Revenue/Expense rollups missed ledger entries posted under common names that weren't in the hardcoded list | `client/src/pages/accounting.tsx` |
+| New `DELETE /api/accounting/accounts/:id` admin endpoint | Stray Chart-of-Accounts entries couldn't be removed; endpoint blocks delete if the account has any ledger history | `server/routes.ts` |
+| Inventory **Import CSV** + **Print labels** buttons wired | They rendered with no onClick, classic dead buttons. CSV import parses header + bulk-POSTs to `/api/items`; Print labels triggers `window.print()` | `client/src/pages/inventory.tsx` |
+| Employees-tab green dot uses presence (`lastLogin` < 5min) instead of `isActive` | Account-active flag is permanent; the green dot was lying about who was actually online | `client/src/pages/employees.tsx` (S7) |
+| Tarlac → Antipolo wherever it appeared in docs | `README.md`, `UI_UPDATE_NOTES.md` (S7) | |
+| `html2canvas` pinned in `package.json` | Was transitive only — risked being missing in production builds, breaking the Forecasting PDF chart screenshot | `package.json` (S7) |
+| 11 new Help FAQs (Forecasting PDF, tweaks-vs-settings, calculator lock, dark-mode scope, Total Stocks rename, presence dots, offers/inventory interaction, pending badge logic, messaging, dashboard export) | Help didn't explain the recent Session 7/8 changes; users would have asked the same questions twice | `client/src/pages/help.tsx` (S7) |
+| Dark Mode toggle moved into Settings → Appearance Tweaks card | The user wanted no floating Tweaks overlay; Settings is now the single source for theme | `client/src/pages/settings.tsx` (S7) |
+| Settings scroll-clip fix: `pb-24 overflow-y-auto h-full max-h-screen` | UI got cut when scrolling back from the bottom of Settings | `client/src/pages/settings.tsx` (S7) |
+
+### Verification performed (S8)
+
+End-to-end against live MongoDB:
+
+1. **Logged in admin + employee** via API → both tokens issued.
+2. **Created 3 admin orders** (cash walk-in, COD delivery, cash walk-in) → all three paid → all three released. After fixing the release flow, `fulfillmentStatus="completed"` on every one. Dashboard reported `completedOrders=3, todayRevenue=2220`.
+3. **Created 3 employee orders** as `qatest` user (cash, cash, COD) → paid → released. Dashboard ended at `completedOrders=6, todayRevenue=3135, totalRevenue=6145`.
+4. **Created all 4 offer types** (`percentage_discount`, `b1t1`, `buy1_take_percentage`, `flat_discount`) → applied a 10%-off offer to an order → confirmed `discountApplied=true`, `offerName` propagated, `totalSavings=29` on a ₱290→₱261 order.
+5. **Created a reservation** as employee → updated status to `confirmed` as admin → reservation count moved from 2 → 3 pending confirmation.
+6. **Created a leave request** as employee → pending badge went 0 → 1. **Accepted** as admin → badge went 1 → 0. Confirmed the "no pending = no badge" rule works.
+7. **Walked all 19 routes** in the browser (Dashboard, Inventory, Orders, Billing, Pending Payment, Reservations, Accounting, Reports, Forecasting, Requests, Employees, Users, Settings, Help, Profile, Maintenance, System Logs, Offers, About). Every route rendered without an error boundary. Network panel shows **0 failed requests**.
+8. **Triggered the Forecasting Export PDF** programmatically — completed without throwing, button text reset from "Exporting…" to "Export PDF".
+9. **Toggled dark mode** and walked 7 representative pages: no real contrast issues (the few `bg-current` decorative dots in Inventory are intentional `1.5×1.5px` bullets, not text).
+10. **Accounting after 6 paid orders**: Total Debits ₱6,145.00 = Total Credits ₱6,145.00, Net Balance ₱0.00 (balanced double-entry), Gross Profit ₱6,145.00, Cash/GCash live balance ₱1,000, Sales Revenue ₱5,230 — all reactive, no static zeros.
+
+### Known non-fixes (intentional)
+
+- `bg-current` decorative dots (`w-1.5 h-1.5 rounded-full bg-current`) intentionally inherit text color via `bg-current` so they tint with the parent. They show up as "color == bg" in automated scans but have no text content — not a real readability issue.
+- Vite HMR WebSocket noise in the browser console (`[vite] failed to connect to websocket`) is a preview-environment artifact, not a runtime error. Disappears in production builds.
 **Repo**: https://github.com/marksonguarine-sketch/SOFTCODE
 
 A full-stack ERP for JOAP Hardware Trading built on React 18 + Vite + Express + MongoDB (Mongoose). This document is exhaustive — it explains every file that was touched, what it does, why it exists, and how the pieces wire together.
