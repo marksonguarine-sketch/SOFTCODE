@@ -262,8 +262,15 @@ export default function AccountingPage() {
     [ledgerEntries, dateFilter],
   );
 
-  const totalDebits = filteredEntries.reduce((sum, e) => sum + e.debit, 0);
-  const totalCredits = filteredEntries.reduce((sum, e) => sum + e.credit, 0);
+  // Totals derive from the full-ledger summary so they don't change with
+  // pagination of the ledger table. summaryEntries already aggregates every
+  // GeneralLedgerEntry on the server.
+  const totalDebits = dateFilter
+    ? filteredEntries.reduce((sum, e) => sum + e.debit, 0)
+    : summaryEntries.reduce((sum, s) => sum + (s.debit || 0), 0);
+  const totalCredits = dateFilter
+    ? filteredEntries.reduce((sum, e) => sum + e.credit, 0)
+    : summaryEntries.reduce((sum, s) => sum + (s.credit || 0), 0);
   const netBalance = totalDebits - totalCredits;
 
   // Account type lookup map
@@ -272,13 +279,20 @@ export default function AccountingPage() {
     accounts.forEach((a) => { map[a.accountName] = a.accountType; });
     // Hard-code well-known names in case not in accounts list
     map["Cash/GCash"] = "Asset";
+    map["Cash on Hand"] = "Asset";
+    map["Cash"] = "Asset";
+    map["GCash"] = "Asset";
     map["Accounts Receivable"] = "Asset";
     map["Inventory"] = "Asset";
     map["Accounts Payable"] = "Liability";
     map["Owner's Equity"] = "Equity";
     map["Sales Revenue"] = "Revenue";
+    map["Service Revenue"] = "Revenue";
     map["Cost of Goods Sold"] = "Expense";
     map["Operating Expenses"] = "Expense";
+    map["Delivery Expense"] = "Expense";
+    map["Salaries Expense"] = "Expense";
+    map["Utilities Expense"] = "Expense";
     return map;
   }, [accounts]);
 

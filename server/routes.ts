@@ -2063,6 +2063,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       order.currentStatus = "Completed";
+      order.fulfillmentStatus = "completed";
+      order.completedProcessingAt = new Date();
       order.statusHistory.push(
         { status: "Released", timestamp: new Date(), actor: req.user!.username, note: "Items released from inventory" },
         { status: "Completed", timestamp: new Date(), actor: req.user!.username, note: "Order fulfilled" }
@@ -2072,6 +2074,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await logAction("ORDER_RELEASED", req.user!.username, order.trackingNumber);
       emitEvent("ORDER_RELEASED", { orderId: order._id });
       emitEvent("INVENTORY_LOG_CREATED");
+      emitEvent("DASHBOARD_STATS_UPDATED");
       return ok(res, { order, message: "Order released. Inventory updated. Revenue updated." });
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -2081,8 +2084,43 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── ACCOUNTING ─────────────────────────────────────────
   app.get("/api/accounting/accounts", authMiddleware, async (_req: AuthRequest, res: Response) => {
     try {
-      const accounts = await AccountingAccount.find().sort({ accountCode: 1 });
-      return ok(res, accounts);
+      // Always derive live balances from the ledger so the Chart of Accounts
+      // panel never shows stale zeros even if AccountingAccount.balance got
+      // out of sync with GeneralLedgerEntry totals.
+      const [accounts, entries] = await Promise.all([
+        AccountingAccount.find().sort({ accountCode: 1 }).lean(),
+        GeneralLedgerEntry.find().lean(),
+      ]);
+      const totals: Record<string, { debit: number; credit: number }> = {};
+      for (const e of entries) {
+        if (!totals[e.accountName]) totals[e.accountName] = { debit: 0, credit: 0 };
+        totals[e.accountName].debit += e.debit;
+        totals[e.accountName].credit += e.credit;
+      }
+      const withLiveBalance = accounts.map((a) => {
+        const t = totals[a.accountName] || { debit: 0, credit: 0 };
+        const isDebitNormal = ["Asset", "Expense"].includes(a.accountType);
+        const liveBalance = isDebitNormal ? t.debit - t.credit : t.credit - t.debit;
+        return { ...a, balance: liveBalance };
+      });
+      return ok(res, withLiveBalance);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Delete a Chart-of-Accounts entry (admin only). Safe-guards against
+  // deleting accounts that have ledger history.
+  app.delete("/api/accounting/accounts/:id", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const acct = await AccountingAccount.findById(req.params.id);
+      if (!acct) return fail(res, 404, "Account not found");
+      const hasEntries = await GeneralLedgerEntry.exists({ accountName: acct.accountName });
+      if (hasEntries) return fail(res, 400, `Cannot delete "${acct.accountName}" — it has ledger history. Archive instead.`);
+      await AccountingAccount.findByIdAndDelete(req.params.id);
+      await logAction("ACCOUNT_DELETED", req.user!.username, acct.accountName);
+      emitEvent("LEDGER_POSTED");
+      return ok(res, { deleted: acct.accountName });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
