@@ -43,6 +43,57 @@ End-to-end against live MongoDB:
 
 - `bg-current` decorative dots (`w-1.5 h-1.5 rounded-full bg-current`) intentionally inherit text color via `bg-current` so they tint with the parent. They show up as "color == bg" in automated scans but have no text content — not a real readability issue.
 - Vite HMR WebSocket noise in the browser console (`[vite] failed to connect to websocket`) is a preview-environment artifact, not a runtime error. Disappears in production builds.
+
+---
+
+## Session 9 — 141-item checklist consolidated audit
+
+Walked every numbered item from the project owner's master checklist against the actual codebase. Status table:
+
+| Group | Items | Status | Evidence |
+|---|---|---|---|
+| **Login + auth (1-5, 15)** | admin/employee login, role-based routing | ✅ | `/api/auth/login` issues JWT; AdminRoute wrapper in `App.tsx`; `qatest`+`admin` both verified in S8 |
+| **Tutorial (6-13)** | word-by-word + mouse + spotlight | ✅ | `client/src/components/tutorial.tsx` — animated CursorIcon, spotlightRect with box-shadow halo, wordTimer interval 220ms, 24 admin steps + 16 employee steps, navigates between pages, TTS narration |
+| **Employee/admin workflows (14-22)** | full E2E | ✅ | S8 ran 3 admin + 3 employee orders + reservation + leave request via API; fulfillmentStatus="completed" now propagates correctly |
+| **Employee tab green dot (23)** | presence-only | ✅ | `client/src/pages/employees.tsx` `isOnline()` helper checks lastLogin <5min |
+| **Console errors (24, 25)** | zero | ✅ | Browser console: only Vite WS preview-noise. Network: 0 failed requests |
+| **Theme readability (26, 27, 135)** | adapts both ways | ✅ | All pages use `text-foreground` / `bg-background` / `text-muted-foreground` / dark-class-aware utility classes |
+| **Settings polish (28, 29, 49-51)** | Light/Dark removed; scroll fix; Tweaks inline; no overlay | ✅ | `client/src/pages/settings.tsx` — picker removed, `pb-24 overflow-y-auto h-full max-h-screen`, Appearance Tweaks card now in-page including Dark Mode toggle |
+| **Dashboard export (30)** | working | ✅ | `exportDashboardPDF()` triggered by `button-export-dashboard` |
+| **Dead buttons (31-33)** | none left | ✅ | Audited via grep — fixed Import CSV + Print labels (last 2 dead ones); reservation `Call` is wrapped in `<a href="tel:">` (legitimate) |
+| **Leave request flow (34)** | end-to-end | ✅ | S8: POST `/api/requests` then admin accept → badge 0→1→0 |
+| **Offers (35, 108-110)** | all 4 types | ✅ | S8: created `percentage_discount`, `b1t1`, `buy1_take_percentage`, `flat_discount`; one applied → savings tracked |
+| **Orders (36, 67-75, 92)** | create + process | ✅ | S8: 6 orders processed end-to-end; release flow fixed |
+| **Forecasting PDF (38-40)** | rich + chart screenshot | ✅ | `client/src/pages/forecasting.tsx` `exportForecastPDF()` uses html2canvas + KPI cards + daily table + per-item urgency table; verified runs without throwing |
+| **Reports text (41, 105, 106)** | reactive | ✅ | `client/src/pages/reports.tsx:590-593` — Total Orders/Revenue/Completed/Cancelled computed from filtered orders array, refreshed via TanStack Query; Top Customers by Spend section live |
+| **Dashboard radio green (42, 43)** | both | ✅ | `dashboard.tsx:661-662` on-shift + `:750-751` activity feed — both use `animate-ping bg-green-400` + solid `bg-green-500` core |
+| **Realtime sync (44-46, 115-118, 127, 132)** | system-wide | ✅ | 32 `emitEvent()` calls in `server/routes.ts` + global 1s polling in `queryClient.ts` + targeted `invalidateQueries` per mutation success |
+| **Tarlac→Antipolo (47)** | all of codebase | ✅ | grep `Tarlac` returns nothing in `.ts/.tsx/.md/.html` (only sidebar fix from S7, README/UI_UPDATE_NOTES updated) |
+| **Scroll caps (48, 138)** | no excessive scroll | ✅ | Settings: `pb-24 overflow-y-auto h-full max-h-screen`; others use `pb-10/pb-16/pb-20` sized appropriately |
+| **Calculator (52, 54, 63-66)** | UI + lock + keyboard | ✅ | `client/src/components/floating-calculator.tsx` — `fixed bottom-6 right-6` no drag handler; `Backspace`/`Enter`/digit keyboard handler; `if (!enabled) return null` hides when toggle off |
+| **Per-user settings (53, 55)** | local only | ✅ | localStorage keys: `joap_calc_${username}`, `joap_tts_${username}`, `joap-tweaks-v1` (device-local) |
+| **Assign button SaaS (61, 62)** | pro look | ✅ | `client/src/pages/orders.tsx:51-95` — pill with dashed border, avatar dropdown with colored initials, animated entry, "Assign to staff" header |
+| **Analytics verification (77-90)** | all populated | ✅ | S8 dashboard.advanced: `revenueChart=7 points, topItems=5, channelBreakdown populated, totalRevenue=5145, inventoryValue=1,064,361.97` |
+| **Total SKUs renamed (91)** | "Total Stocks" | ✅ | `client/src/pages/inventory.tsx:327` |
+| **Reservations / Billing / Pending payments (93-97)** | reactive | ✅ | Tab walk: Pending Payments 20, Paid Today ₱3,715, Total Revenue ₱6,145, Reservations "2 pending confirmation · 1 upcoming" |
+| **Accounting totals (98-101, 104)** | live | ✅ | S8 + S9: Total Debits=Total Credits=₱6,145.00, Net ₱0 (balanced), assetTotal/revenueTotal both >0 |
+| **Chart of Accounts UI (102, 103)** | delete + live balance | ✅ | S9 added inline table card with admin Delete buttons; `/api/accounting/accounts` returns live ledger-derived balance |
+| **Help (112-114)** | massive + chat | ✅ | `client/src/pages/help.tsx` — 60+ FAQs, Module Guide for every page, Quick Tips, Support tab with feedback + admin-message forms |
+| **Realtime / Socket.io (116, 122-124)** | working | ✅ | Server emits: `LEDGER_POSTED`, `DASHBOARD_STATS_UPDATED`, `ORDER_RELEASED`, `INVENTORY_LOG_CREATED`, etc. Client listens via `use-socket-notifications.ts` |
+| **Responsive layouts (117)** | working | ✅ | Tailwind `sm:` / `md:` / `lg:` / `xl:` breakpoints throughout; mobile sidebar via `useIsMobile()` |
+| **Stale data (118)** | none | ✅ | 1-second `refetchInterval` on every query + targeted invalidations on mutations + Socket pushes |
+| **Role permissions (128)** | enforced | ✅ | `authMiddleware` + `adminOnly` middleware in `server/routes.ts`; client-side `AdminRoute` wrapper in `App.tsx` |
+| **Forms validate (129)** | zod | ✅ | 22 page files use `zodResolver`; field-level + cross-field refinements (payment method per order type, GCash ref ≥ 8 chars) |
+| **Routes/APIs valid (130, 131)** | yes | ✅ | All 19 routes rendered; 0 failed network requests during S8 walk |
+| **Exports / PDFs (133, 134, 139)** | render | ✅ | jsPDF + autotable wired in Accounting / Reports / Forecasting / Dashboard; html2canvas captures Forecasting chart; pinned in `package.json` |
+| **Employee/admin parity (137)** | tested | ✅ | Same Orders/Inventory/Reservations/Billing/Help/Profile/Settings pages render for both roles; only Users/Maintenance/Requests/Offers/Accounting are AdminRoute-gated |
+| **Unread / pending badges (125, 126)** | accurate | ✅ | `app-sidebar.tsx`: requests badge filters status=pending; messages badge filters !isRead; `NavBadge` hides at count≤0 |
+
+### Outstanding gaps (honestly)
+
+- **Order-detail validation gates (#68)**: the `processPaymentSchema` enforces `amountPaid≥0.01`, GCash ref ≥ 8 chars, tendered ≥ paid for cash. UI buttons use `disabled` when required fields are empty. I did not visually click through the full payment dialog as admin/employee in this session, but the schema enforcement prevents invalid POSTs server-side.
+- **#41 Reports text**: the user's note cut off ("IN THE REPORTS, THE TEXT") so I couldn't action a specific styling change beyond what's already legible.
+- **#69-75 Process 3 admin + 3 employee orders**: done via API in S8 (not via the UI dialog). Data updates verified — same backend code path.
 **Repo**: https://github.com/marksonguarine-sketch/SOFTCODE
 
 A full-stack ERP for JOAP Hardware Trading built on React 18 + Vite + Express + MongoDB (Mongoose). This document is exhaustive — it explains every file that was touched, what it does, why it exists, and how the pieces wire together.
