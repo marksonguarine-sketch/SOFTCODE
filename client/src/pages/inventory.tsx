@@ -258,11 +258,56 @@ export default function InventoryPage() {
         }
         actions={
           <>
-            <Button variant="outline" size="sm" data-testid="button-import-csv">
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              id="inventory-csv-import"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                const text = await file.text();
+                // Parse CSV — expect header: itemName,category,supplierName,unitPrice,currentQuantity[,reorderLevel]
+                const lines = text.split(/\r?\n/).filter(Boolean);
+                if (lines.length < 2) { toast({ title: "Empty CSV", variant: "destructive" }); return; }
+                const header = lines[0].split(",").map(h => h.trim().toLowerCase());
+                const idx = (k: string) => header.indexOf(k);
+                let ok = 0, fail = 0;
+                for (let i = 1; i < lines.length; i++) {
+                  const cols = lines[i].split(",").map(c => c.trim());
+                  const payload = {
+                    itemName: cols[idx("itemname")] || "",
+                    category: cols[idx("category")] || "Uncategorized",
+                    supplierName: cols[idx("suppliername")] || "",
+                    unitPrice: Number(cols[idx("unitprice")] || 0),
+                    currentQuantity: Math.floor(Number(cols[idx("currentquantity")] || 0)),
+                  };
+                  if (!payload.itemName) { fail++; continue; }
+                  try {
+                    const res = await apiRequest("POST", "/api/items", payload);
+                    if ((await res.json()).success) ok++; else fail++;
+                  } catch { fail++; }
+                }
+                queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+                toast({ title: `CSV imported`, description: `${ok} added, ${fail} skipped` });
+                e.target.value = "";
+              }}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="button-import-csv"
+              onClick={() => document.getElementById("inventory-csv-import")?.click()}
+            >
               <Upload className="w-3.5 h-3.5 mr-1.5" />
               Import CSV
             </Button>
-            <Button variant="outline" size="sm" data-testid="button-print-labels">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="button-print-labels"
+              onClick={() => window.print()}
+            >
               <Printer className="w-3.5 h-3.5 mr-1.5" />
               Print labels
             </Button>
