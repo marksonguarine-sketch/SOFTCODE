@@ -368,11 +368,13 @@ export default function SystemLogsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 sm:space-y-6 pb-10">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="shrink-0 px-3 sm:px-6 pt-3 sm:pt-6 pb-4">
       <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-logs-title">System Logs</h1>
-
-      <Tabs value={tab} onValueChange={(v) => { setTab(v as "all" | "user-log"); setPage(1); }}>
-        <TabsList>
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 pb-3">
+      <Tabs value={tab} onValueChange={(v) => { setTab(v as "all" | "user-log"); setPage(1); }} className="flex-1 min-h-0 flex flex-col">
+        <TabsList className="shrink-0">
           <TabsTrigger value="all" className="gap-1.5">
             <List className="h-3.5 w-3.5" />
             All Logs
@@ -384,9 +386,9 @@ export default function SystemLogsPage() {
             <Badge variant="secondary" className="text-[10px] h-4 px-1">{userLogs.length}</Badge>
           </TabsTrigger>
         </TabsList>
-
+        <div className="flex-1 min-h-0 overflow-y-auto mt-3 pr-0.5">
         {/* ── All Logs Tab ── */}
-        <TabsContent value="all" className="space-y-4 mt-4">
+        <TabsContent value="all" className="space-y-4 pb-4">
           <div className="flex items-center gap-3 flex-wrap">
             <div className="relative flex-1 min-w-[200px] max-w-md" ref={searchRef}>
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -521,7 +523,9 @@ export default function SystemLogsPage() {
             </div>
           )}
         </TabsContent>
+        </div>
       </Tabs>
+      </div>
 
       {/* Log detail dialog */}
       <Dialog open={!!selectedLog} onOpenChange={(open) => !open && setSelectedLog(null)}>

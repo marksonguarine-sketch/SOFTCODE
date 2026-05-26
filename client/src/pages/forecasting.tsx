@@ -337,7 +337,8 @@ export default function ForecastingPage() {
   }, [items]);
 
   return (
-    <div className="p-3 sm:p-6 space-y-5 pb-10" data-testid="page-forecasting">
+    <div className="h-full flex flex-col overflow-hidden" data-testid="page-forecasting">
+      <div className="shrink-0 px-3 sm:px-6 pt-3 sm:pt-6 pb-0 space-y-4">
       {/* ── Header ─────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="flex items-start gap-3">
@@ -426,10 +427,11 @@ export default function ForecastingPage() {
           loading={itemsLoading}
         />
       </div>
-
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 pb-3">
       {/* ── Tabs ───────────────────────────────────────────────── */}
-      <Tabs defaultValue="aggregate">
-        <TabsList>
+      <Tabs defaultValue="aggregate" className="flex-1 min-h-0 flex flex-col">
+        <TabsList className="shrink-0">
           <TabsTrigger value="aggregate" className="gap-1.5" data-testid="tab-aggregate">
             <Activity className="h-3.5 w-3.5" /> Aggregate
           </TabsTrigger>
@@ -438,9 +440,9 @@ export default function ForecastingPage() {
             <Badge variant="secondary" className="text-[10px] h-4 px-1">{items.length}</Badge>
           </TabsTrigger>
         </TabsList>
-
+        <div className="flex-1 min-h-0 overflow-y-auto mt-3 pr-0.5">
         {/* ── Aggregate tab ──────────────────────────────────── */}
-        <TabsContent value="aggregate" className="space-y-4 mt-4">
+        <TabsContent value="aggregate" className="space-y-4 pb-4">
           <Card>
             <CardHeader className="border-b py-3.5 px-5">
               <CardTitle className="text-[14px] font-semibold tracking-tight flex items-center gap-2">
@@ -639,7 +641,9 @@ export default function ForecastingPage() {
             </div>
           )}
         </TabsContent>
+        </div>
       </Tabs>
+      </div>
     </div>
   );
 }

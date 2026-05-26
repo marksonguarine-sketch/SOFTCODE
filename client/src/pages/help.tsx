@@ -599,8 +599,8 @@ export default function HelpPage() {
     : faqs;
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-10" data-testid="page-help">
-
+    <div className="h-full flex flex-col overflow-hidden" data-testid="page-help">
+      <div className="shrink-0 px-3 sm:px-6 pt-3 sm:pt-6 pb-4">
       {/* ── HEADER ────────────────────────────────────────────────────── */}
       <div className="flex items-start gap-3">
         <div
@@ -618,19 +618,20 @@ export default function HelpPage() {
           </p>
         </div>
       </div>
-
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 pb-3">
       {/* ── TABS ──────────────────────────────────────────────────────── */}
-      <Tabs defaultValue="modules" className="w-full">
-        <TabsList className="flex flex-wrap h-auto gap-1 mb-4">
+      <Tabs defaultValue="modules" className="flex-1 min-h-0 flex flex-col w-full">
+        <TabsList className="flex flex-wrap h-auto gap-1 mb-0 shrink-0 pb-3">
           <TabsTrigger value="modules" className="text-xs"><BookOpen className="h-3.5 w-3.5 mr-1.5" />Module Guide</TabsTrigger>
           <TabsTrigger value="shortcuts" className="text-xs"><Keyboard className="h-3.5 w-3.5 mr-1.5" />Shortcuts</TabsTrigger>
           <TabsTrigger value="tips" className="text-xs"><Lightbulb className="h-3.5 w-3.5 mr-1.5" />Tips</TabsTrigger>
           <TabsTrigger value="faq" className="text-xs"><HelpCircle className="h-3.5 w-3.5 mr-1.5" />FAQs</TabsTrigger>
           <TabsTrigger value="support" className="text-xs"><MessageSquare className="h-3.5 w-3.5 mr-1.5" />Support</TabsTrigger>
         </TabsList>
-
+        <div className="flex-1 min-h-0 overflow-y-auto pr-0.5">
         {/* MODULE GUIDE */}
-        <TabsContent value="modules" className="space-y-4">
+        <TabsContent value="modules" className="space-y-4 mt-3">
           <div className="grid gap-4 grid-cols-1 md:grid-cols-2">
             {MODULES.map((mod) => {
               const Icon = mod.icon;
@@ -999,7 +1000,9 @@ export default function HelpPage() {
             </div>
           </div>
         </TabsContent>
+        </div>
       </Tabs>
+      </div>
     </div>
   );
 }

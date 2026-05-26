@@ -125,7 +125,8 @@ export default function RequestsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 pb-10">
+    <div className="h-full flex flex-col overflow-hidden">
+      <div className="shrink-0 px-3 sm:px-6 pt-3 sm:pt-6 pb-4">
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
           <Inbox className="h-5 w-5 text-amber-600" />
@@ -137,9 +138,10 @@ export default function RequestsPage() {
           </p>
         </div>
       </div>
-
-      <Tabs value={tab} onValueChange={(v) => setTab(v as any)}>
-        <TabsList>
+      </div>
+      <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 pb-3">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as any)} className="flex-1 min-h-0 flex flex-col">
+        <TabsList className="shrink-0">
           <TabsTrigger value="all" className="gap-1.5">
             All
             <Badge variant="secondary" className="text-[10px] h-4 px-1">{requests.length}</Badge>
@@ -163,8 +165,8 @@ export default function RequestsPage() {
             )}
           </TabsTrigger>
         </TabsList>
-
-        <TabsContent value={tab} className="space-y-4 mt-4">
+        <div className="flex-1 min-h-0 overflow-y-auto mt-3 pr-0.5">
+        <TabsContent value={tab} className="space-y-4 pb-4">
           {/* Pending */}
           <div>
             <h2 className="text-sm font-semibold text-muted-foreground mb-2 uppercase tracking-wide flex items-center gap-2">
@@ -241,7 +243,9 @@ export default function RequestsPage() {
             </div>
           )}
         </TabsContent>
+        </div>
       </Tabs>
+      </div>
 
       {/* Detail dialog */}
       <Dialog open={!!selected} onOpenChange={(v) => { if (!v) { setSelected(null); setActionNote(""); } }}>
