@@ -20,19 +20,6 @@ function formatDisplay(val: string): string {
   return val;
 }
 
-/**
- * Floating Casio-style calculator.
- *
- * Behavior:
- * - Shows as a circular bubble button by default (CalcIcon).
- * - Click bubble → expands to full calculator panel.
- * - Click X → collapses back to bubble.
- * - "display calculator: on/off" in Settings persists across sessions
- *   via localStorage (key `joap_calc_${username}`). When turned off,
- *   both bubble and panel are hidden entirely.
- * - Dispatches/listens to the `joap-calc-toggle` event to sync with
- *   the settings page in real time.
- */
 export function FloatingCalculator({ username }: FloatingCalculatorProps) {
   const [enabled, setEnabled] = useState(() => {
     const k = `joap_calc_${username}`;
@@ -44,62 +31,43 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
   const [op, setOp] = useState<CalcOp>(null);
   const [waitingForOperand, setWaitingForOperand] = useState(false);
   const [memory, setMemory] = useState(0);
-  const [isDragging, setIsDragging] = useState(false);
-  const [pos, setPos] = useState({ x: 0, y: 0 });
-  const [initialized, setInitialized] = useState(false);
-  const dragStart = useRef({ mx: 0, my: 0, cx: 0, cy: 0 });
   const calcRef = useRef<HTMLDivElement>(null);
-
-  // Initialize position bottom-right
-  useEffect(() => {
-    setPos({ x: window.innerWidth - 72, y: window.innerHeight - 96 });
-    setInitialized(true);
-  }, []);
 
   // Listen for settings page toggle
   useEffect(() => {
     function handleToggle(e: Event) {
       const detail = (e as CustomEvent).detail;
-      const isEnabled = detail?.enabled ?? true;
-      setEnabled(isEnabled);
+      const isEnabled = detail?.enabled !== undefined ? detail.enabled : detail;
+      setEnabled(typeof isEnabled === "boolean" ? isEnabled : true);
       if (!isEnabled) setExpanded(false);
     }
     window.addEventListener("joap-calc-toggle", handleToggle);
     return () => window.removeEventListener("joap-calc-toggle", handleToggle);
   }, []);
 
-  // Dragging (works for both bubble and panel)
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-    dragStart.current = { mx: e.clientX, my: e.clientY, cx: pos.x, cy: pos.y };
-  }, [pos]);
-
+  // Keyboard support when calculator is expanded
   useEffect(() => {
-    if (!isDragging) return;
-    let dragged = false;
-    function onMove(e: MouseEvent) {
-      const dx = e.clientX - dragStart.current.mx;
-      const dy = e.clientY - dragStart.current.my;
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragged = true;
-      const width = expanded ? 240 : 56;
-      const height = expanded ? 400 : 56;
-      const newX = Math.max(8, Math.min(window.innerWidth - width - 8, dragStart.current.cx + dx));
-      const newY = Math.max(8, Math.min(window.innerHeight - height - 8, dragStart.current.cy + dy));
-      setPos({ x: newX, y: newY });
+    if (!expanded) return;
+    function handleKey(e: KeyboardEvent) {
+      // Don't steal keys from inputs
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const k = e.key;
+      if (k >= "0" && k <= "9") { e.preventDefault(); inputDigit(k); }
+      else if (k === ".") { e.preventDefault(); inputDigit("."); }
+      else if (k === "+") { e.preventDefault(); handleOperator("+"); }
+      else if (k === "-") { e.preventDefault(); handleOperator("-"); }
+      else if (k === "*") { e.preventDefault(); handleOperator("×"); }
+      else if (k === "/") { e.preventDefault(); handleOperator("÷"); }
+      else if (k === "%" ) { e.preventDefault(); handlePercent(); }
+      else if (k === "Enter" || k === "=") { e.preventDefault(); handleEqual(); }
+      else if (k === "Backspace") { e.preventDefault(); handleBackspace(); }
+      else if (k === "Escape") { e.preventDefault(); setExpanded(false); }
+      else if (k.toLowerCase() === "c" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); handleAC(); }
     }
-    function onUp() {
-      setIsDragging(false);
-      // If user didn't drag (just clicked), toggle expanded state on bubble
-      if (!dragged && !expanded) setExpanded(true);
-    }
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-    return () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-    };
-  }, [isDragging, expanded]);
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, display, prev, op, waitingForOperand]);
 
   function inputDigit(digit: string) {
     if (waitingForOperand) {
@@ -108,6 +76,15 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
     } else {
       if (digit === "." && display.includes(".")) return;
       setDisplay(display === "0" && digit !== "." ? digit : display + digit);
+    }
+  }
+
+  function handleBackspace() {
+    if (waitingForOperand) return;
+    if (display.length <= 1 || (display.length === 2 && display[0] === "-")) {
+      setDisplay("0");
+    } else {
+      setDisplay(display.slice(0, -1));
     }
   }
 
@@ -175,24 +152,24 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
   }
 
   function btnClass(label: string): string {
-    const base = "flex items-center justify-center rounded-xl text-sm font-semibold cursor-pointer select-none transition-all duration-75 active:scale-95 h-10";
-    if (label === "0") return `${base} col-span-2 px-4 justify-start`;
-    if (["÷", "×", "−", "+", "="].includes(label)) return `${base} bg-primary text-primary-foreground hover:bg-primary/90`;
-    if (["AC", "±", "%"].includes(label)) return `${base} bg-muted text-foreground hover:bg-muted/70`;
-    return `${base} bg-card text-foreground hover:bg-accent border border-border`;
+    const base = "flex items-center justify-center rounded-xl text-sm font-semibold cursor-pointer select-none transition-all duration-75 active:scale-95 h-11 shadow-sm";
+    if (label === "0") return `${base} col-span-2 px-4 justify-start bg-card dark:bg-zinc-800 text-foreground hover:bg-accent border border-border`;
+    if (["÷", "×", "−", "+", "="].includes(label)) return `${base} bg-primary text-primary-foreground hover:brightness-110 shadow-md`;
+    if (["AC", "±", "%"].includes(label)) return `${base} bg-zinc-200 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-300 dark:hover:bg-zinc-600`;
+    return `${base} bg-card dark:bg-zinc-800 text-foreground hover:bg-accent border border-border`;
   }
 
-  if (!initialized || !enabled) return null;
+  if (!enabled) return null;
 
   // ─── BUBBLE MODE ────────────────────────────────────────────
   if (!expanded) {
     return (
       <button
         ref={calcRef as any}
-        className="fixed z-[9999] w-12 h-12 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-110 transition-all duration-150 ring-2 ring-background"
-        style={{ left: pos.x, top: pos.y, cursor: isDragging ? "grabbing" : "pointer" }}
-        onMouseDown={handleMouseDown}
-        title="Open calculator"
+        className="fixed z-[9999] bottom-6 right-6 w-12 h-12 rounded-full shadow-2xl bg-primary text-primary-foreground flex items-center justify-center hover:scale-110 transition-all duration-150 ring-2 ring-background"
+        style={{ cursor: "pointer" }}
+        onClick={() => setExpanded(true)}
+        title="Open calculator (keyboard shortcut: numbers work when open)"
         data-testid="calc-bubble"
       >
         <CalcIcon className="h-5 w-5" />
@@ -206,22 +183,22 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
   return (
     <div
       ref={calcRef}
-      className="fixed z-[9999] select-none"
-      style={{ left: pos.x, top: pos.y, width: 220 }}
+      className="fixed z-[9999] bottom-6 right-6 select-none"
+      style={{ width: 240 }}
     >
-      <div className="rounded-2xl overflow-hidden shadow-2xl border border-border/60 bg-background/95 backdrop-blur-sm">
-        {/* Title bar — draggable */}
-        <div
-          className="flex items-center justify-between px-3 py-2 bg-muted/80 cursor-grab active:cursor-grabbing"
-          onMouseDown={handleMouseDown}
-        >
-          <span className="text-xs font-semibold text-muted-foreground tracking-wide">CASIO ◉</span>
-          <div className="flex items-center gap-1">
-            {memStr && <span className="text-[9px] text-primary font-medium">{memStr}</span>}
+      <div className="rounded-2xl overflow-hidden shadow-2xl border border-border/60 bg-background/98 backdrop-blur-sm">
+        {/* Title bar */}
+        <div className="flex items-center justify-between px-3.5 py-2.5 bg-gradient-to-r from-primary/10 to-primary/5 border-b border-border/40">
+          <div className="flex items-center gap-2">
+            <CalcIcon className="w-3.5 h-3.5 text-primary" />
+            <span className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Calculator</span>
+          </div>
+          <div className="flex items-center gap-2">
+            {memStr && <span className="text-[9px] text-primary font-medium bg-primary/10 px-1.5 py-0.5 rounded">{memStr}</span>}
             <button
               className="w-5 h-5 rounded-full bg-muted-foreground/20 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"
               onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
-              title="Minimize"
+              title="Close (Esc)"
               data-testid="calc-close"
             >
               <X className="h-3 w-3" />
@@ -230,24 +207,27 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
         </div>
 
         {/* Display */}
-        <div className="px-3 py-3 bg-muted/40 text-right">
+        <div className="px-4 py-4 bg-gradient-to-b from-muted/60 to-muted/30">
           {op && (
-            <div className="text-[10px] text-muted-foreground mb-0.5 flex items-center justify-end gap-1">
-              <span className="font-mono">{prev}</span>
-              <span className="text-primary font-bold">{op}</span>
+            <div className="text-[10px] text-muted-foreground mb-1 flex items-center justify-end gap-1.5">
+              <span className="font-mono opacity-70">{prev}</span>
+              <span className="text-primary font-bold text-sm">{op}</span>
             </div>
           )}
           <div
-            className="font-mono font-bold tracking-tight text-foreground leading-none"
-            style={{ fontSize: display.length > 9 ? "16px" : display.length > 6 ? "20px" : "28px" }}
+            className="font-mono font-bold tracking-tight text-foreground leading-none text-right"
+            style={{ fontSize: display.length > 9 ? "17px" : display.length > 6 ? "22px" : "30px" }}
             data-testid="calc-display"
           >
             {formatDisplay(display)}
           </div>
+          <div className="text-[9px] text-muted-foreground/60 text-right mt-1">
+            keyboard ready · ⌫ backspace · ESC close
+          </div>
         </div>
 
         {/* Buttons */}
-        <div className="p-2 space-y-1.5">
+        <div className="p-2.5 space-y-1.5 bg-muted/20">
           {BUTTONS.map((row, ri) => (
             <div key={ri} className="grid gap-1.5 grid-cols-4">
               {row.map((label) => (
@@ -264,11 +244,11 @@ export function FloatingCalculator({ username }: FloatingCalculatorProps) {
           ))}
 
           {/* Memory row */}
-          <div className="grid grid-cols-4 gap-1.5 pt-0.5 border-t border-border/30">
+          <div className="grid grid-cols-4 gap-1.5 pt-0.5 border-t border-border/40 mt-1">
             {["MC", "MR", "M+", "M−"].map((label) => (
               <button
                 key={label}
-                className="flex items-center justify-center rounded-xl text-[10px] font-semibold cursor-pointer select-none transition-all active:scale-95 h-7 bg-muted/60 text-muted-foreground hover:bg-muted"
+                className="flex items-center justify-center rounded-lg text-[10px] font-bold cursor-pointer select-none transition-all active:scale-95 h-7 bg-muted/60 text-muted-foreground hover:bg-primary/10 hover:text-primary border border-transparent hover:border-primary/20"
                 onClick={() => {
                   const val = parseFloat(display);
                   if (label === "MC") setMemory(0);

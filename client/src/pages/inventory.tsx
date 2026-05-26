@@ -279,7 +279,7 @@ export default function InventoryPage() {
       {/* KPI strip */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
         <KPICard
-          label="Total SKUs"
+          label="Total Stocks"
           value={kpis.totalSkus}
           icon={Layers}
           tone="slate"

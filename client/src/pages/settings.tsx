@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Settings, Loader2, Save, Type, Palette, Layers, Store, Volume2,
-  Calculator, Lock, Sun, Moon,
+  Calculator, Lock, Sliders, Moon, Sun, AlignJustify,
 } from "lucide-react";
 import { settingsSchema, type SettingsInput, type ISettings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -74,6 +74,58 @@ function loadGoogleFontPreview(fontName: string) {
   document.head.appendChild(link);
 }
 
+const TWEAKS_KEY = "joap-tweaks-v1";
+const TWEAKS_DEFAULTS = { dark: false, density: "balanced" as const, accentHue: 220 };
+const DENSITY_OPTIONS = [
+  { value: "compact", label: "Compact", px: "13px" },
+  { value: "balanced", label: "Balanced", px: "14px" },
+  { value: "comfortable", label: "Comfortable", px: "15px" },
+] as const;
+const ACCENT_PRESETS = [
+  { hue: 220, label: "Blue" },
+  { hue: 38, label: "Amber" },
+  { hue: 152, label: "Green" },
+  { hue: 280, label: "Purple" },
+  { hue: 0, label: "Red" },
+  { hue: 190, label: "Cyan" },
+  { hue: 330, label: "Pink" },
+];
+
+function loadTweaks() {
+  try {
+    const raw = localStorage.getItem(TWEAKS_KEY);
+    if (raw) return { ...TWEAKS_DEFAULTS, ...JSON.parse(raw) };
+  } catch { /* ignore */ }
+  return { ...TWEAKS_DEFAULTS };
+}
+
+function saveTweaks(t: typeof TWEAKS_DEFAULTS & { density: string; accentHue: number }) {
+  try { localStorage.setItem(TWEAKS_KEY, JSON.stringify(t)); } catch { /* ignore */ }
+}
+
+function applyTweaks(t: { dark: boolean; density: string; accentHue: number }) {
+  const root = document.documentElement;
+  root.classList.toggle("dark", t.dark);
+  const densityMap: Record<string, string> = { compact: "13px", balanced: "14px", comfortable: "15px" };
+  root.style.fontSize = densityMap[t.density] || "14px";
+  const hue = t.accentHue;
+  if (t.dark) {
+    root.style.setProperty("--primary", `${hue} 95% 58%`);
+    root.style.setProperty("--ring", `${hue} 95% 58%`);
+    root.style.setProperty("--sidebar-primary", `${hue} 95% 60%`);
+    root.style.setProperty("--chart-1", `${hue} 95% 60%`);
+    root.style.setProperty("--accent", `${hue} 40% 22%`);
+    root.style.setProperty("--accent-foreground", `${hue} 90% 75%`);
+  } else {
+    root.style.setProperty("--primary", `${hue} 92% 50%`);
+    root.style.setProperty("--ring", `${hue} 92% 50%`);
+    root.style.setProperty("--sidebar-primary", `${hue} 92% 50%`);
+    root.style.setProperty("--chart-1", `${hue} 92% 50%`);
+    root.style.setProperty("--accent", `${hue} 85% 94%`);
+    root.style.setProperty("--accent-foreground", `${hue} 70% 30%`);
+  }
+}
+
 export default function SettingsPage() {
   const { toast } = useToast();
   const { isAdmin, user } = useAuth();
@@ -88,6 +140,18 @@ export default function SettingsPage() {
     return localStorage.getItem(k) !== "false";
   });
 
+  // Tweaks (per-device appearance)
+  const [tweaks, setTweaks] = useState(loadTweaks);
+
+  const updateTweak = <K extends keyof typeof tweaks>(key: K, value: (typeof tweaks)[K]) => {
+    setTweaks((prev) => {
+      const next = { ...prev, [key]: value };
+      saveTweaks(next);
+      applyTweaks(next);
+      return next;
+    });
+  };
+
   const persistTts = (val: boolean) => {
     setTtsEnabled(val);
     localStorage.setItem(`joap_tts_${user?.username || "guest"}`, String(val));
@@ -95,7 +159,6 @@ export default function SettingsPage() {
   const persistCalc = (val: boolean) => {
     setCalculatorEnabled(val);
     localStorage.setItem(`joap_calc_${user?.username || "guest"}`, String(val));
-    // Dispatch event so calculator component updates
     window.dispatchEvent(new CustomEvent("joap-calc-toggle", { detail: val }));
   };
 
@@ -172,7 +235,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-10">
+    <div className="p-3 sm:p-6 space-y-6 pb-10 overflow-auto h-full">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (
@@ -218,28 +281,6 @@ export default function SettingsPage() {
                     <FormDescription className="text-xs">
                       Target revenue per day. Shown on every dashboard (admins + employees) as a progress ring.
                     </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )} />
-                <FormField control={form.control} name="theme" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Theme</FormLabel>
-                    <div className="flex gap-3">
-                      {[{ value: "light", label: "Light", Icon: Sun }, { value: "dark", label: "Dark", Icon: Moon }].map(({ value, label, Icon }) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => field.onChange(value)}
-                          className={cn(
-                            "flex items-center gap-2 px-4 py-2 rounded-md border text-sm transition-colors",
-                            field.value === value ? "border-primary bg-primary/10 font-medium" : "border-border hover-elevate"
-                          )}
-                          data-testid={`theme-${value}`}
-                        >
-                          <Icon className="h-4 w-4" /> {label}
-                        </button>
-                      ))}
-                    </div>
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -505,6 +546,107 @@ export default function SettingsPage() {
           )}
         </form>
       </Form>
+
+      {/* ── APPEARANCE TWEAKS (device-local, no server save) ────── */}
+      <Card data-testid="card-appearance-tweaks">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sliders className="h-4 w-4" /> Appearance Tweaks
+          </CardTitle>
+          <CardDescription>
+            Saved to this device only — changes apply instantly, no save needed.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+
+          {/* Dark mode */}
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div className="flex items-center gap-3">
+              {tweaks.dark ? <Moon className="h-4 w-4 text-primary" /> : <Sun className="h-4 w-4 text-amber-500" />}
+              <div>
+                <p className="text-sm font-medium">Dark Mode</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Toggle between light and dark interface</p>
+              </div>
+            </div>
+            <Switch
+              checked={tweaks.dark}
+              onCheckedChange={(v) => updateTweak("dark", v)}
+              data-testid="switch-dark-mode"
+            />
+          </div>
+
+          {/* Density */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <AlignJustify className="h-4 w-4 text-muted-foreground" />
+              <p className="text-sm font-medium">Interface Density</p>
+            </div>
+            <div className="flex gap-2">
+              {DENSITY_OPTIONS.map((d) => (
+                <button
+                  key={d.value}
+                  type="button"
+                  onClick={() => updateTweak("density", d.value)}
+                  className={cn(
+                    "flex-1 py-2 px-3 rounded-md border text-sm transition-colors",
+                    tweaks.density === d.value
+                      ? "border-primary bg-primary/10 font-semibold text-primary"
+                      : "border-border hover:bg-accent"
+                  )}
+                  data-testid={`density-${d.value}`}
+                >
+                  {d.label}
+                  <span className="block text-[10px] text-muted-foreground font-normal">{d.px}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Accent hue */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Palette className="h-4 w-4 text-muted-foreground" />
+              <p className="text-sm font-medium">Accent Color</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {ACCENT_PRESETS.map((a) => (
+                <button
+                  key={a.hue}
+                  type="button"
+                  title={a.label}
+                  onClick={() => updateTweak("accentHue", a.hue)}
+                  className={cn(
+                    "w-8 h-8 rounded-full border-2 transition-all shadow-sm hover:scale-110",
+                    tweaks.accentHue === a.hue ? "border-foreground scale-110 ring-2 ring-foreground/20" : "border-transparent"
+                  )}
+                  style={{ background: `hsl(${a.hue}, 80%, 55%)` }}
+                  data-testid={`accent-${a.label.toLowerCase()}`}
+                />
+              ))}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              Current: <span className="font-medium" style={{ color: `hsl(${tweaks.accentHue}, 80%, 55%)` }}>
+                {ACCENT_PRESETS.find((a) => a.hue === tweaks.accentHue)?.label ?? `Hue ${tweaks.accentHue}`}
+              </span>
+            </p>
+          </div>
+
+          {/* Reset */}
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline hover:text-foreground transition-colors"
+            onClick={() => {
+              const def = { ...TWEAKS_DEFAULTS };
+              saveTweaks(def);
+              applyTweaks(def);
+              setTweaks(def);
+            }}
+            data-testid="button-reset-tweaks"
+          >
+            Reset to defaults
+          </button>
+        </CardContent>
+      </Card>
     </div>
   );
 }

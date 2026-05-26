@@ -318,12 +318,12 @@ const ADMIN_STEPS: TutorialStep[] = [
     title: "Floating Calculator",
     narration: "A Casio-style calculator floats in the bottom-right of every page. Click the bubble to expand it. Drag it anywhere. It has memory keys MC, MR, M-plus, and M-minus. Each user can toggle it on or off in Settings — your preference persists across logins.",
   },
-  // ── NEW: Tweaks Panel ────────────────────────────────────────────
+  // ── NEW: Appearance Tweaks (now in Settings) ─────────────────────
   {
-    path: "/",
-    target: "[data-testid='tweaks-launcher']",
-    title: "UI Tweaks Panel",
-    narration: "The Tweaks pill at the bottom-right lets you switch between light and dark mode, change the accent color, font, and density on the fly. Your preferences are saved in this browser. That completes the tutorial — you're ready to run the store!",
+    path: "/settings",
+    target: "[data-testid='card-appearance-tweaks']",
+    title: "Appearance Tweaks",
+    narration: "Inside Settings, the Appearance Tweaks card lets you switch between light and dark mode, change the accent color, font, and density on the fly. Your preferences are saved in this browser. That completes the admin tutorial — you're ready to run the store!",
   },
 ];
 
@@ -420,10 +420,10 @@ const EMPLOYEE_STEPS: TutorialStep[] = [
     narration: "A calculator floats at the bottom-right of every page. Click to expand. Toggle it off in Settings if you don't want it.",
   },
   {
-    path: "/",
-    target: "[data-testid='tweaks-launcher']",
-    title: "UI Tweaks",
-    narration: "Switch to dark mode, change colors, fonts, and density. Your choices are saved per browser. Tutorial complete — happy selling!",
+    path: "/settings",
+    target: "[data-testid='card-appearance-tweaks']",
+    title: "Appearance Tweaks",
+    narration: "In Settings, find the Appearance Tweaks card to switch dark mode, change accent colors, and adjust density. Your choices are saved per browser. Tutorial complete — happy selling!",
   },
 ];
 

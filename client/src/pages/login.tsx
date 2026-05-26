@@ -97,7 +97,7 @@ export default function LoginPage() {
           <JoapLogo size={44} className="rounded-lg shadow-md" />
           <div>
             <div className="text-[15px] font-bold tracking-tight">JOAP Hardware</div>
-            <div className="text-[12px] text-slate-400">Trading · Tarlac</div>
+            <div className="text-[12px] text-slate-400">Trading · Antipolo</div>
           </div>
         </div>
 
@@ -144,7 +144,7 @@ export default function LoginPage() {
             <JoapLogo size={40} className="rounded-lg" />
             <div>
               <div className="text-[14px] font-bold tracking-tight">JOAP Hardware</div>
-              <div className="text-[11px] text-muted-foreground">Trading · Tarlac</div>
+              <div className="text-[11px] text-muted-foreground">Trading · Antipolo</div>
             </div>
           </div>
 

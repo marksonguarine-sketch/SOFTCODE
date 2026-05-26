@@ -201,7 +201,7 @@ export function AppSidebar() {
               JOAP Hardware
             </span>
             <span className="text-[11px] text-muted-foreground whitespace-nowrap">
-              Trading · Tarlac
+              Trading · Antipolo
             </span>
           </div>
         </div>

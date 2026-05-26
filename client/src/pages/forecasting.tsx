@@ -24,6 +24,7 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
+  Download,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -89,10 +90,137 @@ interface ItemForecast {
   observations: number;
 }
 
+async function exportForecastPDF(agg: AggregateData | undefined, items: ItemForecast[] | undefined, horizon: number) {
+  const { default: jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+  const now = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", hour12: true });
+  const peso = (v: number) => "₱" + Math.round(v).toLocaleString("en-PH");
+
+  // Header
+  doc.setFillColor(20, 30, 48);
+  doc.rect(0, 0, 842, 70, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text("JOAP Hardware Trading — Demand Forecasting Report", 40, 32);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(180, 200, 230);
+  doc.text(`Model: ARIMA(1,1,1)  ·  Horizon: ${horizon} days  ·  60-day lookback  ·  Generated: ${now}`, 40, 52);
+  doc.setTextColor(0);
+
+  let curY = 90;
+
+  // Aggregate KPIs
+  if (agg) {
+    const kpis = [
+      { label: "Forecast Orders", value: String(Math.round(agg.orders.totalForecastDemand)) },
+      { label: "Forecast Revenue", value: peso(agg.revenue.totalForecastRevenue) },
+      { label: "Order σ", value: agg.orders.sigma.toFixed(2) },
+      { label: "Revenue σ", value: peso(agg.revenue.sigma) },
+    ];
+    doc.setFontSize(12);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(20, 30, 48);
+    doc.text("Aggregate Forecast KPIs", 40, curY);
+    curY += 12;
+    const cardW = 175, cardH = 48, gap = 12;
+    kpis.forEach((k, i) => {
+      const x = 40 + i * (cardW + gap);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(x, curY, cardW, cardH, 4, 4, "F");
+      doc.setDrawColor(220, 228, 240);
+      doc.roundedRect(x, curY, cardW, cardH, 4, 4, "S");
+      doc.setFontSize(8);
+      doc.setTextColor(100, 116, 139);
+      doc.setFont("helvetica", "normal");
+      doc.text(k.label.toUpperCase(), x + 8, curY + 14);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(15, 23, 42);
+      doc.text(k.value, x + 8, curY + 34);
+    });
+    curY += cardH + 20;
+
+    // Forecast table (first 14 rows)
+    const forecastRows = agg.forecastLabels.slice(0, horizon).map((label, i) => [
+      label,
+      Math.round(agg.orders.forecast[i] ?? 0).toString(),
+      `${Math.round(agg.orders.lower95[i] ?? 0)} – ${Math.round(agg.orders.upper95[i] ?? 0)}`,
+      peso(agg.revenue.forecast[i] ?? 0),
+      `${peso(agg.revenue.lower95[i] ?? 0)} – ${peso(agg.revenue.upper95[i] ?? 0)}`,
+    ]);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(20, 30, 48);
+    doc.text("Daily Forecast Breakdown", 40, curY);
+    autoTable(doc, {
+      startY: curY + 8,
+      head: [["Date", "Orders (forecast)", "Orders 95% CI", "Revenue (forecast)", "Revenue 95% CI"]],
+      body: forecastRows,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [20, 30, 48] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+    });
+    curY = (doc as any).lastAutoTable.finalY + 20;
+  }
+
+  // Per-item table
+  if (items && items.length > 0) {
+    if (curY > 450) { doc.addPage(); curY = 40; }
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(20, 30, 48);
+    doc.text("Per-Item Forecast & Reorder Advice", 40, curY);
+    const itemRows = items.slice(0, 30).map((it) => [
+      it.itemName,
+      it.category,
+      String(it.currentQuantity),
+      String(Math.round(it.forecastedDemand)),
+      String(Math.round(it.reorderQuantity)),
+      it.reorderUrgency.toUpperCase(),
+    ]);
+    autoTable(doc, {
+      startY: curY + 8,
+      head: [["Item", "Category", "Stock", "Forecast Demand", "Reorder Qty", "Urgency"]],
+      body: itemRows,
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [20, 30, 48] },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      columnStyles: {
+        5: {
+          fontStyle: "bold",
+          textColor: (cell: any) => {
+            const v = cell.raw as string;
+            if (v === "CRITICAL") return [220, 38, 38];
+            if (v === "HIGH") return [217, 119, 6];
+            if (v === "MEDIUM") return [37, 99, 235];
+            return [22, 163, 74];
+          },
+        },
+      },
+    });
+  }
+
+  // Footer
+  const pages = doc.getNumberOfPages();
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    const h = doc.internal.pageSize.getHeight();
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text("JOAP Hardware Trading · Demand Forecasting · Confidential", 40, h - 15);
+    doc.text(`Page ${p} of ${pages}`, 800, h - 15);
+  }
+  doc.save(`joap-forecast-${horizon}d-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
 export default function ForecastingPage() {
   const [horizon, setHorizon] = useState(14);
   const [search, setSearch] = useState("");
   const [expandedItem, setExpandedItem] = useState<string | null>(null);
+  const [exportingPDF, setExportingPDF] = useState(false);
 
   const { data: aggData, isLoading: aggLoading } = useQuery<{ success: boolean; data: AggregateData }>({
     queryKey: ["/api/forecast/aggregate", horizon],
@@ -194,19 +322,36 @@ export default function ForecastingPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-1.5">
-          {HORIZON_OPTIONS.map((opt) => (
-            <Button
-              key={opt.value}
-              size="sm"
-              variant={horizon === opt.value ? "default" : "outline"}
-              className="h-8 text-xs"
-              onClick={() => setHorizon(opt.value)}
-              data-testid={`button-horizon-${opt.value}`}
-            >
-              {opt.label}
-            </Button>
-          ))}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1.5">
+            {HORIZON_OPTIONS.map((opt) => (
+              <Button
+                key={opt.value}
+                size="sm"
+                variant={horizon === opt.value ? "default" : "outline"}
+                className="h-8 text-xs"
+                onClick={() => setHorizon(opt.value)}
+                data-testid={`button-horizon-${opt.value}`}
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 text-xs gap-1.5"
+            disabled={exportingPDF || aggLoading}
+            onClick={async () => {
+              setExportingPDF(true);
+              try { await exportForecastPDF(agg, items, horizon); }
+              finally { setExportingPDF(false); }
+            }}
+            data-testid="button-export-forecast"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {exportingPDF ? "Exporting…" : "Export PDF"}
+          </Button>
         </div>
       </div>
 

@@ -125,11 +125,107 @@ const initialsOf = (name: string) =>
     .join("")
     .toUpperCase();
 
+async function exportDashboardPDF(stats: any, advData: any) {
+  const { default: jsPDF } = await import("jspdf");
+  const doc = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+  const now = new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", hour12: true });
+  const peso = (v: number) => "₱" + Math.round(v).toLocaleString("en-PH");
+
+  // Header
+  doc.setFillColor(30, 41, 59);
+  doc.rect(0, 0, 595, 80, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(20);
+  doc.setFont("helvetica", "bold");
+  doc.text("JOAP Hardware Trading", 40, 36);
+  doc.setFontSize(11);
+  doc.setFont("helvetica", "normal");
+  doc.text("Dashboard Summary Report", 40, 54);
+  doc.setFontSize(9);
+  doc.setTextColor(180, 195, 215);
+  doc.text(`Generated: ${now}`, 40, 70);
+  doc.setTextColor(0, 0, 0);
+
+  // KPI grid
+  const kpis = [
+    { label: "Orders Today", value: String(stats?.totalOrdersToday ?? 0) },
+    { label: "Today's Revenue", value: peso(stats?.todayRevenue ?? 0) },
+    { label: "Total Revenue", value: peso(stats?.totalRevenue ?? 0) },
+    { label: "Pending Payments", value: String(stats?.pendingPayments ?? 0) },
+    { label: "Pending Releases", value: String(stats?.pendingReleases ?? 0) },
+    { label: "Active Users", value: String(stats?.activeUsers ?? 0) },
+    { label: "Total Items", value: String(stats?.totalItems ?? 0) },
+    { label: "Critical Stock", value: String(stats?.criticalStock ?? 0) },
+    { label: "Low Stock Items", value: String(stats?.lowStock ?? 0) },
+    { label: "Completed Orders", value: String(stats?.completedOrders ?? 0) },
+  ];
+
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(30, 41, 59);
+  doc.text("Key Performance Indicators", 40, 110);
+  doc.setFont("helvetica", "normal");
+
+  const cols = 2;
+  const cardW = 240, cardH = 50, gap = 15, startY = 125, startX = 40;
+  kpis.forEach((kpi, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = startX + col * (cardW + gap);
+    const y = startY + row * (cardH + gap);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(x, y, cardW, cardH, 4, 4, "F");
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(x, y, cardW, cardH, 4, 4, "S");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text(kpi.label.toUpperCase(), x + 10, y + 16);
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(15, 23, 42);
+    doc.text(kpi.value, x + 10, y + 36);
+    doc.setFont("helvetica", "normal");
+  });
+
+  // Trend summary
+  const trendY = startY + Math.ceil(kpis.length / cols) * (cardH + gap) + 20;
+  if (advData?.revenueByDay?.length) {
+    doc.setFontSize(13);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 41, 59);
+    doc.text("Revenue by Day (last 7 days)", 40, trendY);
+    doc.setFont("helvetica", "normal");
+    const rows = advData.revenueByDay.slice(-7).map((d: any) => [
+      d.date || d.label || "—",
+      peso(d.revenue ?? d.value ?? 0),
+      String(d.orders ?? "—"),
+    ]);
+    const { default: autoTable } = await import("jspdf-autotable");
+    autoTable(doc, {
+      startY: trendY + 10,
+      head: [["Date", "Revenue", "Orders"]],
+      body: rows,
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [30, 41, 59] },
+    });
+  }
+
+  // Footer
+  const pageH = doc.internal.pageSize.getHeight();
+  doc.setFontSize(8);
+  doc.setTextColor(150);
+  doc.text("JOAP Hardware Trading ERP · Confidential", 40, pageH - 20);
+  doc.text(`Page 1`, 540, pageH - 20);
+
+  doc.save(`joap-dashboard-${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
 export default function DashboardPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("daily");
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [exportingPDF, setExportingPDF] = useState(false);
 
   // Daily sales goal sourced from system settings (set by admin in Settings)
   const { data: settingsRes } = useQuery<{ success: boolean; data: { dailySalesGoal?: number } }>({
@@ -280,9 +376,19 @@ export default function DashboardPage() {
         }
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={exportingPDF}
+              onClick={async () => {
+                setExportingPDF(true);
+                try { await exportDashboardPDF(stats, advData); }
+                finally { setExportingPDF(false); }
+              }}
+              data-testid="button-export-dashboard"
+            >
               <Download className="w-3.5 h-3.5 mr-1.5" />
-              Export
+              {exportingPDF ? "Exporting…" : "Export PDF"}
             </Button>
             <Button size="sm" onClick={() => navigate("/orders")}>
               <Plus className="w-3.5 h-3.5 mr-1.5" />
@@ -550,8 +656,11 @@ export default function DashboardPage() {
                     {new Date().getHours() < 12 ? "AM" : "PM"} shift
                   </div>
                 </div>
-                <Badge className="badge-success text-[10.5px]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
+                <Badge className="badge-success text-[10.5px] flex items-center gap-1.5">
+                  <span className="relative flex h-2 w-2">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                  </span>
                   Active
                 </Badge>
               </div>
@@ -636,8 +745,11 @@ export default function DashboardPage() {
               <CardTitle className="text-[13.5px] font-semibold tracking-tight">Activity feed</CardTitle>
               <div className="text-[12px] text-muted-foreground mt-0.5">Real-time across the store</div>
             </div>
-            <Badge className="badge-success">
-              <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
+            <Badge className="badge-success flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-green-500" />
+              </span>
               Live
             </Badge>
           </CardHeader>

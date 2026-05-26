@@ -13,7 +13,6 @@ import { Loader2, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { LiveClock } from "@/components/live-clock";
-import { TweaksPanel } from "@/components/tweaks-panel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -179,8 +178,6 @@ function AuthenticatedLayout() {
       {/* Floating Calculator */}
       {calcUsername && <FloatingCalculator username={calcUsername} />}
 
-      {/* Tweaks panel — floating, persists in localStorage */}
-      <TweaksPanel />
 
       {/* TUTORIAL OVERHAUL: The Tutorial component needs to be overhauled.
           See task.txt for full instructions. Key changes:

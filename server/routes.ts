@@ -1999,6 +1999,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         { date: new Date(), accountName, debit: parsed.data.amountPaid, credit: 0, description: `Payment for order ${order.trackingNumber} via ${methodLabel}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
         { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: parsed.data.amountPaid, description: `Revenue from order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
       ]);
+      // Sync AccountingAccount balances (asset accounts: balance += debit-credit; revenue: balance += credit-debit)
+      await Promise.all([
+        AccountingAccount.findOneAndUpdate(
+          { accountName },
+          { $inc: { balance: parsed.data.amountPaid } }, // asset: debit increases balance
+          { upsert: false }
+        ),
+        AccountingAccount.findOneAndUpdate(
+          { accountName: "Sales Revenue" },
+          { $inc: { balance: parsed.data.amountPaid } }, // revenue: credit increases balance
+          { upsert: false }
+        ),
+      ]);
 
       await logAction("PAYMENT_LOGGED", req.user!.username, order.trackingNumber, { amount: parsed.data.amountPaid, method: parsed.data.paymentMethod, transactionCode });
       emitEvent("PAYMENT_LOGGED", { orderId: order._id, transactionCode });
@@ -2100,6 +2113,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const parsed = ledgerEntrySchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed");
       const entry = await GeneralLedgerEntry.create({ ...parsed.data, date: new Date(parsed.data.date), actor: req.user!.username });
+      // Sync AccountingAccount balance for manually posted entries
+      // For Asset/Expense accounts: debit increases balance, credit decreases
+      // For Liability/Equity/Revenue accounts: credit increases balance, debit decreases
+      const account = await AccountingAccount.findOne({ accountName: entry.accountName });
+      if (account) {
+        const isDebitNormal = ["Asset", "Expense"].includes(account.accountType);
+        const balanceDelta = isDebitNormal
+          ? entry.debit - entry.credit
+          : entry.credit - entry.debit;
+        await AccountingAccount.findByIdAndUpdate(account._id, { $inc: { balance: balanceDelta } });
+      }
       await logAction("LEDGER_POSTED", req.user!.username, entry.accountName, { debit: entry.debit, credit: entry.credit });
       emitEvent("LEDGER_POSTED");
       return ok(res, entry);

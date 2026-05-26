@@ -37,7 +37,7 @@ type OrderItemLocal = { itemId: string; itemName: string; qty: number; originalU
 function PoolAdminRow({ order, allUsers, onAssignClick, onNavigate }: {
   order: IOrder; allUsers: SimpleUser[]; onAssignClick: (username: string) => void; onNavigate: () => void;
 }) {
-  const [assignVal, setAssignVal] = useState("");
+  const [open, setOpen] = useState(false);
   return (
     <TableRow data-testid={`row-pool-admin-${order._id}`}>
       <TableCell className="font-mono text-sm font-semibold cursor-pointer" onClick={onNavigate}>{order.trackingNumber}</TableCell>
@@ -45,13 +45,55 @@ function PoolAdminRow({ order, allUsers, onAssignClick, onNavigate }: {
       <TableCell className="text-xs text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
       <TableCell className="text-right cursor-pointer" onClick={onNavigate}>{formatCurrency(order.totalAmount)}</TableCell>
       <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
-      <TableCell onClick={(e) => e.stopPropagation()}>
-        <Select value={assignVal} onValueChange={(v) => { setAssignVal(v); onAssignClick(v); setAssignVal(""); }}>
-          <SelectTrigger className="h-7 text-xs w-[130px]" data-testid={`select-pool-assign-${order._id}`}><SelectValue placeholder="Assign..." /></SelectTrigger>
-          <SelectContent>
-            {allUsers.map((u) => <SelectItem key={u.username} value={u.username}>{u.username}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <TableCell onClick={(e) => e.stopPropagation()} className="py-1.5">
+        {/* SaaS-style assign button — shows user avatar stack then drops a clean list */}
+        <div className="relative">
+          <button
+            className="flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full border border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all text-xs font-medium text-muted-foreground hover:text-foreground group"
+            onClick={() => setOpen((v) => !v)}
+            data-testid={`button-pool-assign-${order._id}`}
+          >
+            <UserCheck className="h-3.5 w-3.5 group-hover:text-primary transition-colors shrink-0" />
+            <span>Assign to…</span>
+          </button>
+          {open && (
+            <>
+              {/* Backdrop */}
+              <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+              {/* Dropdown */}
+              <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[160px] rounded-xl border border-border bg-popover shadow-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150">
+                <div className="px-3 py-2 border-b">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Assign to staff</p>
+                </div>
+                <div className="max-h-[200px] overflow-y-auto py-1">
+                  {allUsers.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-2 text-center">No staff available</p>
+                  ) : allUsers.map((u) => {
+                    const initials = u.username.slice(0, 2).toUpperCase();
+                    const colors = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-rose-500", "bg-cyan-500"];
+                    const color = colors[u.username.charCodeAt(0) % colors.length];
+                    return (
+                      <button
+                        key={u.username}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent text-sm transition-colors text-left"
+                        onClick={() => { onAssignClick(u.username); setOpen(false); }}
+                        data-testid={`assign-to-${u.username}-${order._id}`}
+                      >
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-bold shrink-0 ${color}`}>
+                          {initials}
+                        </span>
+                        <span className="font-medium truncate">{u.username}</span>
+                        {u.role === "ADMIN" && (
+                          <span className="ml-auto text-[9px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">Admin</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </TableCell>
     </TableRow>
   );
