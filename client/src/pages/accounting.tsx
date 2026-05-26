@@ -359,6 +359,21 @@ export default function AccountingPage() {
       toast({ title: "Failed to add entry", description: err.message, variant: "destructive" }),
   });
 
+  const deleteAccountMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("DELETE", `/api/accounting/accounts/${id}`);
+      const body = await res.json();
+      if (!body.success) throw new Error(body.error || "Delete failed");
+      return body;
+    },
+    onSuccess: (body) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/accounts"] });
+      toast({ title: `Deleted "${body.data?.deleted ?? "account"}"` });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Failed to delete account", description: err.message, variant: "destructive" }),
+  });
+
   // ─── PDF EXPORT ───────────────────────────────────────────────────────────
 
   function exportPDF() {
@@ -756,6 +771,63 @@ export default function AccountingPage() {
           </Card>
         ))}
       </div>
+
+      {/* Chart of Accounts — live balances + admin delete for empty accounts */}
+      <Card>
+        <CardHeader className="py-3 px-4">
+          <CardTitle className="text-base flex items-center gap-2">
+            <BookOpen className="h-4 w-4" />
+            Chart of Accounts
+            <span className="text-xs font-normal text-muted-foreground ml-1">
+              · {accounts.length} accounts · live balances
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-[40%]">Account</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Balance</TableHead>
+                {isAdmin && <TableHead className="w-[80px] text-right">Actions</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {accounts.map((a) => (
+                <TableRow key={a._id}>
+                  <TableCell className="font-medium">{a.accountName}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">{a.accountType}</Badge>
+                  </TableCell>
+                  <TableCell className="text-right font-mono tabular-nums">
+                    {formatCurrency(a.balance || 0)}
+                  </TableCell>
+                  {isAdmin && (
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                        title={(a.balance || 0) !== 0 ? "Cannot delete — has ledger history" : "Delete account"}
+                        disabled={(a.balance || 0) !== 0 || deleteAccountMutation.isPending}
+                        onClick={() => {
+                          if (confirm(`Delete account "${a.accountName}"? This is only allowed for accounts with no ledger history.`)) {
+                            deleteAccountMutation.mutate(a._id);
+                          }
+                        }}
+                        data-testid={`delete-account-${a._id}`}
+                      >
+                        Delete
+                      </Button>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
 
       {/* General Ledger (only tab) */}
       <div className="space-y-4">
