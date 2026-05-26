@@ -36,7 +36,6 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import jsPDF from "jspdf";
@@ -243,10 +242,20 @@ export default function AccountingPage() {
     data: { entries: IGeneralLedgerEntry[]; total: number };
   }>({
     queryKey: ["/api/accounting/ledger"],
+    refetchInterval: 30_000,
+  });
+
+  const { data: summaryData } = useQuery<{
+    success: boolean;
+    data: Array<{ accountName: string; debit: number; credit: number; net: number }>;
+  }>({
+    queryKey: ["/api/accounting/summary"],
+    refetchInterval: 30_000,
   });
 
   const accounts = accountsData?.data || [];
   const ledgerEntries = ledgerData?.data?.entries || [];
+  const summaryEntries = summaryData?.data || [];
 
   const filteredEntries = useMemo(
     () => (dateFilter ? ledgerEntries.filter((e) => e.date.startsWith(dateFilter)) : ledgerEntries),
@@ -257,35 +266,53 @@ export default function AccountingPage() {
   const totalCredits = filteredEntries.reduce((sum, e) => sum + e.credit, 0);
   const netBalance = totalDebits - totalCredits;
 
-  // Per-account aggregates for charts
-  const accountChartData = useMemo(() => {
-    const map: Record<string, { label: string; debit: number; credit: number; type: string }> = {};
-    filteredEntries.forEach((e) => {
-      if (!map[e.accountName]) map[e.accountName] = { label: e.accountName, debit: 0, credit: 0, type: "" };
-      map[e.accountName].debit += e.debit;
-      map[e.accountName].credit += e.credit;
-    });
-    accounts.forEach((a) => {
-      if (map[a.accountName]) map[a.accountName].type = a.accountType;
-    });
-    return Object.values(map).sort((a, b) => b.debit + b.credit - (a.debit + a.credit));
-  }, [filteredEntries, accounts]);
-
-  // Account type totals for pie chart
-  const accountTypeData = useMemo(() => {
-    const map: Record<string, number> = {};
-    accounts.forEach((a) => {
-      const t = a.accountType || "Other";
-      map[t] = (map[t] || 0) + Math.abs(a.balance);
-    });
-    return Object.entries(map).map(([name, value]) => ({ name, value })).filter((d) => d.value > 0);
+  // Account type lookup map
+  const accountTypeMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    accounts.forEach((a) => { map[a.accountName] = a.accountType; });
+    // Hard-code well-known names in case not in accounts list
+    map["Cash/GCash"] = "Asset";
+    map["Accounts Receivable"] = "Asset";
+    map["Inventory"] = "Asset";
+    map["Accounts Payable"] = "Liability";
+    map["Owner's Equity"] = "Equity";
+    map["Sales Revenue"] = "Revenue";
+    map["Cost of Goods Sold"] = "Expense";
+    map["Operating Expenses"] = "Expense";
+    return map;
   }, [accounts]);
 
-  // Revenue vs Expense summary
-  const revenueTotal = accounts.filter((a) => a.accountType === "Revenue").reduce((s, a) => s + a.balance, 0);
-  const expenseTotal = accounts.filter((a) => a.accountType === "Expense").reduce((s, a) => s + a.balance, 0);
-  const assetTotal = accounts.filter((a) => a.accountType === "Asset").reduce((s, a) => s + a.balance, 0);
-  const liabilityTotal = accounts.filter((a) => a.accountType === "Liability").reduce((s, a) => s + a.balance, 0);
+  // Per-account aggregates for charts (computed from summary for accuracy)
+  const accountChartData = useMemo(() => {
+    return summaryEntries
+      .map((s) => ({ label: s.accountName, debit: s.debit, credit: s.credit, type: accountTypeMap[s.accountName] || "Other" }))
+      .sort((a, b) => b.debit + b.credit - (a.debit + a.credit));
+  }, [summaryEntries, accountTypeMap]);
+
+  // Account type totals for pie chart (from summary)
+  const accountTypeData = useMemo(() => {
+    const map: Record<string, number> = {};
+    summaryEntries.forEach((s) => {
+      const t = accountTypeMap[s.accountName] || "Other";
+      map[t] = (map[t] || 0) + Math.abs(s.net);
+    });
+    return Object.entries(map).map(([name, value]) => ({ name, value })).filter((d) => d.value > 0);
+  }, [summaryEntries, accountTypeMap]);
+
+  // Financial position totals — computed from ALL ledger entries via summary endpoint
+  const revenueTotal = summaryEntries
+    .filter((s) => accountTypeMap[s.accountName] === "Revenue")
+    .reduce((sum, s) => sum + (s.credit - s.debit), 0);
+  const expenseTotal = summaryEntries
+    .filter((s) => accountTypeMap[s.accountName] === "Expense")
+    .reduce((sum, s) => sum + (s.debit - s.credit), 0);
+  const assetTotal = summaryEntries
+    .filter((s) => accountTypeMap[s.accountName] === "Asset")
+    .reduce((sum, s) => sum + (s.debit - s.credit), 0);
+  const liabilityTotal = summaryEntries
+    .filter((s) => accountTypeMap[s.accountName] === "Liability")
+    .reduce((sum, s) => sum + (s.credit - s.debit), 0);
+  const grossProfit = revenueTotal - expenseTotal;
 
   // ─── FORM ─────────────────────────────────────────────────────────────────
 
@@ -603,11 +630,11 @@ export default function AccountingPage() {
             bg: netBalance >= 0 ? "bg-emerald-50 dark:bg-emerald-950/30" : "bg-red-50 dark:bg-red-950/30",
           },
           {
-            label: "Accounts",
-            value: accounts.length.toString(),
+            label: "Gross Profit",
+            value: formatCurrency(grossProfit),
             icon: BookOpen,
-            color: "text-violet-600",
-            bg: "bg-violet-50 dark:bg-violet-950/30",
+            color: grossProfit >= 0 ? "text-violet-600" : "text-red-600",
+            bg: grossProfit >= 0 ? "bg-violet-50 dark:bg-violet-950/30" : "bg-red-50 dark:bg-red-950/30",
           },
         ].map((kpi) => {
           const Icon = kpi.icon;
@@ -715,67 +742,12 @@ export default function AccountingPage() {
         </div>
       )}
 
-      {/* Tabs */}
-      <Tabs defaultValue="ledger">
-        <TabsList>
-          <TabsTrigger value="ledger" data-testid="tab-ledger">
-            General Ledger
-          </TabsTrigger>
-          <TabsTrigger value="accounts" data-testid="tab-accounts">
-            Chart of Accounts
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Chart of Accounts */}
-        <TabsContent value="accounts">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Chart of Accounts</CardTitle>
-            </CardHeader>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Code</TableHead>
-                    <TableHead>Account Name</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead className="text-right">Balance</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {accounts.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
-                        No accounts found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    accounts.map((account) => (
-                      <TableRow key={account._id} data-testid={`row-account-${account._id}`}>
-                        <TableCell className="font-mono text-sm">{account.accountCode}</TableCell>
-                        <TableCell className="font-medium">{account.accountName}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="text-xs">
-                            {account.accountType}
-                          </Badge>
-                        </TableCell>
-                        <TableCell
-                          className={`text-right font-semibold ${account.balance >= 0 ? "text-emerald-600" : "text-red-600"}`}
-                        >
-                          {formatCurrency(account.balance)}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* General Ledger */}
-        <TabsContent value="ledger">
-          <div className="space-y-4">
+      {/* General Ledger (only tab) */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">General Ledger</h2>
+        </div>
+        <div className="space-y-4">
             <div className="flex items-center gap-3 flex-wrap">
               <Input
                 type="date"
@@ -867,11 +839,11 @@ export default function AccountingPage() {
               </div>
             )}
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
 
       {/* Add Entry Dialog */}
       <Dialog open={addEntryOpen} onOpenChange={setAddEntryOpen}>
+
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Ledger Entry</DialogTitle>

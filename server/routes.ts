@@ -1994,7 +1994,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       );
       await order.save();
 
-      const accountName = isGcash ? "GCash Receivable" : "Cash on Hand";
+      const accountName = "Cash/GCash";
       await GeneralLedgerEntry.create([
         { date: new Date(), accountName, debit: parsed.data.amountPaid, credit: 0, description: `Payment for order ${order.trackingNumber} via ${methodLabel}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
         { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: parsed.data.amountPaid, description: `Revenue from order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
@@ -2004,12 +2004,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         AccountingAccount.findOneAndUpdate(
           { accountName },
           { $inc: { balance: parsed.data.amountPaid } }, // asset: debit increases balance
-          { upsert: false }
+          { upsert: true }
         ),
         AccountingAccount.findOneAndUpdate(
           { accountName: "Sales Revenue" },
           { $inc: { balance: parsed.data.amountPaid } }, // revenue: credit increases balance
-          { upsert: false }
+          { upsert: true }
         ),
       ]);
 

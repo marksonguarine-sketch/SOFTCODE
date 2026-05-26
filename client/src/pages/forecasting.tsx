@@ -176,29 +176,29 @@ async function exportForecastPDF(agg: AggregateData | undefined, items: ItemFore
     const itemRows = items.slice(0, 30).map((it) => [
       it.itemName,
       it.category,
-      String(it.currentQuantity),
-      String(Math.round(it.forecastedDemand)),
-      String(Math.round(it.reorderQuantity)),
+      String(it.currentStock),
+      String(Math.round(it.totalForecastDemand)),
+      it.daysOfStock !== null ? `${Math.round(it.daysOfStock)}d` : "N/A",
       it.reorderUrgency.toUpperCase(),
     ]);
     autoTable(doc, {
       startY: curY + 8,
-      head: [["Item", "Category", "Stock", "Forecast Demand", "Reorder Qty", "Urgency"]],
+      head: [["Item", "Category", "Stock", "Forecast Demand", "Days of Stock", "Urgency"]],
       body: itemRows,
       styles: { fontSize: 8 },
       headStyles: { fillColor: [20, 30, 48] },
       alternateRowStyles: { fillColor: [248, 250, 252] },
       columnStyles: {
-        5: {
-          fontStyle: "bold",
-          textColor: (cell: any) => {
-            const v = cell.raw as string;
-            if (v === "CRITICAL") return [220, 38, 38];
-            if (v === "HIGH") return [217, 119, 6];
-            if (v === "MEDIUM") return [37, 99, 235];
-            return [22, 163, 74];
-          },
-        },
+        5: { fontStyle: "bold" },
+      },
+      willDrawCell: (data: any) => {
+        if (data.section === "body" && data.column.index === 5) {
+          const v = data.cell.raw as string;
+          if (v === "CRITICAL") doc.setTextColor(220, 38, 38);
+          else if (v === "HIGH") doc.setTextColor(217, 119, 6);
+          else if (v === "MEDIUM") doc.setTextColor(37, 99, 235);
+          else doc.setTextColor(22, 163, 74);
+        }
       },
     });
   }
