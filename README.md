@@ -2,7 +2,7 @@
 
 # JOAP Hardware Trading
 
-**ERP system for a Tarlac, Philippines hardware store.**
+**ERP system for a Antipolo, Philippines hardware store.**
 Inventory · Orders · Reservations · Billing · Accounting · Reports — in one place.
 
 ![status](https://img.shields.io/badge/status-active-success?style=flat-square)
@@ -15,7 +15,7 @@ Inventory · Orders · Reservations · Billing · Accounting · Reports — in o
 
 ## What this is
 
-A full-stack ERP built for the way Philippine hardware stores actually work: walk-in counter sales, online + GCash deliveries, bulk reservations, multi-employee shifts, peso-denominated accounting, and Filipino-style customer relationships. Designed for the JOAP Hardware Trading branch in Tarlac.
+A full-stack ERP built for the way Philippine hardware stores actually work: walk-in counter sales, online + GCash deliveries, bulk reservations, multi-employee shifts, peso-denominated accounting, and Filipino-style customer relationships. Designed for the JOAP Hardware Trading branch in Antipolo.
 
 Built on **React 18 + Vite + TypeScript** on the front, **Express + MongoDB (Atlas) + Mongoose** on the back, **Socket.io** for realtime, and **edge-tts** for spoken order announcements.
 

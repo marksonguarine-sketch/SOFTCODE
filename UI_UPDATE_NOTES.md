@@ -26,7 +26,7 @@ This document records every file added or modified when adopting the new modern 
 | `client/src/index.css` | **Replaced wholesale** with the new theme tokens from `claude-design-work/client/src/index.css`. All shadcn CSS variables preserved by name — only values changed. Adds `.badge-success` / `.badge-warning` / `.badge-danger` / `.badge-info` drop-in utility classes, tight typographic table headers, refined card shadows, primary-color focus rings, and the active-nav amber left bar (`2.5px`). Elevation system (`hover-elevate`, `active-elevate`, etc.) preserved verbatim. |
 | `client/index.html` | Added `Manrope:wght@200..800` to the existing Google Fonts `<link>`. No other fonts removed. |
 | `client/src/App.tsx` | Header restructured into 3 zones: left (SidebarTrigger + Breadcrumbs + GlobalSearch), right (LiveClock + TweaksPanel + user pill + logout). GlobalSearch input now shows ⌘K keyboard hint and listens for `Ctrl/Cmd+K` to focus. User pill replaced with an avatar circle + name on a muted-bg rounded chip. Existing data-testids preserved. |
-| `client/src/components/app-sidebar.tsx` | Brand block restyled: amber tile with hammer icon, bold "JOAP Hardware" + muted "Trading · Tarlac" subtitle. All existing nav items and structure preserved. |
+| `client/src/components/app-sidebar.tsx` | Brand block restyled: amber tile with hammer icon, bold "JOAP Hardware" + muted "Trading · Antipolo" subtitle. All existing nav items and structure preserved. |
 
 ---
 

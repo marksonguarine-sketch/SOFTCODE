@@ -487,6 +487,46 @@ const faqs = [
     question: "How is revenue calculated in the Accounting module?",
     answer: "Revenue is posted to the Sales Revenue account automatically when an order payment is logged. Cash is posted to the Cash (or GCash) asset account. The General Ledger tab shows all entries. The Summary tab shows the net balance per account. Totals update in real time as payments are processed.",
   },
+  {
+    question: "How do I export the Forecasting report as a PDF?",
+    answer: "Open the Forecasting page and click the 'Export PDF' button in the header. The PDF includes a screenshot of the live forecast chart, aggregate KPI cards (forecast orders, revenue, sigma), the full daily forecast breakdown table with 95% confidence intervals, and a per-item reorder advice table with color-coded urgency. The file is named joap-forecast-{horizon}d-{date}.pdf and downloads automatically.",
+  },
+  {
+    question: "What's the difference between the floating Tweaks button and Settings?",
+    answer: "There used to be a floating Tweaks button at the bottom-right of every page. It has been removed. All appearance options (dark mode, density, accent color) now live inside the Settings page under 'Appearance Tweaks' at the bottom. Changes still apply instantly and are saved per device — no save button needed.",
+  },
+  {
+    question: "Why is the calculator stuck at the bottom-right?",
+    answer: "The floating calculator is intentionally fixed at the bottom-right corner of every page and cannot be dragged. This ensures it never overlaps important UI and is always in the same place. You can hide it entirely from Settings → Calculator → Show Calculator toggle (saved per user).",
+  },
+  {
+    question: "Why does my dark-mode preference not apply to other users?",
+    answer: "All Appearance Tweaks (dark mode, density, accent color) are stored in your browser's localStorage and apply only to your device. They are NOT shared with other users or admins. This way each person can have their own comfortable look without changing the system-wide theme.",
+  },
+  {
+    question: "What does 'Total Stocks' on the Inventory KPI mean?",
+    answer: "Total Stocks is the count of distinct items (SKUs) currently in the catalog. It is shown as the top-left KPI on the Inventory page and updates immediately when items are added or deleted. (This was previously labelled 'Total SKUs' — same metric, clearer name.)",
+  },
+  {
+    question: "How do I tell which staff are currently online?",
+    answer: "On the Employees page (admin only), each employee card shows a small dot next to their name: green = active within the last 5 minutes (currently online), gray = not seen recently. The same indicator appears on the Users page. The 'On Shift Now' card on the Dashboard also shows the currently logged-in user with a green pulsing dot.",
+  },
+  {
+    question: "What happens to inventory when an offer (discount) is applied to an order?",
+    answer: "Discounts only affect the order total and accounting entries — they do not change the underlying item quantities deducted from inventory. Stock deduction still uses the original ordered quantity. The Sales Revenue posted to the ledger reflects the discounted amount, so revenue and inventory remain consistent.",
+  },
+  {
+    question: "How are pending requests counted in the sidebar badge?",
+    answer: "The 'Requests' sidebar badge counts ONLY requests with status 'pending'. Once an admin accepts or declines a request, it no longer contributes to the count. If there are no pending requests, no badge is shown at all.",
+  },
+  {
+    question: "How do I send a message to admin or reply to one?",
+    answer: "Employees: scroll to 'Send Message to Admin' on this Help page, fill in a subject and message, and submit. Admins: see all employee messages in the 'Employee Messages' section on this page. Click the Reply button on any message to send a response back. All messages are saved and time-stamped.",
+  },
+  {
+    question: "Does the dashboard Export PDF include charts?",
+    answer: "The Dashboard Export PDF currently includes KPI cards (Orders Today, Today's Revenue, Total Revenue, Pending Payments, etc.) and a 7-day revenue trend table. It is a quick-glance summary report. For chart-rich exports, use the Forecasting Export PDF (full chart screenshot) or the Accounting Export PDF (bar charts + pie summary).",
+  },
 ];
 
 // ─── TIPS ─────────────────────────────────────────────────────────────────────

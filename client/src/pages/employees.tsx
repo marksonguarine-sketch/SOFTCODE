@@ -56,6 +56,12 @@ function fmtPHP(v: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(v);
 }
 
+/** Presence helper — green dot only if the user was active within the last 5 min. */
+function isOnline(lastLogin: string | null | undefined): boolean {
+  if (!lastLogin) return false;
+  return new Date(lastLogin).getTime() > Date.now() - 5 * 60 * 1000;
+}
+
 function ProfileModal({ username, onClose }: { username: string | null; onClose: () => void }) {
   const { toast } = useToast();
   const [analyticsRange, setAnalyticsRange] = useState<"1d" | "3d" | "7d" | "1m">("7d");
@@ -605,9 +611,9 @@ export default function EmployeesPage() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     <p className="font-semibold truncate">{emp.username}</p>
-                    {emp.isActive
-                      ? <span className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
-                      : <span className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />}
+                    {isOnline(emp.lastLogin)
+                      ? <span title="Online" className="w-1.5 h-1.5 rounded-full bg-green-500 flex-shrink-0" />
+                      : <span title={emp.isActive ? "Offline" : "Account inactive"} className="w-1.5 h-1.5 rounded-full bg-gray-400 flex-shrink-0" />}
                   </div>
                   <p className="text-xs text-muted-foreground font-mono">{emp.profile?.employeeId || "—"}</p>
                   <p className="text-xs text-muted-foreground truncate">{emp.profile?.email || "No email"}</p>

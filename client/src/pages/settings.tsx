@@ -235,7 +235,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-20">
+    <div className="p-3 sm:p-6 space-y-6 pb-24 overflow-y-auto h-full max-h-screen">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (
@@ -284,6 +284,7 @@ export default function SettingsPage() {
                     <FormMessage />
                   </FormItem>
                 )} />
+                {/* Light/Dark picker removed — dark mode lives in the Tweaks panel (per-browser, persists in localStorage). */}
                 <FormField control={form.control} name="autoApplyOffers" render={({ field }) => (
                   <FormItem className="flex items-center justify-between rounded-md border p-3">
                     <div>
@@ -559,6 +560,19 @@ export default function SettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-5">
+
+          {/* Dark mode */}
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">Dark Mode</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Toggle dark theme — saved to this browser only</p>
+            </div>
+            <Switch
+              checked={tweaks.dark}
+              onCheckedChange={(v) => updateTweak("dark", v)}
+              data-testid="switch-dark-mode"
+            />
+          </div>
 
           {/* Density */}
           <div>
