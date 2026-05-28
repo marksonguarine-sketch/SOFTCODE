@@ -5,7 +5,14 @@ import { Loader2, AlertTriangle, ArrowRight } from "lucide-react";
 import { JoapLogo } from "@/components/joap-logo";
 import { loginSchema, type LoginInput } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
@@ -24,7 +31,11 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [liveStats, setLiveStats] = useState<{ ordersToday: number; totalItems: number; totalStaff: number }>({
+  const [liveStats, setLiveStats] = useState<{
+    ordersToday: number;
+    totalItems: number;
+    totalStaff: number;
+  }>({
     ordersToday: 0,
     totalItems: 0,
     totalStaff: 0,
@@ -47,7 +58,9 @@ export default function LoginPage() {
             totalStaff: Number(json.data.totalStaff) || 0,
           });
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     fetchStats();
     const iv = setInterval(fetchStats, 20000);
@@ -96,7 +109,9 @@ export default function LoginPage() {
         <div className="relative flex items-center gap-3">
           <JoapLogo size={44} className="rounded-lg shadow-md" />
           <div>
-            <div className="text-[15px] font-bold tracking-tight">JOAP Hardware</div>
+            <div className="text-[15px] font-bold tracking-tight">
+              JOAP Hardware
+            </div>
             <div className="text-[12px] text-slate-400">Trading · Antipolo</div>
           </div>
         </div>
@@ -104,19 +119,31 @@ export default function LoginPage() {
         {/* Headline */}
         <div className="relative max-w-md">
           <h2 className="text-[34px] font-bold leading-tight tracking-tight mb-3">
-            One system for every<br/>order, item, and peso.
+            One system for every
+            <br />
+            order, item, and peso.
           </h2>
           <p className="text-slate-400 text-[14px] leading-relaxed">
-            Real-time inventory, walk-in &amp; delivery orders, billing &amp; reservations &mdash;
-            all in one place, designed for the way Philippine hardware stores actually work.
+            for testing purpose only: account: admin password: admin123
+            <br></br>
+            account: john password: john123
           </p>
 
           {/* Mini metrics — live from server */}
           <div className="grid grid-cols-3 gap-4 mt-8">
             {[
-              { label: "Orders today", value: (liveStats?.ordersToday ?? 0).toLocaleString() },
-              { label: "Items tracked", value: (liveStats?.totalItems ?? 0).toLocaleString() },
-              { label: "Total staff", value: (liveStats?.totalStaff ?? 0).toLocaleString() },
+              {
+                label: "Orders today",
+                value: (liveStats?.ordersToday ?? 0).toLocaleString(),
+              },
+              {
+                label: "Items tracked",
+                value: (liveStats?.totalItems ?? 0).toLocaleString(),
+              },
+              {
+                label: "Total staff",
+                value: (liveStats?.totalStaff ?? 0).toLocaleString(),
+              },
             ].map((m) => (
               <div key={m.label}>
                 <div className="font-mono text-[22px] font-semibold tracking-tight text-amber-300 tabular-nums">
@@ -143,12 +170,19 @@ export default function LoginPage() {
           <div className="md:hidden flex items-center gap-3 mb-8">
             <JoapLogo size={40} className="rounded-lg" />
             <div>
-              <div className="text-[14px] font-bold tracking-tight">JOAP Hardware</div>
-              <div className="text-[11px] text-muted-foreground">Trading · Antipolo</div>
+              <div className="text-[14px] font-bold tracking-tight">
+                JOAP Hardware
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Trading · Antipolo
+              </div>
             </div>
           </div>
 
-          <h1 className="text-[24px] font-bold tracking-tight mb-1.5" data-testid="text-login-title">
+          <h1
+            className="text-[24px] font-bold tracking-tight mb-1.5"
+            data-testid="text-login-title"
+          >
             Welcome back
           </h1>
           <p className="text-[13px] text-muted-foreground mb-7">
@@ -162,7 +196,8 @@ export default function LoginPage() {
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
-                Your session was ended because the account was logged in elsewhere. Please log in again.
+                Your session was ended because the account was logged in
+                elsewhere. Please log in again.
               </span>
             </div>
           )}
@@ -229,8 +264,12 @@ export default function LoginPage() {
                 disabled={isLoading}
                 data-testid="button-login"
               >
-                {isLoading && <Loader2 className="animate-spin mr-1.5 h-4 w-4" />}
-                {isLoading ? "Signing in…" : (
+                {isLoading && (
+                  <Loader2 className="animate-spin mr-1.5 h-4 w-4" />
+                )}
+                {isLoading ? (
+                  "Signing in…"
+                ) : (
                   <>
                     Sign in
                     <ArrowRight className="ml-1.5 h-4 w-4" />
