@@ -4,6 +4,8 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { connectDB } from "./db";
 import { seedDatabase } from "./seed";
+import SiteVisitor from "./models/SiteVisitor";
+import { sendTelegramNotification, parseDeviceName } from "./lib/telegram";
 
 const app = express();
 const httpServer = createServer(app);
@@ -62,6 +64,46 @@ app.use((req, res, next) => {
   next();
 });
 
+function visitorTrackingMiddleware(req: Request, res: Response, next: NextFunction) {
+  const isPageLoad =
+    req.method === "GET" &&
+    !req.path.startsWith("/api") &&
+    !req.path.startsWith("/node_modules") &&
+    !req.path.startsWith("/@") &&
+    !req.path.startsWith("/src") &&
+    !req.path.startsWith("/assets") &&
+    !req.path.match(/\.(js|ts|css|map|ico|png|jpg|jpeg|svg|woff|woff2|ttf|gif|webp)$/i);
+
+  if (!isPageLoad) return next();
+
+  const ip =
+    (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() ||
+    req.socket.remoteAddress ||
+    "unknown";
+
+  const userAgent = req.headers["user-agent"] || "";
+  const deviceName = parseDeviceName(userAgent);
+
+  SiteVisitor.findOneAndUpdate(
+    { ip },
+    { $inc: { visitCount: 1 }, lastSeen: new Date() },
+    { upsert: true, returnDocument: "after" }
+  )
+    .then((visitor) => {
+      const count = visitor?.visitCount ?? 1;
+      const message =
+        `🔔 <b>New Site Visit</b>\n\n` +
+        `📱 <b>Device name:</b> ${deviceName}\n` +
+        `🔢 <b>How many times visit:</b> ${count}`;
+      return sendTelegramNotification(message);
+    })
+    .catch((err) => {
+      console.warn("[visitor] tracking error:", err);
+    });
+
+  next();
+}
+
 (async () => {
   await connectDB();
   await seedDatabase();
@@ -82,14 +124,15 @@ app.use((req, res, next) => {
   });
 
   if (process.env.NODE_ENV === "production") {
+    app.use(visitorTrackingMiddleware);
     serveStatic(app);
   } else {
+    app.use(visitorTrackingMiddleware);
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
 
   const port = parseInt(process.env.PORT || "5000", 10);
-  // reusePort is a Linux-only socket option; on Windows it raises ENOTSUP
   const isWindows = process.platform === "win32";
   const listenOpts: any = { port, host: "0.0.0.0" };
   if (!isWindows) listenOpts.reusePort = true;
