@@ -31,7 +31,7 @@ import { GraduationCap } from "lucide-react";
 import { useSocketNotifications } from "@/hooks/use-socket-notifications";
 import { FloatingCalculator } from "@/components/floating-calculator";
 import { ErrorBoundary } from "@/components/error-boundary";
-import { DevTimeLog } from "@/components/dev-time-log";
+import { DevTimeLog } from "@/devlogs/dev-time-log";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";

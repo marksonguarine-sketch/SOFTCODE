@@ -1256,4 +1256,13 @@ Root cause: Railway/nixpacks builds have no `.git`, so the build-time `gen-chang
 
 ---
 
+## 30. Session 12 — self-contained `devlogs/` folder with curated first-person time log
+
+- Moved the Developer Time Log into a single self-contained folder: `client/src/devlogs/` holds both `dev-time-log.tsx` and `devlogs.json`. Deleting that folder + the one import in `App.tsx` removes the feature with no other impact.
+- `devlogs.json` is a curated, hand-written store (newest-first) written in the owner's first-person voice ("I added…", "I fixed…"). It deliberately omits build-tooling noise, internal "session" wording, the visitor-tracking/Telegram commit, and host-cleanup churn. Each entry has `{ id, date, label, title, body }`.
+- The component no longer fetches from GitHub and no longer reads a build-time generated file. Removed `scripts/gen-changelog.mjs`, `client/src/changelog.generated.json`, the old `client/src/components/dev-time-log.tsx`, and the changelog step in `script/build.ts`.
+- Verified live: 42 entries render, grouped by day, with zero occurrences of "session", "Claude/Anthropic", "Replit", or "Telegram/visitor".
+
+---
+
 End of code.md.
