@@ -24,9 +24,21 @@ export default defineConfig({
     },
   },
   root: path.resolve(import.meta.dirname, "client"),
+  // Strip console/debugger and all comments from the production bundle so that
+  // viewing source / devtools reveals only minified, unreadable output.
+  esbuild: {
+    drop: ["console", "debugger"],
+    legalComments: "none",
+  },
   build: {
     outDir: path.resolve(import.meta.dirname, "dist/public"),
     emptyOutDir: true,
+    // No sourcemaps in production — nothing maps the bundle back to readable TS.
+    sourcemap: false,
+    minify: "esbuild",
+    cssCodeSplit: true,
+    reportCompressedSize: false,
+    chunkSizeWarningLimit: 4000,
   },
   server: {
     fs: {

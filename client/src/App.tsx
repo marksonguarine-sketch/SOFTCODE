@@ -9,10 +9,11 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { SettingsProvider } from "@/lib/settings-context";
-import { Loader2, LogOut } from "lucide-react";
+import { Loader2, LogOut, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { LiveClock } from "@/components/live-clock";
+import { getTweaks, setDark, THEME_EVENT } from "@/lib/theme";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +54,28 @@ import PendingPaymentPage from "@/pages/pending-payment";
 import RequestsPage from "@/pages/requests";
 import EmployeesPage from "@/pages/employees";
 import ProfilePage from "@/pages/profile";
+
+/** Header light/dark toggle — sits next to the live clock. */
+function ThemeToggle() {
+  const [dark, setDarkState] = useState(() => getTweaks().dark);
+  useEffect(() => {
+    const sync = () => setDarkState(getTweaks().dark);
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-9 w-9"
+      title={dark ? "Switch to light mode" : "Switch to dark mode"}
+      onClick={() => setDark(!dark)}
+      data-testid="button-theme-toggle"
+    >
+      {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+    </Button>
+  );
+}
 
 function AdminRoute({ component: Component }: { component: React.ComponentType }) {
   const { isAdmin } = useAuth();
@@ -177,6 +200,7 @@ function AuthenticatedLayout() {
             <Breadcrumbs />
             <div className="flex-1" />
             <LiveClock />
+            <ThemeToggle />
             <span className="text-sm text-muted-foreground hidden md:inline pl-2 border-l border-border" data-testid="text-header-user">
               {user?.username}
             </span>

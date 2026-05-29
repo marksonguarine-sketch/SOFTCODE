@@ -6,7 +6,7 @@
 // Run manually after committing:  node scripts/gen-changelog.mjs
 // It is also wired into the build via the "prebuild" npm script.
 import { execSync } from "node:child_process";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -44,6 +44,19 @@ const commits = raw
     };
   })
   .filter((c) => c.hash);
+
+// Never clobber a good bundled changelog with an empty one. On CI/deploy hosts
+// without a .git directory (e.g. Railway/nixpacks) `git log` yields nothing —
+// in that case keep whatever was committed so the Time Log still has data.
+if (commits.length === 0 && existsSync(OUT)) {
+  try {
+    const existing = JSON.parse(readFileSync(OUT, "utf8"));
+    if (Array.isArray(existing.commits) && existing.commits.length > 0) {
+      console.log(`[gen-changelog] git produced 0 commits — keeping existing ${existing.commits.length} from ${OUT}`);
+      process.exit(0);
+    }
+  } catch { /* fall through and write empty */ }
+}
 
 const payload = {
   generatedAt: new Date().toISOString(),

@@ -46,6 +46,7 @@ export interface IOrderDoc extends Document {
   paymentMethod: string;
   fulfillmentStatus: string;
   sourceChannel: string;
+  createdBy: string;
   notes: string;
   scheduledDate?: Date;
   currentStatus: string;
@@ -124,6 +125,7 @@ const orderSchema = new Schema<IOrderDoc>(
       default: "pending",
     },
     sourceChannel: { type: String, default: "walkin" },
+    createdBy: { type: String, default: "" },
     notes: { type: String, default: "" },
     scheduledDate: { type: Date },
     currentStatus: { type: String, default: "pending" },

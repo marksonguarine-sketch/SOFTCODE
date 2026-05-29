@@ -1,7 +1,15 @@
 {
-  "generatedAt": "2026-05-29T15:51:06.234Z",
-  "total": 49,
+  "generatedAt": "2026-05-29T16:28:10.086Z",
+  "total": 50,
   "commits": [
+    {
+      "hash": "b801717df5a13b2fca111d6c10f4f2cfc879b0fc",
+      "shortHash": "b801717",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-29T23:55:27+08:00",
+      "subject": "Session 10: implement REQUEST.pdf — order logic, reservations, inventory roles, backup email, Developers Time Log",
+      "body": "Orders: in-dropdown staff search; pool type/sort filters + 10/page pagination; order channel/payment/fulfillment constraint logic (walk-in => Paid only); Next disabled without data; unsaved-changes close confirmation; Refund removed.\n\nPending Payment: added History of Payment (paid orders, timestamps, CSV export). Dashboard: Inventory snapshot moved to top.\n\nInventory: admin image upload in grid + table; green/amber/red status colors; fixed Image column misalignment; apiRequest supports FormData. Accounting: ledger 20/page pagination + date & account filters.\n\nNew INVENTORY_MANAGER role (employee subtype, inventory-only access + nav/route scoping). Settings: default light + boot-time tweak persistence + scroll fix.\n\nMaintenance: Resend backup email (editable, password-gated) + Email-Now; full wipe re-seeds default admin; restore requires admin password + typing ACCEPT.\n\nReservations: handle-this-order endpoint + buttons; Reservation History with date-range CSV export. Forecasting: per-item includes ALL items (flat fallback for sparse data). Developers Time Log screen from full git history (gen-changelog at build).\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+    },
     {
       "hash": "4e632b76571ac81c4b1cc1f08381287a299beb83",
       "shortHash": "4e632b7",

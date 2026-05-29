@@ -1,6 +1,6 @@
-import { useMemo } from "react";
-import { ArrowRight, GitCommit, Clock, User, Hammer } from "lucide-react";
-import changelog from "@/changelog.generated.json";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, GitCommit, Clock, User, Hammer, Loader2, GitBranch } from "lucide-react";
+import bundled from "@/changelog.generated.json";
 
 interface Commit {
   hash: string;
@@ -11,17 +11,19 @@ interface Commit {
   body: string;
 }
 
-// Categorize a commit by its subject so each entry gets a colored label chip,
-// mimicking a "sassy" release-notes look.
+// Public repo — the Time Log pulls the live commit history from GitHub so it is
+// always current, and falls back to the changelog baked at build time.
+const REPO = "marksonguarine-sketch/SOFTCODE";
+
 function labelFor(subject: string): { text: string; cls: string } {
   const s = subject.toLowerCase();
-  if (/(fix|bug|patch|hotfix)/.test(s)) return { text: "FIX", cls: "bg-red-500/15 text-red-300 ring-red-500/30" };
-  if (/(add|new|implement|introduce|create)/.test(s)) return { text: "FEATURE", cls: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" };
-  if (/(refactor|clean|rename|move|reorganize)/.test(s)) return { text: "REFACTOR", cls: "bg-purple-500/15 text-purple-300 ring-purple-500/30" };
-  if (/(update|change|tweak|improve|polish|enhance|adjust)/.test(s)) return { text: "UPDATE", cls: "bg-sky-500/15 text-sky-300 ring-sky-500/30" };
-  if (/(build|deploy|ci|release|bump|pin|config)/.test(s)) return { text: "BUILD", cls: "bg-amber-500/15 text-amber-300 ring-amber-500/30" };
-  if (/(doc|readme|comment|session)/.test(s)) return { text: "DOCS", cls: "bg-slate-500/20 text-slate-300 ring-slate-500/30" };
-  return { text: "CHORE", cls: "bg-slate-500/20 text-slate-300 ring-slate-500/30" };
+  if (/(fix|bug|patch|hotfix)/.test(s)) return { text: "FIX", cls: "bg-rose-500/10 text-rose-300 ring-rose-500/30" };
+  if (/(add|new|implement|introduce|create|feat)/.test(s)) return { text: "FEATURE", cls: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30" };
+  if (/(refactor|clean|rename|move|reorganize)/.test(s)) return { text: "REFACTOR", cls: "bg-violet-500/10 text-violet-300 ring-violet-500/30" };
+  if (/(update|change|tweak|improve|polish|enhance|adjust)/.test(s)) return { text: "UPDATE", cls: "bg-sky-500/10 text-sky-300 ring-sky-500/30" };
+  if (/(build|deploy|ci|release|bump|pin|config)/.test(s)) return { text: "BUILD", cls: "bg-amber-500/10 text-amber-300 ring-amber-500/30" };
+  if (/(doc|readme|comment|session)/.test(s)) return { text: "DOCS", cls: "bg-slate-400/10 text-slate-300 ring-slate-400/25" };
+  return { text: "CHORE", cls: "bg-slate-400/10 text-slate-300 ring-slate-400/25" };
 }
 
 function fmtDateTime(iso: string): string {
@@ -30,20 +32,60 @@ function fmtDateTime(iso: string): string {
       year: "numeric", month: "short", day: "2-digit",
       hour: "2-digit", minute: "2-digit", hour12: true,
     });
-  } catch {
-    return iso;
+  } catch { return iso; }
+}
+
+async function fetchGitHubCommits(): Promise<Commit[]> {
+  const out: Commit[] = [];
+  // Up to 3 pages × 100 = 300 commits, plenty for this project.
+  for (let page = 1; page <= 3; page++) {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/commits?per_page=100&page=${page}`, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!res.ok) throw new Error(`GitHub ${res.status}`);
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) break;
+    for (const c of data) {
+      const msg: string = c.commit?.message || "";
+      const nl = msg.indexOf("\n");
+      out.push({
+        hash: c.sha,
+        shortHash: (c.sha || "").slice(0, 7),
+        author: c.commit?.author?.name || c.author?.login || "Unknown",
+        date: c.commit?.author?.date || "",
+        subject: (nl === -1 ? msg : msg.slice(0, nl)).trim(),
+        body: (nl === -1 ? "" : msg.slice(nl + 1)).trim(),
+      });
+    }
+    if (data.length < 100) break;
   }
+  return out;
 }
 
 export function DevTimeLog({ onProceed }: { onProceed: () => void }) {
-  const commits = (changelog.commits as Commit[]) || [];
-  const total = changelog.total ?? commits.length;
+  const [commits, setCommits] = useState<Commit[]>(() => (bundled.commits as Commit[]) || []);
+  const [source, setSource] = useState<"bundled" | "live" | "loading">("loading");
 
-  // Group commits by calendar day for a timeline feel.
+  useEffect(() => {
+    let alive = true;
+    fetchGitHubCommits()
+      .then((live) => {
+        if (!alive || live.length === 0) { setSource("bundled"); return; }
+        setCommits(live);
+        setSource("live");
+      })
+      .catch(() => { if (alive) setSource("bundled"); });
+    return () => { alive = false; };
+  }, []);
+
+  const total = commits.length;
+
   const groups = useMemo(() => {
     const map = new Map<string, Commit[]>();
     for (const c of commits) {
-      const day = new Date(c.date).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" });
+      const day = c.date
+        ? new Date(c.date).toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric" })
+        : "Undated";
       if (!map.has(day)) map.set(day, []);
       map.get(day)!.push(c);
     }
@@ -51,65 +93,85 @@ export function DevTimeLog({ onProceed }: { onProceed: () => void }) {
   }, [commits]);
 
   return (
-    <div className="fixed inset-0 z-[100] overflow-y-auto bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 text-slate-100">
-      {/* Decorative glow */}
-      <div className="pointer-events-none fixed inset-0 opacity-40 [background:radial-gradient(60rem_40rem_at_70%_-10%,rgba(99,102,241,0.25),transparent),radial-gradient(50rem_30rem_at_-10%_20%,rgba(16,185,129,0.18),transparent)]" />
+    <div className="fixed inset-0 z-[100] overflow-y-auto bg-[#0a0e1a] text-slate-100">
+      {/* Subtle grid + glow backdrop */}
+      <div
+        className="pointer-events-none fixed inset-0 opacity-[0.35]"
+        style={{
+          backgroundImage:
+            "radial-gradient(50rem 34rem at 75% -8%, rgba(56,189,248,0.16), transparent), radial-gradient(44rem 30rem at -10% 10%, rgba(99,102,241,0.16), transparent)",
+        }}
+      />
+      <div
+        className="pointer-events-none fixed inset-0 opacity-[0.04]"
+        style={{
+          backgroundImage: "linear-gradient(rgba(255,255,255,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.5) 1px, transparent 1px)",
+          backgroundSize: "44px 44px",
+        }}
+      />
 
-      <div className="relative mx-auto max-w-3xl px-5 py-12 sm:px-8">
+      <div className="relative mx-auto max-w-3xl px-5 py-14 sm:px-8">
         {/* Header */}
         <div className="flex flex-col items-center text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-emerald-500 shadow-lg shadow-indigo-500/30">
-            <Hammer className="h-8 w-8 text-white" />
+          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-900 ring-1 ring-white/10 shadow-2xl shadow-sky-500/10">
+            <Hammer className="h-7 w-7 text-sky-300" />
           </div>
-          <h1 className="bg-gradient-to-r from-indigo-300 via-sky-200 to-emerald-300 bg-clip-text text-3xl font-black tracking-tight text-transparent sm:text-4xl">
-            DEVELOPERS TIME LOG
+          <p className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.2em] text-slate-400 ring-1 ring-white/10">
+            <GitBranch className="h-3 w-3" /> JOAP Hardware Trading
+          </p>
+          <h1 className="text-3xl font-bold tracking-tight text-white sm:text-[2.6rem] sm:leading-tight">
+            Developers Time Log
           </h1>
-          <p className="mt-3 max-w-xl text-sm text-slate-400">
-            Every line of sweat, shipped. A complete, timestamped chronicle of what we
-            built for <span className="font-semibold text-slate-200">JOAP Hardware Trading</span> — straight from the git history.
-            <span className="block mt-1 text-slate-500">{total} commits and counting. Scroll the whole story. 🔨</span>
+          <p className="mt-4 max-w-xl text-[14.5px] leading-relaxed text-slate-400">
+            A complete, timestamped record of everything engineered for the system — sourced directly from the
+            project's version control history.
+          </p>
+          <p className="mt-2 text-[12.5px] text-slate-500">
+            {source === "loading" ? (
+              <span className="inline-flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" /> Loading commit history…</span>
+            ) : (
+              <>{total} commits · {source === "live" ? "live from GitHub" : "bundled with this build"}</>
+            )}
           </p>
 
           <button
             onClick={onProceed}
             data-testid="button-proceed-system"
-            className="group mt-7 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-indigo-500 to-emerald-500 px-7 py-3 text-sm font-bold uppercase tracking-wider text-white shadow-lg shadow-indigo-500/30 transition-all hover:scale-[1.03] hover:shadow-indigo-500/50 active:scale-95"
+            className="group mt-8 inline-flex items-center gap-2 rounded-lg bg-white px-7 py-3 text-sm font-semibold text-slate-900 shadow-lg transition-all hover:bg-slate-100 active:scale-[0.98]"
           >
             Proceed to the System
-            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
           </button>
         </div>
 
         {/* Timeline */}
-        <div className="mt-12">
-          <div className="mb-4 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-slate-500">
-            <span className="h-px flex-1 bg-slate-700/60" />
-            Logs
-            <span className="h-px flex-1 bg-slate-700/60" />
+        <div className="mt-14">
+          <div className="mb-6 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">
+            <span className="h-px flex-1 bg-white/10" />
+            Changelog
+            <span className="h-px flex-1 bg-white/10" />
           </div>
 
-          {commits.length === 0 && (
-            <p className="text-center text-sm text-slate-500">No commit history was bundled with this build.</p>
+          {total === 0 && source !== "loading" && (
+            <p className="text-center text-sm text-slate-500">No commit history is available.</p>
           )}
 
-          <div className="space-y-8">
+          <div className="space-y-9">
             {groups.map(([day, dayCommits]) => (
               <div key={day}>
-                <div className="sticky top-0 z-10 -mx-1 mb-3 bg-slate-950/70 px-1 py-1 backdrop-blur">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-indigo-300/80">{day}</span>
+                <div className="sticky top-0 z-10 -mx-1 mb-4 bg-[#0a0e1a]/85 px-1 py-1.5 backdrop-blur">
+                  <span className="text-[12px] font-semibold tracking-wide text-sky-300/90">{day}</span>
+                  <span className="ml-2 text-[11px] text-slate-600">{dayCommits.length} commit{dayCommits.length !== 1 ? "s" : ""}</span>
                 </div>
-                <div className="relative space-y-3 border-l border-slate-700/60 pl-5">
+                <div className="relative space-y-3 border-l border-white/10 pl-6">
                   {dayCommits.map((c) => {
                     const label = labelFor(c.subject);
                     return (
                       <div key={c.hash} className="relative" data-testid={`commit-${c.shortHash}`}>
-                        {/* Node dot */}
-                        <span className="absolute -left-[1.45rem] top-1.5 flex h-3 w-3 items-center justify-center">
-                          <span className="h-3 w-3 rounded-full bg-gradient-to-br from-indigo-400 to-emerald-400 ring-4 ring-slate-950" />
-                        </span>
-                        <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-4 transition-colors hover:border-indigo-500/40 hover:bg-slate-800/70">
+                        <span className="absolute -left-[1.65rem] top-2 h-2.5 w-2.5 rounded-full bg-sky-400 ring-4 ring-[#0a0e1a]" />
+                        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4 transition-colors hover:border-sky-400/30 hover:bg-white/[0.06]">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className={`rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${label.cls}`}>
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ${label.cls}`}>
                               {label.text}
                             </span>
                             <span className="inline-flex items-center gap-1 font-mono text-[11px] text-slate-500">
@@ -122,9 +184,9 @@ export function DevTimeLog({ onProceed }: { onProceed: () => void }) {
                               <User className="h-3 w-3" />{c.author}
                             </span>
                           </div>
-                          <p className="mt-2 text-sm font-semibold leading-snug text-slate-100">{c.subject}</p>
+                          <p className="mt-2 text-[14px] font-semibold leading-snug text-slate-100">{c.subject}</p>
                           {c.body && (
-                            <pre className="mt-2 whitespace-pre-wrap break-words font-sans text-[12.5px] leading-relaxed text-slate-400">{c.body}</pre>
+                            <pre className="mt-2 max-h-64 overflow-hidden whitespace-pre-wrap break-words font-sans text-[12.5px] leading-relaxed text-slate-400">{c.body}</pre>
                           )}
                         </div>
                       </div>
@@ -135,15 +197,15 @@ export function DevTimeLog({ onProceed }: { onProceed: () => void }) {
             ))}
           </div>
 
-          <div className="mt-10 flex flex-col items-center gap-4">
-            <p className="text-xs text-slate-600">— end of log —</p>
+          <div className="mt-12 flex flex-col items-center gap-4">
+            <p className="text-[11px] uppercase tracking-[0.25em] text-slate-700">End of log</p>
             <button
               onClick={onProceed}
               data-testid="button-proceed-system-bottom"
-              className="group inline-flex items-center gap-2 rounded-full border border-slate-600 px-6 py-2.5 text-sm font-bold uppercase tracking-wider text-slate-200 transition-all hover:border-indigo-400 hover:text-white"
+              className="group inline-flex items-center gap-2 rounded-lg border border-white/15 px-6 py-2.5 text-sm font-semibold text-slate-200 transition-all hover:border-white/40 hover:text-white"
             >
               Proceed to the System
-              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </button>
           </div>
         </div>

@@ -1227,4 +1227,33 @@ This session worked through the full `REQUEST.pdf` brief (11 pages of annotated 
 
 ---
 
+## 29. Session 11 — REQUEST.pdf round 2 (live time log, true light default, header toggle, settings layout, source hardening)
+
+Follow-up after the owner reviewed the deployed build. Fixes for the issues they reported, all verified live against the dev server (hardcoded Mongo) with the preview tools.
+
+### 29.1 Developers Time Log showed "0 commits" in production
+Root cause: Railway/nixpacks builds have no `.git`, so the build-time `gen-changelog.mjs` overwrote the bundled changelog with an empty one.
+- `scripts/gen-changelog.mjs` now **never clobbers** a good changelog: if git yields 0 commits and a non-empty `changelog.generated.json` already exists, it keeps it.
+- `client/src/components/dev-time-log.tsx` now fetches the commit history **live from the GitHub API** (`/repos/marksonguarine-sketch/SOFTCODE/commits`, up to 300) and only falls back to the bundled JSON if the API is unavailable. Verified: 69 commits render "live from GitHub".
+- Redesigned the screen to look more professional: dark slate canvas + faint grid, "JOAP Hardware Trading" eyebrow, day-grouped timeline, colour-coded FEATURE/FIX/UPDATE/… chips, hash/time/author per commit, white "Proceed to the System" CTA.
+
+### 29.2 True light-mode default + header toggle
+- New `client/src/lib/theme.ts` is the single source of truth for the per-device tweaks (dark/density/accent): `getTweaks`, `applyTweaks`, `saveTweaks`, `setDark`, `THEME_EVENT`. `main.tsx`, `settings.tsx`, and the header all use it.
+- `settings-context.tsx` `applySettings` no longer lets the DB `theme` force dark — dark is **only** on when the local tweaks toggle says so, so the system always opens in **light**.
+- Added a sun/moon **light/dark toggle in the top header** next to the live clock (`data-testid=button-theme-toggle`); it stays in sync with the Settings → Appearance Tweaks switch via `THEME_EVENT`. Verified: default light, toggle flips + persists.
+
+### 29.3 Settings "scroll too much"
+- The page content actually fills correctly (no trailing empty space) — the stale deployed build was the culprit. To reduce scrolling regardless, the settings cards now lay out in a **responsive 2-column grid** (`lg:grid-cols-2`, `max-w-5xl`); the Save button spans both columns. Verified: page height dropped ~3450→2440px at 1440px wide.
+
+### 29.4 Hide source on view-source / inspect
+- `vite.config.ts`: `build.sourcemap=false`, `minify:"esbuild"`, and `esbuild.drop=["console","debugger"]` + `legalComments:"none"`. Verified the production bundle has **no `.map` files**, single-character identifiers, and effectively no `console.log`.
+
+### 29.5 Reservation audit ("who created")
+- Added `createdBy` to the Order model + shared `IOrder`, set on order/reservation creation. The Reservation History list/export already surfaces it.
+
+### 29.6 Verification (live)
+- `npx tsc --noEmit` → 0 errors. `npm run build` → clean. Dev server smoke (preview): login → light mode, header toggle works, settings 2-col, inventory image buttons (17) + green status badges, Dev Time Log 69 live commits.
+
+---
+
 End of code.md.

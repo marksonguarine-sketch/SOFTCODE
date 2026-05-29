@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { TWEAKS_DEFAULTS, THEME_EVENT, getTweaks, saveTweaks, applyTweaks, type Tweaks } from "@/lib/theme";
 import { useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -74,9 +75,6 @@ function loadGoogleFontPreview(fontName: string) {
   document.head.appendChild(link);
 }
 
-const TWEAKS_KEY = "joap-tweaks-v1";
-type Tweaks = { dark: boolean; density: string; accentHue: number };
-const TWEAKS_DEFAULTS: Tweaks = { dark: false, density: "balanced", accentHue: 220 };
 const DENSITY_OPTIONS = [
   { value: "compact", label: "Compact", px: "13px" },
   { value: "balanced", label: "Balanced", px: "14px" },
@@ -92,40 +90,7 @@ const ACCENT_PRESETS = [
   { hue: 330, label: "Pink" },
 ];
 
-function loadTweaks(): Tweaks {
-  try {
-    const raw = localStorage.getItem(TWEAKS_KEY);
-    if (raw) return { ...TWEAKS_DEFAULTS, ...JSON.parse(raw) };
-  } catch { /* ignore */ }
-  return { ...TWEAKS_DEFAULTS };
-}
-
-function saveTweaks(t: Tweaks) {
-  try { localStorage.setItem(TWEAKS_KEY, JSON.stringify(t)); } catch { /* ignore */ }
-}
-
-function applyTweaks(t: { dark: boolean; density: string; accentHue: number }) {
-  const root = document.documentElement;
-  root.classList.toggle("dark", t.dark);
-  const densityMap: Record<string, string> = { compact: "13px", balanced: "14px", comfortable: "15px" };
-  root.style.fontSize = densityMap[t.density] || "14px";
-  const hue = t.accentHue;
-  if (t.dark) {
-    root.style.setProperty("--primary", `${hue} 95% 58%`);
-    root.style.setProperty("--ring", `${hue} 95% 58%`);
-    root.style.setProperty("--sidebar-primary", `${hue} 95% 60%`);
-    root.style.setProperty("--chart-1", `${hue} 95% 60%`);
-    root.style.setProperty("--accent", `${hue} 40% 22%`);
-    root.style.setProperty("--accent-foreground", `${hue} 90% 75%`);
-  } else {
-    root.style.setProperty("--primary", `${hue} 92% 50%`);
-    root.style.setProperty("--ring", `${hue} 92% 50%`);
-    root.style.setProperty("--sidebar-primary", `${hue} 92% 50%`);
-    root.style.setProperty("--chart-1", `${hue} 92% 50%`);
-    root.style.setProperty("--accent", `${hue} 85% 94%`);
-    root.style.setProperty("--accent-foreground", `${hue} 70% 30%`);
-  }
-}
+const loadTweaks = getTweaks;
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -142,16 +107,24 @@ export default function SettingsPage() {
   });
 
   // Tweaks (per-device appearance)
-  const [tweaks, setTweaks] = useState(loadTweaks);
+  const [tweaks, setTweaks] = useState<Tweaks>(loadTweaks);
 
-  const updateTweak = <K extends keyof typeof tweaks>(key: K, value: (typeof tweaks)[K]) => {
+  const updateTweak = <K extends keyof Tweaks>(key: K, value: Tweaks[K]) => {
     setTweaks((prev) => {
       const next = { ...prev, [key]: value };
       saveTweaks(next);
       applyTweaks(next);
+      window.dispatchEvent(new CustomEvent(THEME_EVENT, { detail: next }));
       return next;
     });
   };
+
+  // Keep the panel in sync when dark mode is toggled from the header switch.
+  useEffect(() => {
+    const sync = () => setTweaks(getTweaks());
+    window.addEventListener(THEME_EVENT, sync);
+    return () => window.removeEventListener(THEME_EVENT, sync);
+  }, []);
 
   const persistTts = (val: boolean) => {
     setTtsEnabled(val);
@@ -247,7 +220,7 @@ export default function SettingsPage() {
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))} className="space-y-6 max-w-2xl">
+        <form onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))} className="grid gap-5 lg:grid-cols-2 items-start max-w-5xl">
 
           {/* ── SYSTEM SETTINGS (admin only) ────────────────────────── */}
           {isAdmin && (
@@ -541,16 +514,18 @@ export default function SettingsPage() {
 
           {/* Save button (only for admin-saveable settings) */}
           {isAdmin && (
-            <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-settings" className="w-full sm:w-auto">
-              {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-              Save Settings
-            </Button>
+            <div className="lg:col-span-2">
+              <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-settings" className="w-full sm:w-auto">
+                {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                Save Settings
+              </Button>
+            </div>
           )}
         </form>
       </Form>
 
       {/* ── APPEARANCE TWEAKS (device-local, no server save) ────── */}
-      <div className="max-w-2xl">
+      <div className="max-w-5xl">
       <Card data-testid="card-appearance-tweaks">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">

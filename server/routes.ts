@@ -1847,6 +1847,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         paymentMethod: parsed.data.paymentMethod,
         fulfillmentStatus: parsed.data.fulfillmentStatus,
         sourceChannel: parsed.data.orderChannel,
+        createdBy: req.user!.username,
         notes: parsed.data.notes,
         scheduledDate: parsed.data.scheduledDate ? new Date(parsed.data.scheduledDate) : undefined,
         currentStatus: parsed.data.fulfillmentStatus,

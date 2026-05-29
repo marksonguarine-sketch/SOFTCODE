@@ -504,6 +504,7 @@ export interface IOrder {
   paymentMethod: PaymentMethod;
   fulfillmentStatus: FulfillmentStatus;
   sourceChannel: string;
+  createdBy?: string;
   notes: string;
   scheduledDate?: string;
   currentStatus: string;

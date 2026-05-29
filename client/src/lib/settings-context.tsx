@@ -86,8 +86,11 @@ function loadGoogleFont(fontName: string) {
 export function applySettings(settings: ISettings) {
   const root = document.documentElement;
 
-  // Dark / light mode — tweaks panel takes priority over DB setting
-  let isDark = settings.theme === "dark";
+  // Dark / light mode is a per-device choice that DEFAULTS TO LIGHT. The DB
+  // `theme` field no longer forces dark — only the local tweaks toggle does
+  // (header switch + Settings → Appearance Tweaks), so the system always opens
+  // in light mode until the user explicitly turns on dark.
+  let isDark = false;
   try {
     const tweaksRaw = localStorage.getItem("joap-tweaks-v1");
     if (tweaksRaw) {
