@@ -1,0 +1,15 @@
+# Pin Node 20 — Vite 7.3 + Mongoose 9 require Node >=20.19.0.
+# Without this, Railway/nixpacks defaults to Node 18 and the Vite build
+# fails with "crypto.hash is not a function".
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-10_x", "openssl"]
+
+[phases.install]
+cmds = ["npm ci --include=dev"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
