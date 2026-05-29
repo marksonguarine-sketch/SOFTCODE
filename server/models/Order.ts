@@ -110,7 +110,7 @@ const orderSchema = new Schema<IOrderDoc>(
     },
     paymentStatus: {
       type: String,
-      enum: ["pending_payment", "partial", "paid", "refunded"],
+      enum: ["pending_payment", "partial", "paid", "reservation_only"],
       default: "pending_payment",
     },
     paymentMethod: {

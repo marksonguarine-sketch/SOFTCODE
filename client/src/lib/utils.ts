@@ -12,7 +12,7 @@ export function getStatusBadgeClass(status: string): string {
     case "pending_payment": return "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300";
     case "partial": return "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300";
     case "paid": return "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300";
-    case "refunded": return "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300";
+    case "reservation_only": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
     case "pending": return "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300";
     case "processing": return "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300";
     case "ready": return "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300";

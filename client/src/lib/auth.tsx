@@ -6,6 +6,7 @@ interface AuthContextType {
   user: IUser | null;
   token: string | null;
   isAdmin: boolean;
+  isInventoryManager: boolean;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -19,6 +20,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const isAdmin = user?.role === "ADMIN";
+  const isInventoryManager = user?.role === "INVENTORY_MANAGER";
 
   useEffect(() => {
     if (token) {
@@ -78,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, isAdmin, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, isAdmin, isInventoryManager, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

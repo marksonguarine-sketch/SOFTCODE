@@ -1,6 +1,7 @@
 import { build as esbuild } from "esbuild";
 import { build as viteBuild } from "vite";
 import { rm, readFile } from "fs/promises";
+import { execSync } from "child_process";
 
 // Server deps to bundle — reduces openat(2) syscalls and improves cold-start time.
 const allowlist = [
@@ -23,6 +24,15 @@ const allowlist = [
 
 async function buildAll() {
   await rm("dist", { recursive: true, force: true });
+
+  // Bake the git history into the Developers Time Log before bundling the
+  // client. Tolerant of CI checkouts without git — the generator self-handles.
+  console.log("generating changelog...");
+  try {
+    execSync("node scripts/gen-changelog.mjs", { stdio: "inherit" });
+  } catch (err) {
+    console.warn("changelog generation skipped:", (err as Error).message);
+  }
 
   console.log("building client...");
   await viteBuild();

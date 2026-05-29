@@ -16,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
@@ -317,6 +317,7 @@ export default function UsersPage() {
               <SelectItem value="all">All Roles</SelectItem>
               <SelectItem value="ADMIN">Admin</SelectItem>
               <SelectItem value="EMPLOYEE">Employee</SelectItem>
+              <SelectItem value="INVENTORY_MANAGER">Inventory Manager</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -461,8 +462,12 @@ export default function UsersPage() {
                     <SelectContent>
                       <SelectItem value="ADMIN">Admin</SelectItem>
                       <SelectItem value="EMPLOYEE">Employee</SelectItem>
+                      <SelectItem value="INVENTORY_MANAGER">Inventory Manager</SelectItem>
                     </SelectContent>
                   </Select>
+                  <FormDescription className="text-xs">
+                    Inventory Managers are employees who can only access and manage the Inventory page.
+                  </FormDescription>
                   <FormMessage />
                 </FormItem>
               )} />

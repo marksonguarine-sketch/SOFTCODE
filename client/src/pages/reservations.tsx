@@ -626,6 +626,24 @@ function DayResCard({ r, onViewDetail }: { r: any; onViewDetail: () => void }) {
       toast({ title: "Reservation completed" });
     },
   });
+  const handleMutation = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/reservations/${r._id}/handle`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      toast({ title: "Reservation handled", description: "Converted to an order and sent to the order pool." });
+      navigate("/orders");
+    },
+    onError: (err: any) => toast({ title: "Could not handle", description: err.message, variant: "destructive" }),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", `/api/reservations/${r._id}?force=true`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/reservations"] });
+      toast({ title: "Reservation deleted" });
+    },
+    onError: (err: any) => toast({ title: "Could not delete", description: err.message, variant: "destructive" }),
+  });
 
   return (
     <div className="border rounded-lg p-3 space-y-2">
@@ -659,11 +677,25 @@ function DayResCard({ r, onViewDetail }: { r: any; onViewDetail: () => void }) {
         <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onViewDetail}>
           <Eye className="h-3 w-3 mr-1" />View Details
         </Button>
+        {r.fulfillmentStatus !== "completed" && r.fulfillmentStatus !== "cancelled" && (
+          <Button size="sm" className="h-7 text-xs" onClick={() => handleMutation.mutate()} disabled={handleMutation.isPending}>
+            <Package className="h-3 w-3 mr-1" />Handle this order
+          </Button>
+        )}
         {r.fulfillmentStatus === "pending" && (
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => confirmMutation.mutate()} disabled={confirmMutation.isPending}>
             <CheckCircle2 className="h-3 w-3 mr-1" />Confirm
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs text-destructive hover:text-destructive"
+          onClick={() => { if (window.confirm(`Delete reservation ${r.trackingNumber}? This cannot be undone.`)) deleteMutation.mutate(); }}
+          disabled={deleteMutation.isPending}
+        >
+          <Trash2 className="h-3 w-3 mr-1" />Delete
+        </Button>
         {r.fulfillmentStatus !== "completed" && r.fulfillmentStatus !== "cancelled" && (
           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => completeMutation.mutate()} disabled={completeMutation.isPending}>
             <Check className="h-3 w-3 mr-1" />Complete
@@ -694,7 +726,13 @@ function ListView({ reservations, isLoading }: { reservations: any[]; isLoading:
   const { toast } = useToast();
   const PAGE_SIZE = 15;
 
-  const filtered = useMemo(() => {
+  const [showHistory, setShowHistory] = useState(false);
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+
+  const isDone = (r: any) => r.fulfillmentStatus === "completed" || r.fulfillmentStatus === "cancelled";
+
+  const baseMatched = useMemo(() => {
     return reservations.filter((r) => {
       const s = search.toLowerCase();
       const matchSearch = !search ||
@@ -707,6 +745,45 @@ function ListView({ reservations, isLoading }: { reservations: any[]; isLoading:
       return matchSearch && matchType && matchStatus && matchPayment;
     });
   }, [reservations, search, typeFilter, statusFilter, paymentFilter]);
+
+  // Active list excludes completed/cancelled (those live in Reservation History
+  // below) unless the user has explicitly filtered to one of those statuses.
+  const filtered = useMemo(
+    () => (statusFilter === "all" ? baseMatched.filter((r) => !isDone(r)) : baseMatched),
+    [baseMatched, statusFilter],
+  );
+  const historyRes = useMemo(
+    () => reservations.filter(isDone).sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime()),
+    [reservations],
+  );
+
+  function exportHistoryCsv() {
+    const from = exportFrom ? new Date(exportFrom) : null;
+    const to = exportTo ? new Date(exportTo + "T23:59:59") : null;
+    const rows = historyRes.filter((r) => {
+      const d = new Date(r.scheduledDate || r.createdAt);
+      return (!from || d >= from) && (!to || d <= to);
+    });
+    const header = ["Tracking #", "Customer", "Type", "Status", "Payment", "Amount", "Scheduled", "Created By", "Created At"];
+    const body = rows.map((r) => [
+      r.trackingNumber, r.customerName,
+      ORDER_TYPE_LABEL[r.orderType] || r.orderType,
+      FULFILLMENT_LABELS[r.fulfillmentStatus] || r.fulfillmentStatus,
+      PAYMENT_LABELS[r.paymentStatus] || r.paymentStatus,
+      String(r.totalAmount || 0),
+      r.scheduledDate ? new Date(r.scheduledDate).toLocaleString("en-PH") : "",
+      r.createdBy || r.assignedBy || "—",
+      new Date(r.createdAt).toLocaleString("en-PH"),
+    ]);
+    const csv = [header, ...body].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `reservation-history-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
@@ -900,6 +977,60 @@ function ListView({ reservations, isLoading }: { reservations: any[]; isLoading:
           )}
         </>
       )}
+
+      {/* ── RESERVATION HISTORY (completed / cancelled) ──────────────────── */}
+      <Card className="mt-4">
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="text-base flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-green-600" /> Reservation History
+              <Badge variant="outline">{historyRes.length}</Badge>
+            </CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Input type="date" value={exportFrom} onChange={(e) => setExportFrom(e.target.value)} className="h-8 w-[150px]" data-testid="input-res-export-from" />
+              <span className="text-xs text-muted-foreground">to</span>
+              <Input type="date" value={exportTo} onChange={(e) => setExportTo(e.target.value)} className="h-8 w-[150px]" data-testid="input-res-export-to" />
+              <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportHistoryCsv} disabled={historyRes.length === 0} data-testid="button-export-res-history">
+                <FileText className="h-3.5 w-3.5 mr-1" /> Export CSV
+              </Button>
+              <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setShowHistory((v) => !v)}>
+                <ChevronDown className={cn("h-3.5 w-3.5 mr-1 transition-transform", showHistory && "rotate-180")} />
+                {showHistory ? "Hide" : "Show"}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        {showHistory && (
+          <CardContent>
+            {historyRes.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">No completed or cancelled reservations yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {historyRes.slice(0, 50).map((r) => (
+                  <div key={r._id} className="flex items-center justify-between gap-3 p-2.5 rounded-md border hover:bg-muted/30" data-testid={`row-res-history-${r._id}`}>
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{r.customerName} <span className="font-mono text-xs text-muted-foreground">{r.trackingNumber}</span></p>
+                      <p className="text-xs text-muted-foreground">
+                        {r.scheduledDate ? format(new Date(r.scheduledDate), "MMM d yyyy") : "Date TBD"} · {formatPHP(r.totalAmount || 0)}
+                        {r.createdBy && <> · by {r.createdBy}</>}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <StatusBadge status={r.fulfillmentStatus} size="xs" />
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setDetailRes(r)}>
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {historyRes.length > 50 && (
+                  <p className="text-xs text-muted-foreground text-center pt-1">Showing latest 50 — use Export CSV for the full range.</p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        )}
+      </Card>
 
       {detailRes && (
         <ReservationDetailDrawer reservation={detailRes} onClose={() => setDetailRes(null)} />

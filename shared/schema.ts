@@ -1,7 +1,13 @@
 import { z } from "zod";
 
-export const UserRole = { ADMIN: "ADMIN", EMPLOYEE: "EMPLOYEE" } as const;
+export const UserRole = { ADMIN: "ADMIN", EMPLOYEE: "EMPLOYEE", INVENTORY_MANAGER: "INVENTORY_MANAGER" } as const;
 export type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
+
+export const USER_ROLE_LABELS: Record<UserRoleType, string> = {
+  ADMIN: "Admin",
+  EMPLOYEE: "Employee",
+  INVENTORY_MANAGER: "Inventory Manager",
+};
 
 export const OrderStatus = {
   PENDING_PAYMENT: "Pending Payment",
@@ -26,7 +32,7 @@ export type OrderType = (typeof ORDER_TYPES)[number];
 export const ORDER_CHANNELS = ["walkin", "email", "sms", "messenger", "phone"] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
-export const PAYMENT_STATUSES = ["pending_payment", "partial", "paid", "refunded"] as const;
+export const PAYMENT_STATUSES = ["pending_payment", "partial", "paid", "reservation_only"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const PAYMENT_METHODS = ["cash", "gcash", "cod", "gcash_qr", "bank"] as const;
@@ -72,7 +78,44 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   pending_payment: "Pending Payment",
   partial: "Partial",
   paid: "Paid",
-  refunded: "Refunded",
+  reservation_only: "For Reservation Only",
+};
+
+// ─── Real-world workflow constraints ──────────────────────────────────────────
+// Which order channels make sense for each order type. Walk-in types can only be
+// transacted at the counter; online types come through a remote channel.
+export const ALLOWED_ORDER_CHANNELS: Record<OrderType, OrderChannel[]> = {
+  online_delivery: ["email", "sms", "messenger", "phone"],
+  online_pickup: ["email", "sms", "messenger", "phone"],
+  online_reservation: ["email", "sms", "messenger", "phone"],
+  walkin_delivery: ["walkin"],
+  walkin_pickup: ["walkin"],
+  walkin_reservation: ["walkin"],
+};
+
+// Which payment statuses make sense for each order type.
+//  • Walk-in pickup is paid on the spot → "Paid" only.
+//  • Reservations are not yet transacted → pending or "For Reservation Only".
+//  • Everything else may be unpaid, partial, or paid (no refunds in this flow).
+export const ALLOWED_PAYMENT_STATUSES: Record<OrderType, PaymentStatus[]> = {
+  online_delivery: ["pending_payment", "partial", "paid"],
+  online_pickup: ["pending_payment", "partial", "paid"],
+  walkin_delivery: ["pending_payment", "partial", "paid"],
+  walkin_pickup: ["paid"],
+  online_reservation: ["pending_payment", "reservation_only"],
+  walkin_reservation: ["pending_payment", "reservation_only"],
+};
+
+// Which fulfillment statuses can be chosen at creation / are valid for a type.
+//  • Pickup types are never "out for delivery".
+//  • Reservation types stay pending until handled into a real order.
+export const ALLOWED_FULFILLMENT_STATUSES: Record<OrderType, FulfillmentStatus[]> = {
+  online_delivery: ["pending", "processing", "ready", "out_for_delivery", "completed", "cancelled"],
+  walkin_delivery: ["pending", "processing", "ready", "out_for_delivery", "completed", "cancelled"],
+  online_pickup: ["pending", "processing", "ready", "completed", "cancelled"],
+  walkin_pickup: ["pending", "processing", "ready", "completed", "cancelled"],
+  online_reservation: ["pending", "processing", "cancelled"],
+  walkin_reservation: ["pending", "processing", "cancelled"],
 };
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
@@ -135,7 +178,7 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export const createUserSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
   password: z.string().min(6, "Password must be at least 6 characters"),
-  role: z.enum(["ADMIN", "EMPLOYEE"]),
+  role: z.enum(["ADMIN", "EMPLOYEE", "INVENTORY_MANAGER"]),
 });
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
@@ -207,6 +250,24 @@ export const createOrderSchema = z.object({
   (data) => ({
     message: `Payment method "${data.paymentMethod}" is not allowed for order type "${data.orderType}". Allowed: ${ALLOWED_PAYMENT_METHODS[data.orderType].join(", ")}`,
     path: ["paymentMethod"],
+  })
+).refine(
+  (data) => ALLOWED_ORDER_CHANNELS[data.orderType].includes(data.orderChannel),
+  (data) => ({
+    message: `Order channel "${data.orderChannel}" is not valid for "${ORDER_TYPE_LABELS[data.orderType]}".`,
+    path: ["orderChannel"],
+  })
+).refine(
+  (data) => ALLOWED_PAYMENT_STATUSES[data.orderType].includes(data.paymentStatus),
+  (data) => ({
+    message: `Payment status "${data.paymentStatus}" is not valid for "${ORDER_TYPE_LABELS[data.orderType]}".`,
+    path: ["paymentStatus"],
+  })
+).refine(
+  (data) => ALLOWED_FULFILLMENT_STATUSES[data.orderType].includes(data.fulfillmentStatus),
+  (data) => ({
+    message: `Fulfillment status "${data.fulfillmentStatus}" is not valid for "${ORDER_TYPE_LABELS[data.orderType]}".`,
+    path: ["fulfillmentStatus"],
   })
 );
 export type CreateOrderInput = z.infer<typeof createOrderSchema>;

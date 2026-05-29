@@ -9,7 +9,7 @@ export interface AuthRequest extends Request {
   user?: {
     _id: string;
     username: string;
-    role: "ADMIN" | "EMPLOYEE";
+    role: "ADMIN" | "EMPLOYEE" | "INVENTORY_MANAGER";
   };
 }
 

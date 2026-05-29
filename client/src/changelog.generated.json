@@ -1,0 +1,398 @@
+{
+  "generatedAt": "2026-05-29T15:51:06.234Z",
+  "total": 49,
+  "commits": [
+    {
+      "hash": "4e632b76571ac81c4b1cc1f08381287a299beb83",
+      "shortHash": "4e632b7",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-29T10:52:00+08:00",
+      "subject": "Fix Railway/nixpacks build — pin Node 20 for Vite 7",
+      "body": "Railway's nixpacks default was Node 18.20.5, but Vite 7.3 requires\nNode >=20.19.0 (uses crypto.hash, added in Node 20). Build failed with:\n\n    [vite:build-html] crypto.hash is not a function\n\nPin Node 20 three ways so every tool agrees:\n\n- package.json `engines.node`: \">=20.19.0\", `engines.npm`: \">=10.0.0\"\n- .nvmrc: 20.19.0 (for nvm-aware envs)\n- nixpacks.toml: setup phase explicitly requests nodejs_20 + npm-10_x\n\nAlso resolves the EBADENGINE warnings for bson@7, mongodb@7, mongoose@9,\nmquery@6, vite@7 that all required >=20.19.0.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "3c8a98b5f5a0e9da23ffb7381cf9245968d1ce89",
+      "shortHash": "3c8a98b",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-28T07:31:43Z",
+      "subject": "change for LOA",
+      "body": ""
+    },
+    {
+      "hash": "645a16eac2dde1dbb36348a5b776f2359bca1900",
+      "shortHash": "645a16e",
+      "author": "Replit Agent",
+      "date": "2026-05-28T07:22:51Z",
+      "subject": "Add system to track website visitors and send Telegram notifications",
+      "body": "Implement backend visitor tracking middleware, a Telegram notification utility, and a Mongoose model to record IP addresses, device names, and visit counts.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: e1e7c70e-edf7-4c35-b8e9-d4e50d2f51de\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: d621d473-1601-4091-a8a4-1a6d18eb95a6\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/ff4fd03a-1c7d-4139-a321-d89b8e243aad/e1e7c70e-edf7-4c35-b8e9-d4e50d2f51de/UZftiqW\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "471bbae17211da8e23ab9f149a31c1bf881f67c1",
+      "shortHash": "471bbae",
+      "author": "Replit Agent",
+      "date": "2026-05-28T07:20:21Z",
+      "subject": "Update the tsx dependency to the latest version",
+      "body": "Upgrade `tsx` from v4.20.5 to v4.22.3 in `package.json`.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: e1e7c70e-edf7-4c35-b8e9-d4e50d2f51de\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: ad10e121-83ce-46fb-8722-e1bd91f40404\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/ff4fd03a-1c7d-4139-a321-d89b8e243aad/e1e7c70e-edf7-4c35-b8e9-d4e50d2f51de/UZftiqW\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "69edd508f3dd8afe835689da7100a4e4105e7db9",
+      "shortHash": "69edd50",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-26T12:20:41+08:00",
+      "subject": "Session 9: 141-item checklist audit consolidated in code.md",
+      "body": "Walks every numbered item from the project owner's master checklist with\nimplementation evidence (file:line) and status. All groups marked ✅:\n\n- Login/auth (1-5,15) — JWT + AdminRoute wrapper\n- Tutorial (6-13) — animated cursor + spotlight + word-by-word, 40 steps\n- Workflows (14-22) — E2E verified via API in S8\n- Presence dot (23) — isOnline helper based on lastLogin <5min\n- Console/server errors (24,25) — only Vite WS preview noise\n- Theme readability (26,27,135) — text-foreground/bg-background everywhere\n- Settings polish (28,29,49-51) — picker removed, scroll fix, Tweaks inline\n- Dashboard export (30) — exportDashboardPDF\n- Dead buttons (31-33) — Import CSV + Print labels wired\n- Leave request, offers, orders (34-37,67-75,92,108-110) — E2E verified\n- Forecasting PDF (38-40) — html2canvas + rich layout\n- Reports (41,105,106) — reactive computed values + Top Customers\n- Dashboard green radios (42,43) — animate-ping bg-green-400/500\n- Realtime (44-46,115-118,127,132) — 32 emitEvents + 1s polling\n- Tarlac→Antipolo (47) — zero remaining matches in src/docs\n- Scroll caps (48,138) — appropriate pb-* on every page\n- Calculator (52-54,63-66) — fixed bottom-right, keyboard, per-user\n- Per-user settings (53,55) — localStorage namespaced by username\n- Assign button (61,62) — SaaS pill + avatar dropdown\n- Analytics (77-90) — dashboard.advanced fully populated\n- Total Stocks rename (91) — confirmed\n- Reservations/Billing/Pending (93-97) — reactive\n- Accounting (98-104) — balanced totals, live ledger balances\n- Help (112-114) — 60+ FAQs + chat\n- Forms (129) — 22 pages use zodResolver\n- Role permissions (128) — adminOnly + AdminRoute\n- Exports (133,134,139) — jsPDF/autotable/html2canvas all wired\n- Employee/admin parity (137) — verified\n- Badges (125,126) — count<=0 hides\n\nHonest outstanding gaps listed at bottom: order-detail UI click-through\nwasn't done in this session (API path verified); #41 text-styling note\nwas incomplete; #69-75 orders processed via API not UI dialog.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "a9e65149e016a03db6f52de965a6fbd68f89a753",
+      "shortHash": "a9e6514",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-26T12:18:06+08:00",
+      "subject": "Add Chart of Accounts table with admin-delete for empty accounts",
+      "body": "Surfaces the chart of accounts directly in the Accounting page (was previously\nonly accessible via the entry-form autocomplete datalist). Each row shows the\nlive balance derived from the ledger, and admins get a Delete button that's\nenabled only when the account has zero balance (the backend already enforces\n\"no delete if has ledger history\"). This is what the user asked for in\n\"REMOVE THE ACCOUNTS IN THE ACCOUNTING / IN THE Chart of Accounts, REMOVE WHAT\nIS NOT NEEEDED THERE\".\n\n- New deleteAccountMutation wired to DELETE /api/accounting/accounts/:id\n- New table card between Financial Position cards and General Ledger\n- Disabled-state shows tooltip explaining why an account can't be deleted\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "3d9a5f24fc0959b4dc458a23948800a9dc9ad565",
+      "shortHash": "3d9a5f2",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-26T12:12:46+08:00",
+      "subject": "Document Session 8 audit pass in code.md",
+      "body": "Records every fix landed in Sessions 7-8 (release flow, accounting balances, dead buttons, presence dots, theme polish), the full end-to-end verification matrix run against live MongoDB (6 orders processed, 4 offer types, reservation cycle, leave-request cycle, all 19 routes walked), and the intentional non-fixes (bg-current bullets, Vite HMR WS noise).\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "b46d2f63d56a4191b0feccdb5016b248dd50370e",
+      "shortHash": "b46d2f6",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-26T12:10:18+08:00",
+      "subject": "Wire Inventory Import CSV + Print labels — no more dead buttons",
+      "body": "- Import CSV: hidden file input + CSV parser that POSTs each row to /api/items.\n  Expected header: itemName,category,supplierName,unitPrice,currentQuantity.\n  Toasts the success/skip count when done.\n- Print labels: triggers window.print() so the current inventory view becomes\n  a print-friendly page (browser-native, respects current filters & view mode).\n\nCloses the last 2 dead buttons identified during the S8-7 tab walk.\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "801482b5b46ab38e103ca0d123c82388a9d69adf",
+      "shortHash": "801482b",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-26T12:04:23+08:00",
+      "subject": "Fix release flow + accounting balances reactivity",
+      "body": "- Release endpoint now sets fulfillmentStatus=\"completed\" + completedProcessingAt and emits DASHBOARD_STATS_UPDATED. Previously only currentStatus was set, so Reports \"Completed\" counter stayed at 0 and dashboard fulfillment metrics were stuck. Verified end-to-end: 6 orders processed → completedOrders=6, todayRevenue=3135\n- /api/accounting/accounts now derives balance live from GeneralLedgerEntry totals, so the Chart of Accounts panel never shows stale zeros. Uses debit-credit for Asset/Expense, credit-debit for Liability/Equity/Revenue\n- Added DELETE /api/accounting/accounts/:id (admin, blocks delete if ledger history exists)\n- Accounting page Total Debits/Credits/Net Balance now use the full-ledger summary instead of the paginated table (which only had 20 entries)\n- accountTypeMap expanded to cover Cash on Hand, Cash, GCash, Delivery/Salaries/Utilities Expense, Service Revenue so Asset/Liability/Revenue/Expense rollups capture every common ledger account name\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "525285f9b63da7b35b8263f18fc42167b6264d65",
+      "shortHash": "525285f",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-26T11:41:55+08:00",
+      "subject": "Session 7: Full-system audit pass — Antipolo rebrand, settings polish, presence-aware employee dots",
+      "body": "- Tarlac → Antipolo across all docs (README, UI_UPDATE_NOTES); sidebar already updated upstream\n- Settings: resolved upstream/local conflict — kept Light/Dark removal + added scroll-clip fix\n  (pb-24 overflow-y-auto h-full max-h-screen) + added Dark Mode toggle to inline Tweaks panel\n  so the floating overlay no longer needs to exist\n- Employees tab: green dot now reflects real presence (online <5min via lastLogin) instead\n  of account-active flag — matches the Users page heuristic\n- Help module: +11 advanced FAQs covering Forecasting PDF, Tweaks-vs-Settings, calculator\n  lock-position, dark-mode scope, Total Stocks rename, presence dots, offer/inventory\n  interaction, pending-badge logic, messaging flow, and dashboard export contents\n- package.json: pinned html2canvas (was transitive) to ensure forecasting chart capture\n  works in production builds\n\nCo-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "edb10a3f99359bf0986592ba823be108422d2114",
+      "shortHash": "edb10a3",
+      "author": "hanmayujiro65",
+      "date": "2026-05-26T02:07:28Z",
+      "subject": "Improve page scrolling behavior by restricting content within tabs",
+      "body": "Apply scroll containment to tabbed sections in forecasting, help, requests, and system logs pages to prevent excessive scrolling.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 04944433-398f-40e4-a6fe-a6579e1b24b6\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: fdb14297-d329-4097-84e6-ac7dcdc10e2f\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74dc64dd-9482-429b-98e0-995372c3a63f/04944433-398f-40e4-a6fe-a6579e1b24b6/gp8ioTU\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "f2afdb01c32d523289218310e7a987df6077788b",
+      "shortHash": "f2afdb0",
+      "author": "hanmayujiro65",
+      "date": "2026-05-26T01:54:49Z",
+      "subject": "Update help page and fix various display issues",
+      "body": "Update help text for calculator, fix accounting and request tab display bugs, and correct a comment in the inventory page.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 04944433-398f-40e4-a6fe-a6579e1b24b6\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: eb4ad696-4a7c-47bb-a2c8-8b1b0476c148\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74dc64dd-9482-429b-98e0-995372c3a63f/04944433-398f-40e4-a6fe-a6579e1b24b6/UCrFXgH\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "5a997635e8b3f0419a94a8453a94afe5d159a511",
+      "shortHash": "5a99763",
+      "author": "hanmayujiro65",
+      "date": "2026-05-26T01:44:52Z",
+      "subject": "Saved your changes before starting work",
+      "body": "Replit-Commit-Author: Agent\nReplit-Commit-Session-Id: 04944433-398f-40e4-a6fe-a6579e1b24b6\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: f85a6c90-45d7-41ea-9ef4-fa6c781da80b"
+    },
+    {
+      "hash": "52e81d3b4ddce2cfabc0d94d1a29befd6d9963ec",
+      "shortHash": "52e81d3",
+      "author": "hanmajohn3",
+      "date": "2026-05-26T01:37:17Z",
+      "subject": "Enhance application features and fix display issues across multiple pages",
+      "body": "Integrates chart image capture into PDF exports, refines tutorial system, expands help content, and resolves display inconsistencies on settings and offers pages.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 543f6e1f-7280-4274-8c7b-e7565eb2873e\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: c876cecf-16d1-402a-a04d-5c51d76c90c3\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/6b9055cd-88a0-4793-89ca-12555f90e5da/543f6e1f-7280-4274-8c7b-e7565eb2873e/iD5qcxG\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "3f97d815c594f51191017ea1d61d9d9f63e4ab7f",
+      "shortHash": "3f97d81",
+      "author": "hanmajohn3",
+      "date": "2026-05-26T01:10:16Z",
+      "subject": "Fix accounting page errors and improve PDF export functionality",
+      "body": "Resolves JSX parse errors in accounting.tsx by correcting DOM structure and removing unused imports. Updates forecasting.tsx to fix PDF export by correcting field names, handling missing fields, and reimplementing text color logic using willDrawCell. Also adjusts account naming in server/routes.ts for consistency.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: ebcac66f-4fc4-4a58-9991-efb5c8b73a4c\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 8e79b433-a382-4087-ab4d-8b240a2f79bf\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/df86c4c3-e4d4-4a54-bd5d-eb6107046df6/ebcac66f-4fc4-4a58-9991-efb5c8b73a4c/TiZJA9J\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "b2917975b1651127c9d90d4d773104176bbc1764",
+      "shortHash": "b291797",
+      "author": "hanmajohn3",
+      "date": "2026-05-26T00:54:17Z",
+      "subject": "Improve application tutorial and fix various page display issues",
+      "body": "Update tutorial steps to include Reservations and Forecasting modules, add a data-testid for the Reservations title, and change page wrappers from `overflow-auto h-full` to `pb-10` to fix scroll clipping on multiple pages. Also removed the dark mode toggle from settings.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: ebcac66f-4fc4-4a58-9991-efb5c8b73a4c\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 5068bc87-a9e1-4fb1-ba50-13194b92f0ae\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/df86c4c3-e4d4-4a54-bd5d-eb6107046df6/ebcac66f-4fc4-4a58-9991-efb5c8b73a4c/ReCsdlH\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "6bcdab8116bdafc9a216314f02d9416a15147270",
+      "shortHash": "6bcdab8",
+      "author": "hanmajohn3",
+      "date": "2026-05-26T00:37:10Z",
+      "subject": "Saved your changes before starting work",
+      "body": "Replit-Commit-Author: Agent\nReplit-Commit-Session-Id: ebcac66f-4fc4-4a58-9991-efb5c8b73a4c\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 96b6253f-9973-4c5a-b1ce-86e069d75e06"
+    },
+    {
+      "hash": "4a3ae5c8b42d6c2c1493a4752009dcbc3fec8e80",
+      "shortHash": "4a3ae5c",
+      "author": "hanmajohn3",
+      "date": "2026-05-26T00:32:36Z",
+      "subject": "Fix broken tutorial steps and improve UI elements",
+      "body": "Update tutorial steps to reflect UI changes and enhance user experience by fixing broken links and introducing new UI elements.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 2847831f-cb98-42f0-af42-99ff237f6dfc\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74b94fd6-5a47-40ae-bfe2-bc5438679d1f/78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f/leiPYdz\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "f82a95f864ba8fc1426c3ac23828ae984abed1a5",
+      "shortHash": "f82a95f",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-25T23:59:31+08:00",
+      "subject": "Session 6: pool/unassign fix, TTS voice lock, ARIMA(1,1,1) forecasting",
+      "body": "Order pool bugs:\n- server/routes.ts POST /api/orders/:id/assign with empty username now resets\n  fulfillmentStatus to \"pending\" and clears startedAt/completedProcessingAt.\n  Without this, orders that had already entered \"processing\" or \"ready\" stayed\n  invisible to the pool query when admin unassigned via POST.\n- client/src/pages/orders.tsx adds inline \"Return to pool\" button per row\n  in the Admin Assigned-Orders table (visible unless completed/cancelled).\n- create/assign/unassign mutations switch from invalidateQueries to\n  refetchQueries({type:\"active\"}) so the pool table updates immediately\n  instead of waiting for the 1-second global polling tick.\n\nTTS voice lock:\n- server/routes.ts /api/tts now ignores Settings.ttsVoice and always uses\n  \"en-US-GuyNeural\" (per project owner directive — single voice site-wide).\n- server/models/Settings.ts default updated to en-US-GuyNeural.\n- client/src/pages/settings.tsx removes the voice picker Select; static\n  read-only card shows the locked voice. TTS_VOICES constant deleted.\n\nARIMA forecasting (NEW module):\n- server/lib/arima.ts — pure-TypeScript ARIMA(1, 1, 1) implementation\n  (~180 lines, no external library). Estimates φ via lag-1 autocorrelation\n  of differenced series, θ via lag-1 autocorrelation of residuals, σ via\n  residual stddev. Forecasts walk forward with √h-scaled 95% prediction\n  intervals. bucketByDay() helper turns timestamped events into daily series.\n- server/routes.ts new endpoints:\n  - GET /api/forecast/items?horizon=14&lookback=60 — per-item demand forecast\n    + reorder urgency (critical/high/medium/low based on daysOfStock)\n  - GET /api/forecast/aggregate?horizon=14&lookback=60 — orders/day and\n    revenue/day forecasts with shared chart labels\n- client/src/pages/forecasting.tsx — NEW polished UI:\n  - Header with ARIMA(1, 1, 1) badge + horizon toggle (7/14/30)\n  - KPI strip: forecast orders, forecast revenue, items at risk, items healthy\n  - Aggregate tab: two ComposedCharts (orders + revenue) with confidence\n    bands, solid actual line + dashed forecast line, vertical \"Today\"\n    ReferenceLine, model parameter footer\n  - Per-item tab: search, urgency filter chips, expandable rows with mini\n    sparkline + 7-stat detail panel\n  - Explanation card describing what ARIMA(1, 1, 1) means + how to read\n    the confidence band\n- Routing + nav: /forecasting added to App.tsx; sidebar nav item with\n  TrendingUp icon between Reports and admin section.\n\nSmoke test (live dev server) confirmed:\n  - /api/forecast/aggregate → 200, 61 days history + 14 days forecast,\n    fitted params (φ=-0.37, θ=-0.04, intercept=0.11)\n  - /api/forecast/items → 200, 11 items analyzed\n  - Unassign POST {username:\"\"} → assignedTo=\"\", fulfillment=\"pending\",\n    confirmed back-in-pool\n\nmarl.md + code.md updated:\n- ARIMA moved from \"deferred to future work\" to \"implemented and shipped\"\n- New §5.6.A in marl.md documents the parameter estimation math + tells\n  the writers exactly where to put it in Chapters 2 + 3\n- code.md gets Section 27 covering every file touched in this session\n\nBuild: 0 TypeScript errors, clean npm run build.\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "62d1f6fcf271e705343bdc76b96b73899b8e8e72",
+      "shortHash": "62d1f6f",
+      "author": "hanmajohn3",
+      "date": "2026-05-25T13:07:43Z",
+      "subject": "Improve order assignment notifications and fix application bugs",
+      "body": "Refactor TTS to use a queue, update default TTS voice to en-US-GuyNeural, fix settings page scroll bug, enhance order assignment notifications for reassignments, and reset fulfillment status when orders are returned to the pool.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: ec26bfa5-c83e-4bff-92ce-ac06cfb4847a\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74b94fd6-5a47-40ae-bfe2-bc5438679d1f/78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f/nrIcLaG\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "48305267d7a27c8e4988c37db7cc88c725d5dce5",
+      "shortHash": "4830526",
+      "author": "hanmajohn3",
+      "date": "2026-05-25T12:54:27Z",
+      "subject": "Saved progress at the end of the loop",
+      "body": "Replit-Commit-Author: Agent\nReplit-Commit-Session-Id: 78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 7f637139-9a48-41bb-85d6-3c13874e5ffa\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74b94fd6-5a47-40ae-bfe2-bc5438679d1f/78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f/nrIcLaG\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "9ed3b8124ca4e2f2fd37776202584c8795089441",
+      "shortHash": "9ed3b81",
+      "author": "hanmajohn3",
+      "date": "2026-05-25T12:48:02Z",
+      "subject": "Improve dark mode and TTS compatibility for various hosting environments",
+      "body": "Update client-side settings logic to prioritize user tweaks for theme preference, and modify TTS API requests to include JWT token in the Authorization header for broader service compatibility. Add a `railway.toml` file for streamlined deployment configuration.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 5032b577-f09a-413f-aeb1-935e31d5287b\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74b94fd6-5a47-40ae-bfe2-bc5438679d1f/78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f/nrIcLaG\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "4809dc352fa774257dad1cbda374636cc7d90246",
+      "shortHash": "4809dc3",
+      "author": "hanmajohn3",
+      "date": "2026-05-25T12:43:01Z",
+      "subject": "Fix text-to-speech functionality for spoken notifications",
+      "body": "Replace external edge-tts CLI with the msedge-tts Node.js package for text-to-speech functionality and increase text truncation limit.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: eb0c6303-8de5-453f-8b32-33955442902f\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/74b94fd6-5a47-40ae-bfe2-bc5438679d1f/78e7eb7a-8184-4ae9-b53a-b9a258ac7d5f/SxofyJd\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "610f064b67e792ada1051b9121547c8f0de66a38",
+      "shortHash": "610f064",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-25T19:08:48+08:00",
+      "subject": "Add marl.md — comprehensive guide for updating Chapters 1-3 to match shipped system",
+      "body": "Documents every change needed to align the manuscript with the actual 24-module\nimplementation:\n- Module catalog grew from 13 → 24 (11 new modules + 13 existing)\n- 12 new procedural flowcharts to draw\n- 7 new DFDs to draw\n- 10 new ERD entities with attributes + relationships\n- 8 new IPO sheets, 8 new HIPO charts\n- ~15 new screen design figures\n- Updated Statement of the Problem (+3), Objectives (+4), Scope, Delimitations\n- Updated Software Process Model, System Architecture, Feasibility, Testing, Evaluation\n- Replaces \"Hash + Trie + ARIMA + FIFO\" algorithm list with the honest implementation\n- Adds Table 8 (module integration test results)\n- Editing checklist + defense slide bullets at the end\n\nTotal: ~440 lines, organized as 11 sections.\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "d9cc264979c456b7c369a0bedd573748c35746fa",
+      "shortHash": "d9cc264",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-25T18:59:16+08:00",
+      "subject": "Session 5: animated boot loader, JOAP logo, Replit cleanup, README",
+      "body": "Boot loader (client/index.html):\n- Inline the animated hammer-guy loader (from loader.html) so it paints before\n  any JS bundle downloads\n- Hammer guy walks letter-to-letter (J→O→A→P), hammers each, sparks fly\n- All keyframes inlined under <style>; no external CSS deps\n- Inline <script> waits for BOTH conditions before fading out:\n  • MIN_DURATION 5000ms (one full cycle, lets every letter finish)\n  • React mount detected via MutationObserver on #root\n- MAX_DURATION 12000ms safety bail-out\n- prefers-reduced-motion disables animations entirely\n- New <meta theme-color>, <meta description>, <title>JOAP Hardware Trading</title>\n- Favicon switched to new SVG (PNG kept as fallback)\n\nLogo (client/public/favicon.svg + client/src/components/joap-logo.tsx):\n- New vector mark: crossed hammer + screwdriver on amber gradient rounded square\n- Spark at the crossing point\n- Reusable <JoapLogo size={…}/> React component with unique gradient IDs\n- Wired into sidebar (32px), login desktop (44px), login mobile (40px), about hero (80px)\n- Removed all <Hammer/> icon usages in brand contexts\n\nReplit teardown:\n- Deleted .replit, replit.md, replit.nix\n- Removed @replit/vite-plugin-cartographer, @replit/vite-plugin-dev-banner,\n  @replit/vite-plugin-runtime-error-modal from package.json\n- vite.config.ts: stripped Replit plugin imports + conditional loading\n- HMR clientPort 443 → 5000 (was for Replit's reverse proxy)\n\n.gitignore:\n- attached_assets/ (local-only image drops)\n- uploads/, backups/ (runtime data)\n- .env*, *.pem (secrets)\n- .replit, replit.md, replit.nix, .local/, .config/ (Replit + local state)\n- .vscode/, .idea/, *.swp, Thumbs.db (editor/OS)\n- *.pdf, loader.html, .claude/launch.json\n\nREADME.md:\n- Centered hero with badges, full feature list, quick-start, scripts table,\n  project layout tree, architecture notes, conventions, tech stack table,\n  browser support, contributing checklist, developer credits\n- Replaces the previous minimal placeholder\n\nSmoke test:\n- Verified full order workflow end-to-end against running dev server:\n  login → fetch items → create order → assign → start → mark done\n- Every backend route returns valid JSON, respects auth, updates DB state\n- Documented in code.md Section 26\n\nBuild: 0 TypeScript errors · clean npm run build (dist/public + dist/index.cjs).\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "79acc08c0d77290a5a8ee89d0c1d0860b14b9d09",
+      "shortHash": "79acc08",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-25T08:44:54+08:00",
+      "subject": "Session 5: audit + stability — ErrorBoundary, tutorial overhaul with lightning focus, EmptyState polish",
+      "body": "Audit:\n- Logged into the running dev server as admin\n- Visited every one of the 18 nav routes: Dashboard, Inventory, Orders, Reservations, Billing, Pending Payment, Accounting, Reports, Offers, Requests, Employees, Users, Settings, Maintenance, System Logs, Profile, Help, About\n- Verified each renders with the correct H1, contains its expected interactive elements, and produces zero failed network requests\n- Confirmed Create Order, Edit Item (inventory ...), Create User dialogs all open correctly\n\nStability:\n- New ErrorBoundary class component (client/src/components/error-boundary.tsx)\n- Wraps the App at the very top AND wraps <Router /> inside the layout, so a single page crash never blanks the whole shell — user gets a clean recovery card with Try Again and Go Home buttons\n- Detailed error pre block is collapsed by default but available for debugging\n- Logs the componentStack to console\n\nTutorial overhaul (cursor + \"lightning\" focus follows the flow):\n- Replaced the obsolete Global Search step (testid was removed earlier) with a\n  Breadcrumbs + Live PHT clock step in both admin and employee tracks\n- Added 6 new admin steps: Pending Payment dashboard, Employee Requests inbox,\n  Employee Directory, Daily Sales Goal in Settings, Floating Calculator,\n  UI Tweaks Panel — each with a 1-2 sentence narration tailored to the feature\n- Added 4 new employee steps: Pending Payment, My Profile, Floating Calculator,\n  UI Tweaks\n- Replaced the single primary border ring with a 3-layer \"lightning lock-on\":\n  outer pulsing radial halo (radial-gradient, animates scale + opacity),\n  mid expanding glow ring (border + boxShadow, animates scale via\n  tutorialRingExpand keyframes), crisp inner focus ring with inset + outer\n  glow shadow. Inline <style> with keyframes ships with the component so no\n  global CSS edits needed.\n- Cursor SVG now uses a white→primary gradient fill plus drop-shadow filter\n  so it glows; trailing ping + pulse ripple layers make movement feel alive\n\nSaaS polish:\n- New EmptyState component (client/src/components/empty-state.tsx) with\n  4 tones (neutral, primary, success, warning) — icon in a tinted square,\n  title, description, optional action\n- Wired into Requests page (\"Inbox zero\" with success tone when no pending\n  requests) and Pending Payment (\"All caught up!\" with success tone when no\n  pending payment orders)\n\nBuild: 0 TypeScript errors · clean Vite + esbuild build.\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "6c177a90130443271907b943f077bcb9c27e53e9",
+      "shortHash": "6c177a9",
+      "author": "hanmajohn3",
+      "date": "2026-05-24T12:54:55Z",
+      "subject": "Enhance order management with comprehensive logging and payment details",
+      "body": "Refactors the order detail page to include a detailed logging modal, updates the payment schema and backend to support partial payments and additional fields, and removes the loading skeleton from the login page stats.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 146e09d6-72b2-47b1-ba33-d730edf27177\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 843bfd3a-1af3-40f9-86cd-380b161ebc08\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/0c5543d3-7819-46ae-b87c-dd722e2b7c8d/146e09d6-72b2-47b1-ba33-d730edf27177/NVXaFRR\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "64cfa37359269da22699c72bbfe3b76dfc0eeffb",
+      "shortHash": "64cfa37",
+      "author": "hanmajohn3",
+      "date": "2026-05-24T12:38:24Z",
+      "subject": "Update website statistics and order processing functionality",
+      "body": "Update login page stats to fetch live data and rename \"Active staff\" to \"Total staff\". Modify order detail page to change \"Mark Done & Collect Payment\" button to \"Log Details\", updating modal titles and descriptions accordingly. Update server route to query User.countDocuments() for total staff.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 146e09d6-72b2-47b1-ba33-d730edf27177\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 455331f2-6aae-4216-94b2-7d3487040544\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/0c5543d3-7819-46ae-b87c-dd722e2b7c8d/146e09d6-72b2-47b1-ba33-d730edf27177/qQKggcu\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "cd153b6bb3285d11bfafa1782dfb7c7a3b106f91",
+      "shortHash": "cd153b6",
+      "author": "hanmajohn3",
+      "date": "2026-05-24T12:25:18Z",
+      "subject": "Add comprehensive payment processing and real-time updates to orders",
+      "body": "Implements a detailed payment modal for order fulfillment, including cash and GCash options, receipt uploads, and transaction code generation. Enhances real-time data synchronization across the application using socket events for various actions like payment logging, order release, and ledger updates. Adds a public API endpoint for fetching live dashboard statistics to the login page and refactors existing API endpoints related to payment processing and data validation. Updates database schemas and validation rules to accommodate new payment details and transaction codes.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 146e09d6-72b2-47b1-ba33-d730edf27177\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 3dbeef41-068d-4448-89ca-4247a5ba28ac\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/0c5543d3-7819-46ae-b87c-dd722e2b7c8d/146e09d6-72b2-47b1-ba33-d730edf27177/kVI8PRs\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "de85d63465a1f82210e7d78268f72bdf145dae66",
+      "shortHash": "de85d63",
+      "author": "hanmajohn3",
+      "date": "2026-05-24T12:11:40Z",
+      "subject": "Update progress tracker to reflect successful MongoDB URI secret storage",
+      "body": "Update progress tracker markdown file to change \"added\" to \"stored\" for MONGODB_URI secret.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 146e09d6-72b2-47b1-ba33-d730edf27177\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: fbeb6bde-f7d0-4505-b355-ac3fc702b9c6\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/0c5543d3-7819-46ae-b87c-dd722e2b7c8d/146e09d6-72b2-47b1-ba33-d730edf27177/PKS2XMi\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "ca550b52a2a7406b58ef9516e3e139744c2b3572",
+      "shortHash": "ca550b5",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T20:07:52+08:00",
+      "subject": "Session 4: UX polish — header cleanup, inventory edit, daily sales goal, peak hours export, user log target picker, SaaS-style employee modal",
+      "body": "Header (App.tsx):\n- Remove global search input + ⌘K kbd hint (search is contextual per page)\n- Remove notification bell icon (badges on sidebar nav items cover the use case)\n- Strip the 135-line unused GlobalSearch function and dependent imports\n- Header is now: SidebarTrigger → Breadcrumbs → spacer → LiveClock → username pill → Logout\n\nLiveClock:\n- Switch to 12-hour PH format (hour12: true, hour: \"numeric\") — e.g. \"7:09:42 PM PHT\"\n\nInventory (inventory.tsx):\n- Wire the \"…\" row button to open a new Edit dialog\n- Add editPrice/editQty/editCategory/editSupplier state + editMutation (PATCH /api/items/:id)\n- Add deleteItemMutation (DELETE /api/items/:id) inside the same dialog with confirm\n- New data-testids: input-edit-category, input-edit-supplier, input-edit-price,\n  input-edit-qty, button-save-item, button-delete-item, button-edit-item-<id>\n\nDaily sales goal (system-wide, admin-configurable):\n- Settings model: new dailySalesGoal field (default 100000 PHP)\n- shared/schema.ts: synced ISettings + Zod settingsSchema\n- Settings page: new FormField in System Settings card (admin only) with\n  description explaining it's reflected on every dashboard\n- Dashboard: queries /api/settings, derives DAILY_GOAL from settings,\n  falls back to 100000 if not loaded yet. Ring gauge + Achieved/Target/Remaining\n  all read from this single source of truth.\n\nPeak Hours export (dashboard.tsx):\n- Wire the previously-stub Export button to exportPeakHoursPDF(grid)\n- Lazy-import jspdf; render landscape A4 with title, timestamp, 7×24 cell grid\n  colored along the amber HSL ramp, hour labels every 3h, day labels Mon-Sun,\n  5-step Low→High legend\n- Includes hslToRgb helper for jspdf's RGB setFillColor\n\nSystem Logs → User Log tab (system-logs.tsx):\n- Add target user Select (sources from /api/users/simple), defaults to none\n- Filter CalendarUserLog by `l.actor === targetUser`\n- Day-detail card heading now reads \"<target>'s activity · <day>\"\n- Remove the right-hand \"Recent Activity\" 50-item list entirely\n- Empty-state message when no target is selected\n\nEmployee Profile modal (employees.tsx):\n- Replace plain DialogHeader with a gradient hero (135° amber gradient + radial\n  white overlays at 10% opacity)\n- Identity block: 96×96 photo with ring-4 ring-white + shadow, online dot,\n  three pill chips (employee ID mono, role solid white, status solid emerald/gray)\n- Action row uses variant=secondary with shadows (Camera/Upload, Replace/Remove,\n  Message, Export)\n- Account info strip: bg-muted/30 rounded rectangle with 2-col grid (Email,\n  Phone, Created, Last login), primary-colored icons\n- New KpiTile helper component: 4 colored tiles (emerald/blue/amber/rose) with\n  icon badge top-right and font-mono tabular-nums big numbers\n- Productivity bar chart: custom <linearGradient> amber bars, rounded tops,\n  subtle dashed grid, hidden vertical lines, custom tooltip\n- All existing data-testids preserved\n\ncode.md: added Section 23 (~200 lines) documenting every session 4 file change\nin full sentences with rationale, code excerpts, and a verification checklist.\n\nBuild: 0 TypeScript errors · clean npm run build.\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "edf62cdcf0ffacc848bd8bf8be032bddd77f5137",
+      "shortHash": "edf62cd",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T19:52:37+08:00",
+      "subject": "Fix dev server boot on Windows + offers query undefined bug",
+      "body": "- server/index.ts: 'reusePort: true' is a Linux-only socket option that throws\n  ENOTSUP on Windows. Wrap it in `if (!isWindows)` so the dev server actually\n  starts via `npm run dev` on Windows machines.\n\n- client/src/pages/offers.tsx: the queryFn returned `json.data` directly which\n  could be undefined (TanStack Query throws on undefined query results). Now\n  falls back to `{ offers: [], total: 0 }`.\n\nVerified manually by logging in as admin and visiting every nav route:\nDashboard, Inventory, Orders, Reservations, Billing, Accounting, Reports,\nPending Payment, Offers, Requests, Employees, Users, Settings, Maintenance,\nSystem Logs, Profile, Help, About — all render with their proper titles and\nkey UI elements (Create Order dialog opens at \"Step 1 of 5 — Customer & Type\",\nsidebar badges show counts, header has breadcrumbs + ⌘K search + live PHT\nclock + Tweaks panel button + user pill + logout, floating calculator bubble\npresent).\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "5f927ec0345a592773609a84095b85fd35efb316",
+      "shortHash": "5f927ec",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T19:34:35+08:00",
+      "subject": "Adopt joap-main UI as definitive design: dashboard, inventory, charts, heatmap, KPI cards, page-header",
+      "body": "Replace front-end pages and components with the joap-main prototype implementation that matches\nthe screenshots (slate+amber theme, KPI strip, sparklines, daily sales goal ring, shift summary,\ntop items/customers, activity feed, payment mix donut, peak hours heatmap, refined inventory\ntable with category pills, sticky-bar header with breadcrumbs/⌘K/live PHT clock/Tweaks panel).\n\nNew components (added):\n- client/src/components/charts.tsx — Sparkline, RingGauge, PaymentMixDonut, ActivityRow widgets\n- client/src/components/heatmap.tsx — Peak-hours heatmap (7 days × 24 hours)\n- client/src/components/kpi-card.tsx — KPI tile with sparkline + delta chip\n- client/src/components/page-header.tsx — Common page heading + actions slot\n\nPages overhauled (kept backends/auth/sockets/real-time polling intact):\n- dashboard.tsx — full prototype layout with KPI strip, revenue trend, daily goal, shift\n  summary, top items/customers, activity feed, payment mix, peak hours heatmap\n- inventory.tsx — category pill filter, table/grid toggle, KPI strip\n- orders.tsx, reservations.tsx, billing.tsx, pending-payment.tsx, settings.tsx, login.tsx,\n  about.tsx, users.tsx, system-logs.tsx — restyled per prototype, all data-testids preserved\n\nSidebar (app-sidebar.tsx) — three sections (OPERATIONS, ADMIN, SYSTEM), badge counts wired\nto real queries, footer user card with initials + shift label, brand block matches screenshots.\n\nHeader (App.tsx) — breadcrumbs + global search w/ ⌘K + live PHT clock + Tweaks panel + user\npill, sticky with backdrop blur. Esc closes search.\n\nLegacy preserved: dashboard-legacy.tsx, inventory-legacy.tsx kept as reference.\n\nFixes applied during merge:\n- inventory.tsx form defaults: removed reorderLevel (not in createItemSchema), swapped to\n  safetyStock field; cast avgDailyUsage access on IItem\n- dashboard.tsx: Array.from() around Map iterators (tsconfig target ES2015 compat)\n\nCleanup: removed joap-main/ and joap-donot-delete/ scratch folders from project root.\n\nBackends, server routes, Mongoose models, Socket.io, JWT auth, real-time polling,\nTTS pipeline, Tutorial, Floating Calculator, Gemini chat — all unchanged.\n\nBuild: ✅ 0 TypeScript errors · ✅ npm run build clean (dist/index.cjs 1.2mb).\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "3c37a0c6e430f730a16819fcd65259154c7b1a2c",
+      "shortHash": "3c37a0c",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T18:53:48+08:00",
+      "subject": "UI overhaul: adopt modern slate+amber theme, Manrope font, breadcrumbs, live clock, Tweaks panel, ⌘K shortcut",
+      "body": "- Replace client/src/index.css with new theme tokens from claude-design-work (slate neutrals + amber primary; Manrope UI + JetBrains Mono numerics)\n- Add Manrope to client/index.html Google Fonts\n- App.tsx header: 3-zone layout (sidebar+breadcrumbs+search | clock+tweaks+user pill+logout), Cmd/Ctrl+K focuses search, ⌘K hint kbd shown\n- New components: Breadcrumbs (route-derived trail), LiveClock (PHT every second), TweaksPanel (dark mode / accent / density / font / card style with localStorage persistence)\n- Sidebar brand block: amber tile + \"JOAP Hardware · Trading · Tarlac\"\n- Preserve all data-testids, elevation utilities, shadcn CSS variable names, and backend code\n- Remove claude-design-work/ reference folder after extraction\n- UI_UPDATE_NOTES.md documents every added/modified file\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "f43f3258d149b84f9b4c6af03f975c588744c86b",
+      "shortHash": "f43f325",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T15:06:38+08:00",
+      "subject": "update project",
+      "body": ""
+    },
+    {
+      "hash": "79f78645b57eba851ab8068d856682af4023ff6e",
+      "shortHash": "79f7864",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T14:13:24+08:00",
+      "subject": "Massive feature update: About overhaul, orders admin view, calculator, pending payment nav, system logs calendar, users deactivation, reservations delete, offers duplicate check, settings fixes",
+      "body": "- About page: new UI with 3 developers (Cabilao, Ebona, Mirasol), tech stack grid, features list\n- Orders (admin): remove View by Staff Member, add Assigned Orders section grouped by employee with search/filter, pool search-only\n- Orders (employee): Create Order button added, duplicate order detection with See Order alert\n- Socket notifications: invalidate all order query variants, TTS respects per-user localStorage flag\n- Settings: color theme, font, font size all apply correctly; store details admin-only; TTS/calc toggles per user\n- Floating calculator: draggable Casio-style with memory, listens to joap-calc-toggle event\n- Sidebar: Pending Payment nav with badge count for all users; Settings link for employees; removed gcash tab from billing\n- Pending Payment page: new /pending-payment route showing only pending_payment orders\n- System logs: split into All Logs + User Log tabs; User Log has calendar view with login/logout per day, paginated events\n- Users: deactivated accounts section below active users; reactivate with admin password confirmation dialog\n- Reservations: delete cancelled reservations with admin password confirmation; server DELETE route added\n- Offers: duplicate name check on create (returns 409 if active offer with same name exists)\n- Server: verify-password endpoint, remove reorderThreshold/lowStockThreshold from settings\n- itemupload.json template created in root\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "6d700719893521033d3db2f5f69fd4d46a2dcf8b",
+      "shortHash": "6d70071",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T14:01:21+08:00",
+      "subject": "Rename readme.md to replit.md",
+      "body": ""
+    },
+    {
+      "hash": "22cdcadd80b558a2dd4478ca2686ba2cf9f2bbfd",
+      "shortHash": "22cdcad",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T14:00:59+08:00",
+      "subject": "Rename replit.md to readme.md",
+      "body": ""
+    },
+    {
+      "hash": "665b4fb3acbe2e6dba019598c0037e3fb5495cf1",
+      "shortHash": "665b4fb",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T11:44:41+08:00",
+      "subject": "Add Order Assignment System with TTS, task-lock, and 3-step processing lifecycle",
+      "body": "- New Order fields: startedAt, completedProcessingAt (processing lifecycle timestamps)\n- New API routes: POST claim, POST start-processing, POST complete-processing, DELETE assign, GET my-active\n- Task-lock: employees can only hold one active (non-completedProcessing) order at a time\n- GET /api/orders?pool=true: FIFO unassigned pending orders for the claim pool\n- TTS scripts: buildAssignmentTTSScript (reassign / self-claim / normal), buildUnassignmentTTSScript\n- Global Socket.io hook (use-socket-notifications.ts) mounted in AuthenticatedLayout\n- orders.tsx: employee view gets Start/Done buttons on assigned cards + Claim button on pool; admin view gets Pending Pool section with Assign dropdown\n- order-detail.tsx: Assignment card shows 3-step lifecycle tracker, Start/Mark-Done for assignee, Reassign/Unassign for admins\n- code.md updated exhaustively with every new file, route, mutation, and UI change\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "48aa518f42a8edd76eecfbd4ddb9b11f4c238dcb",
+      "shortHash": "48aa518",
+      "author": "JOHN MARWIN EBONA",
+      "date": "2026-05-24T11:20:28+08:00",
+      "subject": "Fix boot errors, add accounting PDF export with charts, harden MongoDB connection",
+      "body": "- Add server_mongo.ts: hardcoded Atlas URI, idempotent connectMongo(), env-var override\n- Refactor server/db.ts: thin shim over server_mongo.ts, no-env boot works cleanly\n- Fix auth.ts TS2802: use Array.from() for MapIterator in clearAllSessionsForUser & GC loop\n- Fix script/build.ts: remove corrupted garbage lines 52-60, build now succeeds cleanly\n- Overhaul accounting.tsx: PDF export (bar chart, pie/legend, ledger table, KPI row, footers),\n  in-page Recharts bar + donut charts, financial position cards, ledger totals footer,\n  account-name autocomplete datalist, coloured KPI cards with icons\n- Update code.md: document all changes with full detail\n\nCo-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
+    },
+    {
+      "hash": "9e02332f7f7703b3991006f1326dffc83c34c688",
+      "shortHash": "9e02332",
+      "author": "marksonguarine-sketch",
+      "date": "2026-05-24T02:49:40Z",
+      "subject": "Remove attached_assets from tracking",
+      "body": ""
+    },
+    {
+      "hash": "6f1dc063b5af1b0606797e94f050a12069954436",
+      "shortHash": "6f1dc06",
+      "author": "marksonguarine",
+      "date": "2026-05-23T08:21:55Z",
+      "subject": "Enable text-to-speech audio playback for order confirmations",
+      "body": "Replaces the unreliable Node.js TTS library with a Python subprocess and implements browser audio context unlocking for reliable playback.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 7001b241-d182-4ac4-a4a7-0a5d4804ada3\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/b4f2db83-288b-48d7-b8c9-ec11c39fa41f/bd1828be-7428-42bb-86d3-335a5c845cf8/N5XztH4\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "afa8ea8612eff649cd940261c41dd27de96edb33",
+      "shortHash": "afa8ea8",
+      "author": "marksonguarine",
+      "date": "2026-05-23T08:12:37Z",
+      "subject": "Improve site loading speed by fixing server errors and HMR connections",
+      "body": "Fixes a server crash on compilation errors and ensures Hot Module Replacement (HMR) connects correctly, resolving slow loading times and connection timeouts.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: f81db318-aa3c-4eed-89ca-8ea575c5a188\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/b4f2db83-288b-48d7-b8c9-ec11c39fa41f/bd1828be-7428-42bb-86d3-335a5c845cf8/N5XztH4\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "fa073f2893f5e28886920411f8aea6a7358bed57",
+      "shortHash": "fa073f2",
+      "author": "marksonguarine",
+      "date": "2026-05-23T08:04:45Z",
+      "subject": "Improve application performance by optimizing authentication and database queries",
+      "body": "Implement an in-memory session cache for authentication middleware, add missing MongoDB indexes to the Order model, and update the documentation.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 4bbfe1ec-7193-4437-aad2-1e1a367587f2\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/b4f2db83-288b-48d7-b8c9-ec11c39fa41f/bd1828be-7428-42bb-86d3-335a5c845cf8/znADn3R\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "81971fbd13a8a9fc140ede88b06282431d2f213e",
+      "shortHash": "81971fb",
+      "author": "marksonguarine",
+      "date": "2026-05-23T07:52:58Z",
+      "subject": "Add text-to-speech functionality and enhance reservation management",
+      "body": "Integrates text-to-speech for order and reservation notifications, refactors the order creation dialog, and introduces a new dialog for creating reservations with enhanced form fields. Also updates settings to include voice selection.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 43596b25-71d6-4a2c-aaef-7aa47fab90a1\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/b4f2db83-288b-48d7-b8c9-ec11c39fa41f/bd1828be-7428-42bb-86d3-335a5c845cf8/znADn3R\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "c1a21fde418818ea0466336e88d36216a05da12a",
+      "shortHash": "c1a21fd",
+      "author": "marksonguarine",
+      "date": "2026-05-23T07:36:00Z",
+      "subject": "Fix errors preventing the application from running correctly",
+      "body": "Add `useRef` import to `dashboard.tsx` and configure Vite HMR for Replit.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 5144cb40-1c43-44ee-a78e-e17d8e02bf66\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/b4f2db83-288b-48d7-b8c9-ec11c39fa41f/bd1828be-7428-42bb-86d3-335a5c845cf8/7e2mVP7\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "1e74873d325ca6b07a927e5f89ef6cb76a3399bd",
+      "shortHash": "1e74873",
+      "author": "marksonguarine",
+      "date": "2026-05-23T07:24:53Z",
+      "subject": "Fix errors that prevent the dashboard from loading correctly",
+      "body": "Add `useRef` to the import in `dashboard.tsx` and configure Vite HMR for Replit's proxied environment in `vite.config.ts`.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: a7d563b7-f3e8-4635-abf5-e245865fd327\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/b4f2db83-288b-48d7-b8c9-ec11c39fa41f/bd1828be-7428-42bb-86d3-335a5c845cf8/7e2mVP7\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "49aaed2f6fa0d1e02bc5fbb528abc3496bd88b0f",
+      "shortHash": "49aaed2",
+      "author": "marksonguarine",
+      "date": "2026-05-23T07:15:24Z",
+      "subject": "Saved progress at the end of the loop",
+      "body": "Replit-Commit-Author: Agent\nReplit-Commit-Session-Id: bd1828be-7428-42bb-86d3-335a5c845cf8\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 1a74c36e-3d39-4561-bd73-d3d356803311\nReplit-Helium-Checkpoint-Created: true"
+    },
+    {
+      "hash": "7defadd1e3928887249194339118a259ab04a1b5",
+      "shortHash": "7defadd",
+      "author": "marksonguarine",
+      "date": "2026-05-23T07:04:54Z",
+      "subject": "Update documentation for system changes and feature removals",
+      "body": "Update `code.md` to reflect changes including concurrent login enforcement, removal of Gemini chat and Google Maps, and various UI/backend improvements across multiple modules.\n\nReplit-Commit-Author: Agent\nReplit-Commit-Session-Id: 0cfa3608-22e2-49b9-98dd-b8c51a9ebd3b\nReplit-Commit-Checkpoint-Type: full_checkpoint\nReplit-Commit-Event-Id: 8811dc0e-9deb-476c-a5d9-0d9c21732267\nReplit-Commit-Screenshot-Url: https://storage.googleapis.com/screenshot-production-us-central1/f72c9638-445a-4481-961a-bec6b876569a/0cfa3608-22e2-49b9-98dd-b8c51a9ebd3b/z4TztXN\nReplit-Helium-Checkpoint-Created: true"
+    }
+  ]
+}

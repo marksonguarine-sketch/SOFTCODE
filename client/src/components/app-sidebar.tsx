@@ -39,6 +39,7 @@ import { useAuth } from "@/lib/auth";
 import { useSettings, GRADIENT_OPTIONS } from "@/lib/settings-context";
 import { useQuery } from "@tanstack/react-query";
 import type { DashboardStats } from "@shared/schema";
+import { USER_ROLE_LABELS } from "@shared/schema";
 import { cn } from "@/lib/utils";
 import { JoapLogo } from "@/components/joap-logo";
 
@@ -106,8 +107,13 @@ function NavBadge({ count, tone = "amber" }: { count: number; tone?: "amber" | "
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, isInventoryManager, user } = useAuth();
   const { settings } = useSettings();
+
+  // Inventory managers only ever see the Inventory page.
+  const visibleOperationsNav = isInventoryManager
+    ? operationsNav.filter((i) => i.url === "/inventory")
+    : operationsNav;
 
   // Pending payments — for the "Pending Payment" badge
   const { data: statsData } = useQuery<{ success: boolean; data: DashboardStats }>({
@@ -217,7 +223,7 @@ export function AppSidebar() {
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {operationsNav.map((item) => (
+              {visibleOperationsNav.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
@@ -238,20 +244,22 @@ export function AppSidebar() {
                 </SidebarMenuItem>
               ))}
 
-              {/* Pending Payment — visible to all */}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  asChild
-                  isActive={isActive("/pending-payment")}
-                  tooltip="Pending Payment"
-                >
-                  <Link href="/pending-payment" data-testid="nav-pending-payment">
-                    <Clock />
-                    <span>Pending Payment</span>
-                    <NavBadge count={pendingPayments} tone="warning" />
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              {/* Pending Payment — visible to all except inventory managers */}
+              {!isInventoryManager && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive("/pending-payment")}
+                    tooltip="Pending Payment"
+                  >
+                    <Link href="/pending-payment" data-testid="nav-pending-payment">
+                      <Clock />
+                      <span>Pending Payment</span>
+                      <NavBadge count={pendingPayments} tone="warning" />
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
 
               {/* Profile — employees only */}
               {!isAdmin && (
@@ -396,7 +404,7 @@ export function AppSidebar() {
                 {displayName}
               </span>
               <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                {user.role} · {shift}
+                {USER_ROLE_LABELS[user.role as keyof typeof USER_ROLE_LABELS] || user.role} · {shift}
               </span>
             </div>
             <ChevronUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />

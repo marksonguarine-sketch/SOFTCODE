@@ -484,6 +484,42 @@ export default function DashboardPage() {
         />
       </div>
 
+      {/* Inventory snapshot — surfaced near the top for quick stock health */}
+      <Card className="mb-4">
+        <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Inventory snapshot</CardTitle>
+            <div className="text-[12px] text-muted-foreground mt-0.5">Current stock health</div>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => navigate("/inventory")}>
+            Open inventory
+          </Button>
+        </CardHeader>
+        <CardContent className="px-5 py-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="p-4 bg-muted/40 rounded-lg">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Total items</span>
+                <Package className="w-3.5 h-3.5 text-muted-foreground" />
+              </div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums">{stats?.totalItems ?? 0}</div>
+            </div>
+            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg">
+              <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-medium mb-1">Stock value</div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{peso(stats?.totalInventoryValue ?? 0)}</div>
+            </div>
+            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-lg">
+              <div className="text-[11px] uppercase tracking-wider text-amber-700 dark:text-amber-400 font-medium mb-1">Low stock</div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums text-amber-700 dark:text-amber-400">{stats?.lowStock ?? 0}</div>
+            </div>
+            <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-lg">
+              <div className="text-[11px] uppercase tracking-wider text-red-700 dark:text-red-400 font-medium mb-1">Critical</div>
+              <div className="font-mono text-[22px] font-semibold tabular-nums text-red-700 dark:text-red-400">{stats?.criticalStock ?? 0}</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 04. Revenue trend + Daily goal */}
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mb-4">
         <Card>
@@ -897,41 +933,6 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* 08. Inventory snapshot */}
-      <Card>
-        <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Inventory snapshot</CardTitle>
-            <div className="text-[12px] text-muted-foreground mt-0.5">Current stock health</div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => navigate("/inventory")}>
-            Open inventory
-          </Button>
-        </CardHeader>
-        <CardContent className="px-5 py-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 bg-muted/40 rounded-lg">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Total items</span>
-                <Package className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums">{stats?.totalItems ?? 0}</div>
-            </div>
-            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg">
-              <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-medium mb-1">Stock value</div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{peso(stats?.totalInventoryValue ?? 0)}</div>
-            </div>
-            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-lg">
-              <div className="text-[11px] uppercase tracking-wider text-amber-700 dark:text-amber-400 font-medium mb-1">Low stock</div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums text-amber-700 dark:text-amber-400">{stats?.lowStock ?? 0}</div>
-            </div>
-            <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-lg">
-              <div className="text-[11px] uppercase tracking-wider text-red-700 dark:text-red-400 font-medium mb-1">Critical</div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums text-red-700 dark:text-red-400">{stats?.criticalStock ?? 0}</div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

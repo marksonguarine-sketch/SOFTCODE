@@ -75,7 +75,8 @@ function loadGoogleFontPreview(fontName: string) {
 }
 
 const TWEAKS_KEY = "joap-tweaks-v1";
-const TWEAKS_DEFAULTS = { dark: false, density: "balanced" as const, accentHue: 220 };
+type Tweaks = { dark: boolean; density: string; accentHue: number };
+const TWEAKS_DEFAULTS: Tweaks = { dark: false, density: "balanced", accentHue: 220 };
 const DENSITY_OPTIONS = [
   { value: "compact", label: "Compact", px: "13px" },
   { value: "balanced", label: "Balanced", px: "14px" },
@@ -91,7 +92,7 @@ const ACCENT_PRESETS = [
   { hue: 330, label: "Pink" },
 ];
 
-function loadTweaks() {
+function loadTweaks(): Tweaks {
   try {
     const raw = localStorage.getItem(TWEAKS_KEY);
     if (raw) return { ...TWEAKS_DEFAULTS, ...JSON.parse(raw) };
@@ -99,7 +100,7 @@ function loadTweaks() {
   return { ...TWEAKS_DEFAULTS };
 }
 
-function saveTweaks(t: typeof TWEAKS_DEFAULTS & { density: string; accentHue: number }) {
+function saveTweaks(t: Tweaks) {
   try { localStorage.setItem(TWEAKS_KEY, JSON.stringify(t)); } catch { /* ignore */ }
 }
 
@@ -235,7 +236,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-24 overflow-y-auto h-full max-h-screen">
+    <div className="p-3 sm:p-6 space-y-6 pb-10">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (

@@ -1163,4 +1163,68 @@ Build: `npx tsc --noEmit` 0 errors · `npm run build` clean (1.2 MB server bundl
 
 ---
 
+## 28. Session 10 — REQUEST.pdf implementation (orders logic, reservations, inventory roles, backup email, Developers Time Log)
+
+This session worked through the full `REQUEST.pdf` brief (11 pages of annotated screenshots). Several items had already been started in an earlier uncommitted working tree (order workflow constraints, pool filters/pagination, ledger pagination, dashboard snapshot move, settings scroll fix); this session finished those, fixed their bugs, and implemented the remaining items end-to-end.
+
+### 28.1 Order workflow logic (`shared/schema.ts`, `client/src/pages/orders.tsx`, `server/models/Order.ts`)
+- `PAYMENT_STATUSES`: replaced `refunded` with `reservation_only` ("For Reservation Only"). Removed the Refund option everywhere (badges in `utils.ts`, `orders.tsx`, Order model enum).
+- Added real-world constraint tables: `ALLOWED_ORDER_CHANNELS`, `ALLOWED_PAYMENT_STATUSES`, `ALLOWED_FULFILLMENT_STATUSES` (keyed by order type) + three `createOrderSchema.refine()` guards.
+- Create-order dialog now disables/limits Order Channel, Payment Status and Fulfillment Status to the valid set for the chosen type. Walk-in channel (non-reservation) forces **Paid** only. Reservations limited to pending / For Reservation Only.
+- "Next" button disabled until the current step has the required data (`canProceed`).
+- Close confirmation: if the dialog has unsaved data, closing prompts "are you sure" (`requestClose` + `hasUnsavedData`).
+
+### 28.2 Orders dashboard + assign UI (`client/src/pages/orders.tsx`)
+- Assign-to-employee dropdown: widened, responsive, added an in-dropdown **staff search bar** (`empSearch`).
+- Pool: added filters (order type, sort by date/type/amount asc-desc) and **10-per-page pagination** (`POOL_PAGE_SIZE`).
+
+### 28.3 Pending Payment → History of Payment (`client/src/pages/pending-payment.tsx`)
+- Paid orders already leave the pending list. Added a **History of Payment** section below: queries `?paymentStatus=paid`, sorts by paid timestamp (`paidAt` from statusHistory "Paid" entry), clickable rows, and a **CSV export** (`exportPaymentHistoryCsv`).
+
+### 28.4 Dashboard (`client/src/pages/dashboard.tsx`)
+- Inventory snapshot card moved to the **top** of the dashboard (above the KPI/revenue cards).
+
+### 28.5 Inventory images + status colors (`client/src/pages/inventory.tsx`, `client/src/lib/queryClient.ts`)
+- `apiRequest` now supports `FormData` (lets the browser set the multipart boundary) for image uploads.
+- Admin-only image upload in **both** table and grid views (hidden `#inventory-image-upload` input + `imageUploadMutation` → `POST /api/items/:id/image`). Fixed a column-misalignment bug where the table had an "Image" header but no body cell.
+- Status badges now colour **green (In Stock) / amber (Low) / red (Critical)** in table and grid, and the stock bars match.
+
+### 28.6 General Ledger (`client/src/pages/accounting.tsx`)
+- 20-per-page pagination + **date and Account filters** over the full ledger.
+
+### 28.7 Inventory Manager role (`shared/schema.ts`, `server/models/User.ts`, `server/middleware/auth.ts`, `client/src/lib/auth.tsx`, `client/src/App.tsx`, `client/src/components/app-sidebar.tsx`, `client/src/pages/users.tsx`)
+- New `INVENTORY_MANAGER` role (categorised under employees; `USER_ROLE_LABELS` added). Role enum widened in the User model, middleware `AuthRequest`, and `createUserSchema`.
+- `useAuth()` exposes `isInventoryManager`. The router scopes inventory managers to `/inventory` (+ profile/help/about) and redirects everything else there; they land on `/inventory` at login.
+- Sidebar hides everything except Inventory for the role. Item CRUD routes already use `authMiddleware` (not `adminOnly`), so the role can add/update/delete items.
+- Users page can create and filter by Inventory Manager.
+
+### 28.8 Settings / theme (`client/src/pages/settings.tsx`, `client/src/main.tsx`)
+- Settings over-scroll fixed (removed the full-height scroll container). Fixed a `Tweaks` type error.
+- **Default light mode**; dark/light toggle lives in Appearance Tweaks. `main.tsx` now applies saved tweaks (dark/density/accent) at **boot** so the choice persists across reloads.
+
+### 28.9 Maintenance — backup email + wipe + restore (`server/routes.ts`, `server/models/Settings.ts`, `client/src/pages/maintenance.tsx`)
+- **Resend** integration via `fetch` (no new dep): `sendBackupEmail()` emails the JSON backup as an attachment. Wired into `performAutoBackup` and a new `POST /api/maintenance/backup/email` manual trigger. Key/from overridable via `RESEND_API_KEY`/`RESEND_FROM` env.
+- New `Settings.backupEmail` (default `marksonguarine@gmail.com`). `GET/PATCH /api/maintenance/backup-email` — editing requires the admin password. Maintenance UI shows the email with password-gated edit + "Email Backup Now".
+- **Wipe** now clears EVERYTHING (users, settings, offers, customers, sessions, profiles, requests, messages, site visitors, …) then re-seeds a single default admin (`admin`/`admin123`) + fresh Settings so the system isn't bricked.
+- **Restore** now requires the admin password **and** typing `ACCEPT` before it overwrites the DB.
+
+### 28.10 Reservations (`server/routes.ts`, `client/src/pages/reservations.tsx`)
+- `POST /api/reservations/:id/handle` — converts a reservation into a live order (drops the `_reservation` suffix → pickup, resets fulfilment to pending → enters the pool). `DELETE` accepts `?force=true` for admin removal of non-cancelled reservations.
+- Calendar day-cards gained **Handle this order** and **Delete** buttons.
+- List view hides completed/cancelled by default; a new **Reservation History** section lists them with a **date-range CSV export** (audit columns: created-by + timestamps).
+
+### 28.11 Forecasting — all items present (`server/routes.ts`)
+- `GET /api/forecast/items` now iterates over **every** item. Items with ≥5 days of deduction history get a real ARIMA(1,1,1) fit; sparse items get a flat mean-demand fallback so they still appear with current stock + reorder advice (`hasHistory` flag added).
+
+### 28.12 Developers Time Log (`scripts/gen-changelog.mjs`, `script/build.ts`, `client/src/changelog.generated.json`, `client/src/components/dev-time-log.tsx`, `client/src/App.tsx`, `tsconfig.json`)
+- `scripts/gen-changelog.mjs` bakes the full `git log` into `client/src/changelog.generated.json` (run automatically at the start of `npm run build`; tolerant of CI checkouts without git).
+- New `<DevTimeLog>` screen: aesthetic gradient timeline grouped by day, colour-coded labels (FEATURE/FIX/UPDATE/…), all commits newest-first with full bodies, and a **"Proceed to the System"** button. Shown once per browser session (sessionStorage `joap_seen_timelog`) right after the boot loader, before login.
+- `resolveJsonModule` enabled in `tsconfig.json` for the JSON import.
+
+### 28.13 Verification
+- `npx tsc --noEmit` → 0 errors.
+- `npm run build` → clean (client `dist/public` + server `dist/index.cjs`), changelog regenerated as part of the build.
+
+---
+
 End of code.md.

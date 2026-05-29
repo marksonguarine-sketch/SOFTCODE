@@ -217,6 +217,27 @@ export default function InventoryPage() {
     onError: (err: any) => toast({ title: "Failed to delete", description: err.message, variant: "destructive" }),
   });
 
+  // ── Admin image upload (grid + table) ──────────────────────────────────
+  const [uploadTargetId, setUploadTargetId] = useState<string | null>(null);
+  const imageUploadMutation = useMutation({
+    mutationFn: async ({ id, file }: { id: string; file: File }) => {
+      const fd = new FormData();
+      fd.append("image", file);
+      const res = await apiRequest("POST", `/api/items/${id}/image`, fd);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+      toast({ title: "Image uploaded" });
+    },
+    onError: (err: any) => toast({ title: "Failed to upload image", description: err.message, variant: "destructive" }),
+  });
+
+  function triggerImageUpload(itemId: string) {
+    setUploadTargetId(itemId);
+    document.getElementById("inventory-image-upload")?.click();
+  }
+
   function openEdit(item: IItem) {
     setEditItem(item);
     setEditPrice(item.unitPrice || 0);
@@ -321,6 +342,19 @@ export default function InventoryPage() {
         }
       />
 
+      {/* Hidden file input for admin item-image uploads (grid + table) */}
+      <input
+        type="file"
+        id="inventory-image-upload"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file && uploadTargetId) imageUploadMutation.mutate({ id: uploadTargetId, file });
+          e.target.value = "";
+        }}
+      />
+
       {/* KPI strip */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
         <KPICard
@@ -412,6 +446,7 @@ export default function InventoryPage() {
                 <TableRow>
                   <TableHead>SKU</TableHead>
                   <TableHead>Item</TableHead>
+                  <TableHead>Image</TableHead>
                   <TableHead>Category</TableHead>
                   <TableHead className="text-right">Price</TableHead>
                   <TableHead className="text-right">Cost</TableHead>
@@ -425,7 +460,7 @@ export default function InventoryPage() {
               <TableBody>
                 {isLoading && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8">
+                    <TableCell colSpan={11} className="text-center py-8">
                       <Loader2 className="w-4 h-4 animate-spin inline-block mr-2" />
                       Loading inventory…
                     </TableCell>
@@ -433,7 +468,7 @@ export default function InventoryPage() {
                 )}
                 {!isLoading && filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-10 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-10 text-muted-foreground">
                       No items match the current filter.
                     </TableCell>
                   </TableRow>
@@ -446,8 +481,8 @@ export default function InventoryPage() {
                     status === "Critical"
                       ? "bg-red-500"
                       : status === "Low"
-                        ? "bg-red-400"
-                        : "bg-primary";
+                        ? "bg-amber-400"
+                        : "bg-green-500";
                   return (
                     <TableRow key={item._id} data-testid={`row-item-${item._id}`} className="cursor-pointer">
                       <TableCell className="font-mono text-[12px] font-semibold tabular-nums whitespace-nowrap">
@@ -458,6 +493,29 @@ export default function InventoryPage() {
                         {(item as any).supplierName && (
                           <div className="text-[11px] text-muted-foreground">{(item as any).supplierName}</div>
                         )}
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <div className="h-10 w-10 rounded-md bg-muted/40 overflow-hidden grid place-items-center shrink-0">
+                            {(item as any).imageFilename ? (
+                              <img src={`/api/uploads/${(item as any).imageFilename}`} alt={item.itemName} className="w-full h-full object-cover" />
+                            ) : (
+                              <ImageIcon className="w-4 h-4 text-muted-foreground/40" />
+                            )}
+                          </div>
+                          {isAdmin && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 px-2 text-[11px]"
+                              disabled={imageUploadMutation.isPending && uploadTargetId === item._id}
+                              onClick={() => triggerImageUpload(item._id)}
+                              data-testid={`button-upload-image-${item._id}`}
+                            >
+                              {(item as any).imageFilename ? "Change" : "Upload"}
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-[11px]">
@@ -489,14 +547,17 @@ export default function InventoryPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        {status === "Normal" ? (
-                          <span className="text-[11px] text-muted-foreground">—</span>
-                        ) : (
-                          <Badge className={status === "Critical" ? "badge-danger" : "badge-warning"}>
-                            <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
-                            {status}
-                          </Badge>
-                        )}
+                        <Badge
+                          className={cn(
+                            "border-transparent text-white",
+                            status === "Critical" && "bg-red-500",
+                            status === "Low" && "bg-amber-500",
+                            status === "Normal" && "bg-green-500"
+                          )}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
+                          {status === "Normal" ? "In Stock" : status}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-[12px] text-muted-foreground">
                         {(item as any).supplierName || "—"}
@@ -532,7 +593,7 @@ export default function InventoryPage() {
                   className="border border-border rounded-lg overflow-hidden hover:shadow-md transition"
                   data-testid={`card-item-${item._id}`}
                 >
-                  <div className="h-24 bg-muted/40 grid place-items-center">
+                  <div className="relative h-24 bg-muted/40 grid place-items-center group">
                     {(item as any).imageFilename ? (
                       <img
                         src={`/api/uploads/${(item as any).imageFilename}`}
@@ -541,6 +602,18 @@ export default function InventoryPage() {
                       />
                     ) : (
                       <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
+                    )}
+                    {isAdmin && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="absolute bottom-1 right-1 h-6 px-2 text-[10px] opacity-90"
+                        disabled={imageUploadMutation.isPending && uploadTargetId === item._id}
+                        onClick={(e) => { e.stopPropagation(); triggerImageUpload(item._id); }}
+                        data-testid={`button-upload-image-grid-${item._id}`}
+                      >
+                        {(item as any).imageFilename ? "Change" : "Upload"}
+                      </Button>
                     )}
                   </div>
                   <div className="p-3">
@@ -564,8 +637,8 @@ export default function InventoryPage() {
                           status === "Critical"
                             ? "bg-red-500"
                             : status === "Low"
-                              ? "bg-red-400"
-                              : "bg-primary"
+                              ? "bg-amber-400"
+                              : "bg-green-500"
                         )}
                         style={{ width: `${pct}%` }}
                       />

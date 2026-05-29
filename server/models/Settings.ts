@@ -10,6 +10,7 @@ export interface ISettingsDoc extends Document {
   autoBackupEnabled: boolean;
   autoBackupIntervalValue: number;
   autoBackupIntervalUnit: string;
+  backupEmail: string;
   storeAddress: string;
   storeContactNumber: string;
   storeEmail: string;
@@ -33,6 +34,7 @@ const settingsSchema = new Schema<ISettingsDoc>(
     autoBackupEnabled: { type: Boolean, default: false },
     autoBackupIntervalValue: { type: Number, default: 24 },
     autoBackupIntervalUnit: { type: String, enum: ["hours", "days", "weeks"], default: "hours" },
+    backupEmail: { type: String, default: "marksonguarine@gmail.com" },
     storeAddress: { type: String, default: "" },
     storeContactNumber: { type: String, default: "" },
     storeEmail: { type: String, default: "" },

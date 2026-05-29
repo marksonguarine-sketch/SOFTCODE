@@ -46,14 +46,16 @@ export async function apiRequest(
   const headers: Record<string, string> = {
     ...getAuthHeaders(),
   };
-  if (data) {
+  const isFormData = typeof FormData !== "undefined" && data instanceof FormData;
+  if (data && !isFormData) {
+    // Let the browser set the multipart boundary for FormData uploads.
     headers["Content-Type"] = "application/json";
   }
 
   const res = await fetch(url, {
     method,
     headers,
-    body: data ? JSON.stringify(data) : undefined,
+    body: data ? (isFormData ? (data as FormData) : JSON.stringify(data)) : undefined,
     credentials: "include",
   });
 

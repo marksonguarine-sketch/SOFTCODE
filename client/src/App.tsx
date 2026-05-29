@@ -1,4 +1,4 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, startGlobalRealtimeSync } from "./lib/queryClient";
 import { unlockAudio } from "@/lib/tts";
@@ -30,6 +30,7 @@ import { GraduationCap } from "lucide-react";
 import { useSocketNotifications } from "@/hooks/use-socket-notifications";
 import { FloatingCalculator } from "@/components/floating-calculator";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { DevTimeLog } from "@/components/dev-time-log";
 import NotFound from "@/pages/not-found";
 import LoginPage from "@/pages/login";
 import DashboardPage from "@/pages/dashboard";
@@ -70,6 +71,22 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
 }
 
 function Router() {
+  const { isInventoryManager } = useAuth();
+
+  // Inventory managers are scoped to inventory only — everything else redirects
+  // to /inventory. They land there on login as well.
+  if (isInventoryManager) {
+    return (
+      <Switch>
+        <Route path="/inventory" component={InventoryPage} />
+        <Route path="/profile" component={ProfilePage} />
+        <Route path="/help" component={HelpPage} />
+        <Route path="/about" component={AboutPage} />
+        <Route>{() => <Redirect to="/inventory" />}</Route>
+      </Switch>
+    );
+  }
+
   return (
     <Switch>
       <Route path="/" component={DashboardPage} />
@@ -251,8 +268,27 @@ function AuthenticatedLayout() {
   );
 }
 
+const TIMELOG_SEEN_KEY = "joap_seen_timelog";
+
 function AppContent() {
   const { user, isLoading } = useAuth();
+
+  // "Developers Time Log" — shown once per browser session right after the boot
+  // loader (the hammer) finishes, before the user reaches the system.
+  const [showTimeLog, setShowTimeLog] = useState(() => {
+    try { return sessionStorage.getItem(TIMELOG_SEEN_KEY) !== "true"; } catch { return true; }
+  });
+
+  if (showTimeLog) {
+    return (
+      <DevTimeLog
+        onProceed={() => {
+          try { sessionStorage.setItem(TIMELOG_SEEN_KEY, "true"); } catch { /* ignore */ }
+          setShowTimeLog(false);
+        }}
+      />
+    );
+  }
 
   if (isLoading) {
     return (

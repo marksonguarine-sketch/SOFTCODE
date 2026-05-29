@@ -11,10 +11,11 @@ import {
 import { speakTTS, formatAmountForTTS } from "@/lib/tts";
 import {
   createOrderSchema, type CreateOrderInput, type IOrder, type IItem, type IOrderItem,
-  ALLOWED_PAYMENT_METHODS, ORDER_TYPE_LABELS, ORDER_CHANNEL_LABELS,
+  ALLOWED_PAYMENT_METHODS, ALLOWED_ORDER_CHANNELS, ALLOWED_PAYMENT_STATUSES, ALLOWED_FULFILLMENT_STATUSES,
+  ORDER_TYPE_LABELS, ORDER_CHANNEL_LABELS,
   PAYMENT_STATUS_LABELS, PAYMENT_METHOD_LABELS, FULFILLMENT_STATUS_LABELS,
   ORDER_TYPES, ORDER_CHANNELS, PAYMENT_STATUSES, PAYMENT_METHODS, FULFILLMENT_STATUSES,
-  type OrderType, type PaymentMethod,
+  type OrderType, type PaymentMethod, type OrderChannel, type PaymentStatus, type FulfillmentStatus,
 } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -38,6 +39,8 @@ function PoolAdminRow({ order, allUsers, onAssignClick, onNavigate }: {
   order: IOrder; allUsers: SimpleUser[]; onAssignClick: (username: string) => void; onNavigate: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [empSearch, setEmpSearch] = useState("");
+  const visibleUsers = allUsers.filter((u) => u.username.toLowerCase().includes(empSearch.toLowerCase()));
   return (
     <TableRow data-testid={`row-pool-admin-${order._id}`}>
       <TableCell className="font-mono text-sm font-semibold cursor-pointer" onClick={onNavigate}>{order.trackingNumber}</TableCell>
@@ -59,16 +62,27 @@ function PoolAdminRow({ order, allUsers, onAssignClick, onNavigate }: {
           {open && (
             <>
               {/* Backdrop */}
-              <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+              <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setEmpSearch(""); }} />
               {/* Dropdown */}
-              <div className="absolute right-0 top-full mt-1.5 z-50 min-w-[160px] rounded-xl border border-border bg-popover shadow-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150">
+              <div className="absolute right-0 top-full mt-1.5 z-50 w-[240px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover shadow-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150">
                 <div className="px-3 py-2 border-b">
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Assign to staff</p>
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Assign to staff</p>
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      autoFocus
+                      placeholder="Search staff..."
+                      className="pl-8 h-8 text-xs"
+                      value={empSearch}
+                      onChange={(e) => setEmpSearch(e.target.value)}
+                      data-testid={`input-assign-search-${order._id}`}
+                    />
+                  </div>
                 </div>
                 <div className="max-h-[200px] overflow-y-auto py-1">
-                  {allUsers.length === 0 ? (
-                    <p className="text-xs text-muted-foreground px-3 py-2 text-center">No staff available</p>
-                  ) : allUsers.map((u) => {
+                  {visibleUsers.length === 0 ? (
+                    <p className="text-xs text-muted-foreground px-3 py-2 text-center">{allUsers.length === 0 ? "No staff available" : "No match"}</p>
+                  ) : visibleUsers.map((u) => {
                     const initials = u.username.slice(0, 2).toUpperCase();
                     const colors = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-rose-500", "bg-cyan-500"];
                     const color = colors[u.username.charCodeAt(0) % colors.length];
@@ -200,7 +214,7 @@ function PaymentBadge({ status }: { status: string }) {
     pending_payment: "bg-yellow-500 text-white border-transparent",
     partial: "bg-orange-400 text-white border-transparent",
     paid: "bg-green-500 text-white border-transparent",
-    refunded: "bg-red-400 text-white border-transparent",
+    reservation_only: "bg-purple-500 text-white border-transparent",
   };
   return <Badge className={`text-xs ${map[status] || "bg-gray-400 text-white border-transparent"}`}>{PAYMENT_STATUS_LABELS[status as keyof typeof PAYMENT_STATUS_LABELS] || status}</Badge>;
 }
@@ -291,7 +305,18 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   });
 
   const orderType = form.watch("orderType") as OrderType;
+  const orderChannel = form.watch("orderChannel") as OrderChannel;
   const allowedMethods = ALLOWED_PAYMENT_METHODS[orderType] || [];
+  const allowedChannels = ALLOWED_ORDER_CHANNELS[orderType] || [];
+  const allowedFulfillment = ALLOWED_FULFILLMENT_STATUSES[orderType] || [];
+  const isReservation = orderType.includes("reservation");
+  // Walk-in channel (non-reservation) must always be Paid — money changes hands
+  // at the counter, so there's no "pending payment" case for it.
+  const allowedPaymentStatuses = (() => {
+    const base = ALLOWED_PAYMENT_STATUSES[orderType] || [];
+    if (orderChannel === "walkin" && !isReservation) return base.filter((s) => s === "paid");
+    return base;
+  })();
 
   const createMutation = useMutation({
     mutationFn: async (data: CreateOrderInput) => {
@@ -375,6 +400,36 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const deliveryFee = Number(form.watch("deliveryFee")) || 0;
   const estimatedTotal = subtotal + deliveryFee;
 
+  // Whether the user has entered enough to advance to the next step. The "Next"
+  // button is disabled until the current step's required data is present.
+  const watchedCustomerName = form.watch("customerName");
+  const watchedPaymentMethod = form.watch("paymentMethod");
+  const watchedPaymentStatus = form.watch("paymentStatus");
+  const watchedFulfillment = form.watch("fulfillmentStatus");
+  const canProceed = (() => {
+    if (step === 0) return !!watchedCustomerName?.trim() && !!orderType && !!orderChannel;
+    if (step === 1) return orderItems.length > 0;
+    if (step === 2) return !!watchedPaymentMethod && !!watchedPaymentStatus;
+    if (step === 3) return !!watchedFulfillment;
+    return true;
+  })();
+
+  // True when the user has started filling the form — used to confirm before
+  // closing so a half-typed order isn't lost.
+  const hasUnsavedData =
+    !!watchedCustomerName?.trim() || orderItems.length > 0 || !!form.watch("notes")?.trim();
+
+  function requestClose() {
+    if (hasUnsavedData) {
+      if (!window.confirm("You have unsaved order details. Are you sure you want to close? Your changes will be lost.")) return;
+    }
+    onClose();
+    setStep(0);
+    setOrderItems([]);
+    form.reset();
+    setDuplicate(null);
+  }
+
   async function handleNext() {
     if (step === 0) {
       const fields = ["customerName", "orderType", "orderChannel"] as const;
@@ -408,7 +463,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   );
 
   return (
-    <Dialog open={open} onOpenChange={(v) => { if (!v) { onClose(); setStep(0); setOrderItems([]); form.reset(); setDuplicate(null); } }}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) requestClose(); }}>
       <DialogContent className="fixed inset-0 max-w-none !w-screen !h-screen !translate-x-0 !translate-y-0 !left-0 !top-0 !rounded-none m-0 flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="flex-shrink-0 px-6 py-4 border-b bg-background">
           <div className="flex items-center justify-between">
@@ -463,9 +518,25 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                           className={`p-3 rounded-lg border text-sm text-left transition-colors ${field.value === type ? "border-primary bg-primary/5 font-medium" : "border-border hover:border-primary/50"}`}
                           onClick={() => {
                             field.onChange(type);
-                            const allowed = ALLOWED_PAYMENT_METHODS[type];
-                            const current = form.getValues("paymentMethod") as PaymentMethod;
-                            if (!allowed.includes(current)) form.setValue("paymentMethod", allowed[0]);
+                            // Reset payment method to a valid one for this type
+                            const allowedM = ALLOWED_PAYMENT_METHODS[type];
+                            const curM = form.getValues("paymentMethod") as PaymentMethod;
+                            if (!allowedM.includes(curM)) form.setValue("paymentMethod", allowedM[0]);
+                            // Reset order channel to a valid one for this type
+                            const allowedC = ALLOWED_ORDER_CHANNELS[type];
+                            const curC = form.getValues("orderChannel") as OrderChannel;
+                            const nextC = allowedC.includes(curC) ? curC : allowedC[0];
+                            if (nextC !== curC) form.setValue("orderChannel", nextC);
+                            // Reset payment status — respect the walk-in→Paid rule
+                            const resv = type.includes("reservation");
+                            let allowedS = ALLOWED_PAYMENT_STATUSES[type];
+                            if (nextC === "walkin" && !resv) allowedS = allowedS.filter((s) => s === "paid");
+                            const curS = form.getValues("paymentStatus") as PaymentStatus;
+                            if (!allowedS.includes(curS)) form.setValue("paymentStatus", allowedS[0]);
+                            // Reset fulfillment status
+                            const allowedF = ALLOWED_FULFILLMENT_STATUSES[type];
+                            const curF = form.getValues("fulfillmentStatus") as FulfillmentStatus;
+                            if (!allowedF.includes(curF)) form.setValue("fulfillmentStatus", allowedF[0]);
                             const needsAddress = type.includes("delivery");
                             setShowAddress(needsAddress);
                           }}
@@ -480,12 +551,26 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                 <FormField control={form.control} name="orderChannel" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Order Channel *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select
+                      onValueChange={(val) => {
+                        field.onChange(val);
+                        // Walk-in channel forces Paid (non-reservation); keep status valid
+                        let allowedS = ALLOWED_PAYMENT_STATUSES[orderType];
+                        if (val === "walkin" && !isReservation) allowedS = allowedS.filter((s) => s === "paid");
+                        const curS = form.getValues("paymentStatus") as PaymentStatus;
+                        if (!allowedS.includes(curS)) form.setValue("paymentStatus", allowedS[0]);
+                      }}
+                      value={field.value}
+                      disabled={allowedChannels.length <= 1}
+                    >
                       <FormControl><SelectTrigger data-testid="select-order-channel"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {ORDER_CHANNELS.map((ch) => <SelectItem key={ch} value={ch}>{ORDER_CHANNEL_LABELS[ch]}</SelectItem>)}
+                        {allowedChannels.map((ch) => <SelectItem key={ch} value={ch}>{ORDER_CHANNEL_LABELS[ch]}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                    {allowedChannels.length <= 1 && (
+                      <p className="text-xs text-muted-foreground mt-1">Walk-in orders are always logged as in-store.</p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -605,12 +690,15 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                 <FormField control={form.control} name="paymentStatus" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Payment Status *</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={allowedPaymentStatuses.length <= 1}>
                       <FormControl><SelectTrigger data-testid="select-payment-status"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {PAYMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{PAYMENT_STATUS_LABELS[s]}</SelectItem>)}
+                        {allowedPaymentStatuses.map((s) => <SelectItem key={s} value={s}>{PAYMENT_STATUS_LABELS[s]}</SelectItem>)}
                       </SelectContent>
                     </Select>
+                    {orderChannel === "walkin" && !isReservation && (
+                      <p className="text-xs text-muted-foreground mt-1">Walk-in orders are paid at the counter.</p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )} />
@@ -623,10 +711,10 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                 <FormField control={form.control} name="fulfillmentStatus" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Fulfillment Status</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
+                    <Select onValueChange={field.onChange} value={field.value} disabled={allowedFulfillment.length <= 1}>
                       <FormControl><SelectTrigger data-testid="select-fulfillment-status"><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {FULFILLMENT_STATUSES.map((s) => <SelectItem key={s} value={s}>{FULFILLMENT_STATUS_LABELS[s]}</SelectItem>)}
+                        {allowedFulfillment.map((s) => <SelectItem key={s} value={s}>{FULFILLMENT_STATUS_LABELS[s]}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -733,7 +821,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
           <div className="flex gap-2 flex-wrap justify-end">
             {step > 0 && <Button type="button" variant="outline" onClick={handleBack} data-testid="button-order-back"><ChevronLeft className="h-4 w-4 mr-1" />Back</Button>}
             {step < 4 ? (
-              <Button type="button" onClick={handleNext} data-testid="button-order-next">
+              <Button type="button" onClick={handleNext} disabled={!canProceed} data-testid="button-order-next">
                 Next <ChevronRight className="h-4 w-4 ml-1" />
               </Button>
             ) : (
@@ -759,6 +847,10 @@ export default function OrdersPage() {
   const [assignedEmployeeFilter, setAssignedEmployeeFilter] = useState("all");
   const [assignedDoneFilter, setAssignedDoneFilter] = useState("not_yet"); // "all" | "done" | "not_yet"
   const [poolSearch, setPoolSearch] = useState("");
+  const [poolTypeFilter, setPoolTypeFilter] = useState("all");
+  const [poolSort, setPoolSort] = useState("date_desc"); // date_desc | date_asc | type | amount_asc | amount_desc
+  const [poolPage, setPoolPage] = useState(1);
+  const POOL_PAGE_SIZE = 10;
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkStatus, setBulkStatus] = useState<string>("");
@@ -925,12 +1017,30 @@ export default function OrdersPage() {
 
   // ── Admin: Pool ──────────────────────────────────────────────────────────────
   const filteredPoolOrders = useMemo(() => {
-    if (!poolSearch) return poolOrders;
-    return poolOrders.filter((o) =>
-      o.trackingNumber.toLowerCase().includes(poolSearch.toLowerCase()) ||
-      o.customerName.toLowerCase().includes(poolSearch.toLowerCase())
-    );
-  }, [poolOrders, poolSearch]);
+    let res = poolOrders;
+    if (poolSearch) {
+      res = res.filter((o) =>
+        o.trackingNumber.toLowerCase().includes(poolSearch.toLowerCase()) ||
+        o.customerName.toLowerCase().includes(poolSearch.toLowerCase())
+      );
+    }
+    if (poolTypeFilter !== "all") res = res.filter((o) => o.orderType === poolTypeFilter);
+    res = [...res].sort((a, b) => {
+      switch (poolSort) {
+        case "date_asc": return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "amount_asc": return a.totalAmount - b.totalAmount;
+        case "amount_desc": return b.totalAmount - a.totalAmount;
+        case "type": return (ORDER_TYPE_LABELS[a.orderType] || a.orderType).localeCompare(ORDER_TYPE_LABELS[b.orderType] || b.orderType);
+        case "date_desc":
+        default: return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      }
+    });
+    return res;
+  }, [poolOrders, poolSearch, poolTypeFilter, poolSort]);
+
+  const poolTotalPages = Math.max(1, Math.ceil(filteredPoolOrders.length / POOL_PAGE_SIZE));
+  const poolPageSafe = Math.min(poolPage, poolTotalPages);
+  const pagedPoolOrders = filteredPoolOrders.slice((poolPageSafe - 1) * POOL_PAGE_SIZE, poolPageSafe * POOL_PAGE_SIZE);
 
   if (isLoading) {
     return (
@@ -1280,17 +1390,47 @@ export default function OrdersPage() {
           <Badge className="bg-amber-500 text-white border-transparent">{poolOrders.length} unassigned</Badge>
         </div>
 
-        {/* Pool search only — no dropdowns, no bulk */}
-        <div className="relative max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search pool..." className="pl-9 h-8" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} data-testid="input-search-pool" />
+        {/* Pool search + filters */}
+        <div className="flex gap-2 flex-wrap items-center">
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search pool..." className="pl-9 h-8" value={poolSearch} onChange={(e) => { setPoolSearch(e.target.value); setPoolPage(1); }} data-testid="input-search-pool" />
+          </div>
+          <Select value={poolTypeFilter} onValueChange={(v) => { setPoolTypeFilter(v); setPoolPage(1); }}>
+            <SelectTrigger className="w-[170px] h-8 text-xs" data-testid="select-pool-type">
+              <Filter className="h-3.5 w-3.5 mr-1" />
+              <SelectValue placeholder="Order type" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Types</SelectItem>
+              {ORDER_TYPES.map((t) => <SelectItem key={t} value={t}>{ORDER_TYPE_LABELS[t]}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={poolSort} onValueChange={(v) => { setPoolSort(v); setPoolPage(1); }}>
+            <SelectTrigger className="w-[185px] h-8 text-xs" data-testid="select-pool-sort">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="date_desc">Date — Newest first</SelectItem>
+              <SelectItem value="date_asc">Date — Oldest first</SelectItem>
+              <SelectItem value="type">Type (A–Z)</SelectItem>
+              <SelectItem value="amount_asc">Amount — Low to High</SelectItem>
+              <SelectItem value="amount_desc">Amount — High to Low</SelectItem>
+            </SelectContent>
+          </Select>
+          {(poolSearch || poolTypeFilter !== "all" || poolSort !== "date_desc") && (
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setPoolSearch(""); setPoolTypeFilter("all"); setPoolSort("date_desc"); setPoolPage(1); }}>
+              Clear
+            </Button>
+          )}
         </div>
 
         {filteredPoolOrders.length === 0 ? (
           <Card><CardContent className="py-6 text-center text-muted-foreground text-sm">
-            {poolOrders.length === 0 ? "No orders in the pool right now." : "No pool orders match your search."}
+            {poolOrders.length === 0 ? "No orders in the pool right now." : "No pool orders match your filters."}
           </CardContent></Card>
         ) : (
+          <>
           <Card>
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -1306,7 +1446,7 @@ export default function OrdersPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredPoolOrders.map((order) => (
+                    {pagedPoolOrders.map((order) => (
                       <PoolAdminRow
                         key={order._id}
                         order={order}
@@ -1324,6 +1464,22 @@ export default function OrdersPage() {
               </div>
             </CardContent>
           </Card>
+          {/* Pagination — 10 per page */}
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-xs text-muted-foreground">
+              Showing {(poolPageSafe - 1) * POOL_PAGE_SIZE + 1}–{Math.min(poolPageSafe * POOL_PAGE_SIZE, filteredPoolOrders.length)} of {filteredPoolOrders.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="h-8 text-xs" disabled={poolPageSafe <= 1} onClick={() => setPoolPage((p) => Math.max(1, p - 1))} data-testid="button-pool-prev">
+                <ChevronLeft className="h-3.5 w-3.5 mr-1" />Prev
+              </Button>
+              <span className="text-xs text-muted-foreground">Page {poolPageSafe} of {poolTotalPages}</span>
+              <Button variant="outline" size="sm" className="h-8 text-xs" disabled={poolPageSafe >= poolTotalPages} onClick={() => setPoolPage((p) => Math.min(poolTotalPages, p + 1))} data-testid="button-pool-next">
+                Next <ChevronRight className="h-3.5 w-3.5 ml-1" />
+              </Button>
+            </div>
+          </div>
+          </>
         )}
       </div>
 

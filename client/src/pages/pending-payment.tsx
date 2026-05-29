@@ -1,13 +1,14 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Clock, Search, ChevronRight, CreditCard } from "lucide-react";
+import { Clock, Search, ChevronRight, CreditCard, CheckCircle2, Download } from "lucide-react";
 import type { IOrder } from "@shared/schema";
-import { PAYMENT_STATUS_LABELS, ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@shared/schema";
+import { ORDER_TYPE_LABELS, PAYMENT_METHOD_LABELS } from "@shared/schema";
 import { apiRequest } from "@/lib/queryClient";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -17,6 +18,34 @@ function formatCurrency(v: number) {
 }
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+}
+function formatDateTime(d: string) {
+  return new Date(d).toLocaleString("en-PH", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: true });
+}
+// When did this order become paid? Prefer the "Paid" status-history entry; fall
+// back to the last update timestamp.
+function paidAt(order: IOrder): string {
+  const entry = [...(order.statusHistory || [])].reverse().find((s) => s.status === "Paid");
+  return entry?.timestamp || order.updatedAt || order.createdAt;
+}
+function exportPaymentHistoryCsv(orders: IOrder[]) {
+  const header = ["Tracking #", "Customer", "Order Type", "Payment Method", "Amount", "Paid At"];
+  const rows = orders.map((o) => [
+    o.trackingNumber,
+    o.customerName,
+    ORDER_TYPE_LABELS[o.orderType] || o.orderType,
+    PAYMENT_METHOD_LABELS[o.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] || o.paymentMethod,
+    String(o.totalAmount),
+    formatDateTime(paidAt(o)),
+  ]);
+  const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `payment-history-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function PendingPaymentPage() {
@@ -31,11 +60,26 @@ export default function PendingPaymentPage() {
     },
   });
 
+  // Paid orders feed the "History of Payment" section below.
+  const { data: paidData } = useQuery<{ success: boolean; data: { orders: IOrder[] } }>({
+    queryKey: ["/api/orders?paymentStatus=paid"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/orders?paymentStatus=paid&pageSize=200");
+      return res.json();
+    },
+  });
+
   const allOrders = data?.data?.orders || [];
-  const filtered = allOrders.filter((o) =>
+  const match = (o: IOrder) =>
     !search ||
     o.trackingNumber.toLowerCase().includes(search.toLowerCase()) ||
-    o.customerName.toLowerCase().includes(search.toLowerCase())
+    o.customerName.toLowerCase().includes(search.toLowerCase());
+  const filtered = allOrders.filter(match);
+
+  const paidOrders = paidData?.data?.orders || [];
+  const paidSorted = useMemo(
+    () => [...paidOrders].filter(match).sort((a, b) => new Date(paidAt(b)).getTime() - new Date(paidAt(a)).getTime()),
+    [paidOrders, search],
   );
 
   if (isLoading) {
@@ -133,6 +177,79 @@ export default function PendingPaymentPage() {
                     </TableCell>
                     <TableCell className="text-right font-semibold">{formatCurrency(order.totalAmount)}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
+                    <TableCell>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      {/* ── HISTORY OF PAYMENT ──────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-3 pt-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-green-500/10 flex items-center justify-center">
+            <CheckCircle2 className="h-5 w-5 text-green-600" />
+          </div>
+          <div>
+            <h2 className="text-lg sm:text-xl font-bold" data-testid="text-payment-history-title">History of Payment</h2>
+            <p className="text-sm text-muted-foreground">{paidSorted.length} completed payment{paidSorted.length !== 1 ? "s" : ""}</p>
+          </div>
+        </div>
+        {paidSorted.length > 0 && (
+          <Button variant="outline" size="sm" onClick={() => exportPaymentHistoryCsv(paidSorted)} data-testid="button-export-payment-history">
+            <Download className="h-3.5 w-3.5 mr-1.5" />
+            Export CSV
+          </Button>
+        )}
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Tracking #</TableHead>
+                <TableHead>Customer</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Payment Method</TableHead>
+                <TableHead className="text-right">Amount Paid</TableHead>
+                <TableHead>Paid At</TableHead>
+                <TableHead className="w-8" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {paidSorted.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="p-0">
+                    <EmptyState
+                      icon={CheckCircle2}
+                      title="No payments yet"
+                      description="Orders that get fully paid will appear here with a timestamp."
+                    />
+                  </TableCell>
+                </TableRow>
+              ) : (
+                paidSorted.map((order) => (
+                  <TableRow
+                    key={order._id}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => navigate(`/orders/${order._id}`)}
+                    data-testid={`row-paid-${order._id}`}
+                  >
+                    <TableCell className="font-mono text-sm font-semibold">{order.trackingNumber}</TableCell>
+                    <TableCell className="font-medium">{order.customerName}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className="text-xs">
+                        {PAYMENT_METHOD_LABELS[order.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] || order.paymentMethod}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-semibold text-green-600 dark:text-green-400">{formatCurrency(order.totalAmount)}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm whitespace-nowrap">{formatDateTime(paidAt(order))}</TableCell>
                     <TableCell>
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </TableCell>

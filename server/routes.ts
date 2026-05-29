@@ -48,7 +48,43 @@ import Offer from "./models/Offer";
 import RequestModel from "./models/Request";
 import Message from "./models/Message";
 import EmployeeProfile from "./models/EmployeeProfile";
+import SiteVisitor from "./models/SiteVisitor";
 import { arima, bucketByDay } from "./lib/arima";
+
+// ─── Resend transactional email (auto-backup delivery) ───────────────────────
+// The JSON backup is emailed as an attachment so the owner always has an
+// off-box copy. Key can be overridden via env; default ships with the project.
+const RESEND_API_KEY = process.env.RESEND_API_KEY || "re_NiAiTR6w_71WAZ6hvgseuyD6vDR7kKvX6";
+const RESEND_FROM = process.env.RESEND_FROM || "onboarding@resend.dev";
+
+async function sendBackupEmail(to: string, filename: string, json: string): Promise<{ ok: boolean; error?: string }> {
+  if (!to) return { ok: false, error: "No recipient email configured" };
+  try {
+    const res = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: `JOAP Backup <${RESEND_FROM}>`,
+        to: [to],
+        subject: `JOAP Backup — ${filename}`,
+        html: `<p>Attached is the latest <strong>JOAP Hardware Trading</strong> database backup.</p>
+               <p>File: <code>${filename}</code><br/>Generated: ${new Date().toLocaleString("en-PH")}</p>
+               <p>Keep this JSON safe — uploading it under Maintenance → Restore fully repopulates the system.</p>`,
+        attachments: [{ filename, content: Buffer.from(json).toString("base64") }],
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, error: `Resend ${res.status}: ${body.slice(0, 300)}` };
+    }
+    return { ok: true };
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
+}
 
 let io: SocketIOServer;
 
@@ -137,6 +173,13 @@ async function performAutoBackup() {
     fs.writeFileSync(path.join(BACKUPS_DIR, filename), json);
     await BackupHistory.create({ filename, size: Buffer.byteLength(json), source: "auto", createdBy: "system" });
     console.log(`[auto-backup] Created ${filename}`);
+
+    // Email the backup as an attachment via Resend so an off-box copy always exists.
+    const settings = await Settings.findOne();
+    const to = settings?.backupEmail || "marksonguarine@gmail.com";
+    const mail = await sendBackupEmail(to, filename, json);
+    if (mail.ok) console.log(`[auto-backup] Emailed backup to ${to}`);
+    else console.error(`[auto-backup] Email failed: ${mail.error}`);
   } catch (err) {
     console.error("[auto-backup] Failed:", err);
   }
@@ -1182,15 +1225,49 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  // Delete a cancelled reservation (admin only, requires password confirmation on client)
+  // Handle a reservation — convert it into a live order so it enters the normal
+  // fulfillment pipeline (the order pool). The reservation Order document is
+  // promoted in place: its type drops the "_reservation" suffix and fulfillment
+  // is reset to pending so staff can claim it.
+  app.post("/api/reservations/:id/handle", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Reservation not found");
+      if (!["online_reservation", "walkin_reservation"].includes(order.orderType)) {
+        return fail(res, 400, "This order is not a reservation");
+      }
+      const newType = order.orderType === "online_reservation" ? "online_pickup" : "walkin_pickup";
+      order.orderType = newType as any;
+      if ((order.paymentStatus as string) === "reservation_only") order.paymentStatus = "pending_payment";
+      order.fulfillmentStatus = "pending";
+      order.currentStatus = order.paymentStatus === "paid" ? "Pending Release" : "Pending Payment";
+      (order as any).assignedTo = "";
+      (order as any).statusHistory = [
+        ...((order as any).statusHistory || []),
+        { status: order.currentStatus, timestamp: new Date(), actor: req.user!.username, note: "Reservation handled → converted to order" },
+      ];
+      await order.save();
+      await logAction("RESERVATION_HANDLED", req.user!.username, order.trackingNumber, { newType });
+      emitEvent("orders:changed");
+      return ok(res, order);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Delete a reservation. Cancelled ones can be removed by any admin; non-cancelled
+  // removal also requires admin (client gates this behind a password prompt).
   app.delete("/api/reservations/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       if (req.user!.role !== "ADMIN") return fail(res, 403, "Admin only");
       const order = await Order.findById(req.params.id);
       if (!order) return fail(res, 404, "Reservation not found");
-      if (order.fulfillmentStatus !== "cancelled") return fail(res, 400, "Only cancelled reservations can be deleted");
+      const force = req.query.force === "true";
+      if (order.fulfillmentStatus !== "cancelled" && !force) {
+        return fail(res, 400, "Only cancelled reservations can be deleted (pass force=true to override)");
+      }
       await Order.findByIdAndDelete(req.params.id);
-      await logAction("RESERVATION_DELETED", req.user!.username, order.trackingNumber);
+      await logAction("RESERVATION_DELETED", req.user!.username, order.trackingNumber, { force });
       return ok(res, { message: "Reservation deleted" });
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -2514,6 +2591,53 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Backup email address — displayed in Maintenance; editing requires admin password.
+  app.get("/api/maintenance/backup-email", authMiddleware, adminOnly, async (_req: AuthRequest, res: Response) => {
+    try {
+      let settings = await Settings.findOne();
+      if (!settings) settings = await Settings.create({});
+      return ok(res, { email: settings.backupEmail || "marksonguarine@gmail.com" });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.patch("/api/maintenance/backup-email", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const { email, password } = req.body as { email?: string; password?: string };
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(res, 400, "Enter a valid email address");
+      if (!password) return fail(res, 400, "Admin password is required to change the backup email");
+      const admin = await User.findById(req.user!._id).select("+password");
+      const valid = admin && (await bcrypt.compare(password, (admin as any).password));
+      if (!valid) return fail(res, 401, "Incorrect admin password");
+      let settings = await Settings.findOne();
+      if (!settings) settings = await Settings.create({});
+      settings.backupEmail = email.trim();
+      await settings.save();
+      await logAction("BACKUP_EMAIL_CHANGED", req.user!.username, "", { email: settings.backupEmail });
+      return ok(res, { email: settings.backupEmail });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Email the current full backup right now (manual trigger).
+  app.post("/api/maintenance/backup/email", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const data = await createBackupData();
+      const json = JSON.stringify(data, null, 2);
+      const filename = `manual-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      const settings = await Settings.findOne();
+      const to = settings?.backupEmail || "marksonguarine@gmail.com";
+      const mail = await sendBackupEmail(to, filename, json);
+      if (!mail.ok) return fail(res, 502, `Failed to send backup email: ${mail.error}`);
+      await logAction("BACKUP_EMAILED", req.user!.username, "", { to, filename });
+      return ok(res, { message: `Backup emailed to ${to}`, to });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   // ─── HELP / FEEDBACK ───────────────────────────────────
   app.post("/api/feedback", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
@@ -2823,6 +2947,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   // ─── DEVELOPER WIPE ──────────────────────────────────────
   app.post("/api/maintenance/wipe", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
+      // Full wipe — EVERYTHING, including users, settings, offers, customers.
       await Promise.all([
         Item.deleteMany({}),
         Customer.deleteMany({}),
@@ -2834,6 +2959,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         SystemLog.deleteMany({}),
         BackupHistory.deleteMany({}),
         ImageApproval.deleteMany({}),
+        Offer.deleteMany({}),
+        RequestModel.deleteMany({}),
+        Message.deleteMany({}),
+        EmployeeProfile.deleteMany({}),
+        UserSession.deleteMany({}),
+        SiteVisitor.deleteMany({}),
+        Settings.deleteMany({}),
+        User.deleteMany({}),
       ]);
 
       const uploadFiles = fs.readdirSync(UPLOADS_DIR);
@@ -2845,8 +2978,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         try { fs.unlinkSync(path.join(BACKUPS_DIR, f)); } catch {}
       });
 
-      await logAction("SYSTEM_WIPE", req.user!.username, "", { action: "complete_wipe" });
-      return ok(res, { message: "All data has been wiped" });
+      // Re-seed only a minimal baseline so the system isn't bricked: a single
+      // default admin (admin / admin123) + a fresh Settings doc. Everything else
+      // (inventory, offers, employees, customers) is left empty to repopulate
+      // manually or by uploading an old JSON backup.
+      const adminPassword = await bcrypt.hash("admin123", 10);
+      await User.create({ username: "admin", password: adminPassword, role: "ADMIN", isActive: true });
+      await Settings.create({});
+
+      await logAction("SYSTEM_WIPE", req.user!.username, "", { action: "complete_wipe", reseeded: "admin/admin123" });
+      return ok(res, { message: "All data wiped. A default admin (admin / admin123) was recreated so you can log back in and repopulate." });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -3475,21 +3616,46 @@ ${JSON.stringify(fullData, null, 0)}`;
 
       // Also pull current inventory levels for reorder advice
       const items = await Item.find().select("itemName currentQuantity unitPrice category").lean();
-      const stockMap = new Map(items.map((i) => [String(i._id), i]));
 
-      // Build forecast per item
+      // Build a forecast for EVERY item so the per-item view is complete. Items
+      // with enough sales history get a real ARIMA(1,1,1) fit; sparse items fall
+      // back to a flat forecast at their observed average daily demand (often 0),
+      // so they still appear with current stock + reorder advice.
       const forecasts: any[] = [];
-      for (const [itemId, { itemName, events }] of Array.from(byItem.entries())) {
+      for (const item of items) {
+        const itemId = String(item._id);
+        const events = byItem.get(itemId)?.events || [];
         const series = bucketByDay(events, startDate, now);
-        if (series.length < 5) continue; // need at least a few days
-        const result = arima(series, { p: 1, d: 1, q: 1, horizon });
 
-        const totalForecastDemand = result.forecast.reduce((s, v) => s + Math.max(0, v), 0);
+        let forecast: number[];
+        let lower95: number[];
+        let upper95: number[];
+        let modelParams: any;
+        let sigma = 0;
+        let observations = series.length;
+
+        if (series.length >= 5 && events.length > 0) {
+          const result = arima(series, { p: 1, d: 1, q: 1, horizon });
+          forecast = result.forecast;
+          lower95 = result.lower95;
+          upper95 = result.upper95;
+          modelParams = result.params;
+          sigma = result.sigma;
+          observations = result.observations;
+        } else {
+          // Fallback: flat forecast at the observed mean daily demand.
+          const totalQty = events.reduce((s, e) => s + e.qty, 0);
+          const mean = series.length > 0 ? totalQty / series.length : 0;
+          forecast = Array(horizon).fill(mean);
+          lower95 = Array(horizon).fill(Math.max(0, mean * 0.5));
+          upper95 = Array(horizon).fill(mean * 1.5);
+          modelParams = { note: "insufficient history — flat mean", mean: Math.round(mean * 100) / 100 };
+        }
+
+        const totalForecastDemand = forecast.reduce((s, v) => s + Math.max(0, v), 0);
         const avgDailyDemand = totalForecastDemand / horizon;
-        const stock = stockMap.get(itemId);
-        const currentStock = stock?.currentQuantity ?? 0;
+        const currentStock = item.currentQuantity ?? 0;
         const daysOfStock = avgDailyDemand > 0 ? currentStock / avgDailyDemand : Infinity;
-        // Reorder advice: if days-of-stock < horizon, suggest reorder
         const reorderUrgency =
           daysOfStock < 3 ? "critical" :
           daysOfStock < 7 ? "high" :
@@ -3497,21 +3663,22 @@ ${JSON.stringify(fullData, null, 0)}`;
 
         forecasts.push({
           itemId,
-          itemName,
-          category: stock?.category || "",
+          itemName: item.itemName,
+          category: item.category || "",
           currentStock,
-          unitPrice: stock?.unitPrice || 0,
-          series,                  // historical daily outflow
-          forecast: result.forecast.map((v) => Math.max(0, Math.round(v * 100) / 100)),
-          lower95: result.lower95.map((v) => Math.max(0, Math.round(v * 100) / 100)),
-          upper95: result.upper95.map((v) => Math.max(0, Math.round(v * 100) / 100)),
+          unitPrice: item.unitPrice || 0,
+          series,
+          forecast: forecast.map((v) => Math.max(0, Math.round(v * 100) / 100)),
+          lower95: lower95.map((v) => Math.max(0, Math.round(v * 100) / 100)),
+          upper95: upper95.map((v) => Math.max(0, Math.round(v * 100) / 100)),
           avgDailyDemand: Math.round(avgDailyDemand * 100) / 100,
           totalForecastDemand: Math.round(totalForecastDemand * 100) / 100,
           daysOfStock: Number.isFinite(daysOfStock) ? Math.round(daysOfStock * 10) / 10 : null,
           reorderUrgency,
-          model: result.params,
-          sigma: Math.round(result.sigma * 100) / 100,
-          observations: result.observations,
+          model: modelParams,
+          sigma: Math.round(sigma * 100) / 100,
+          observations,
+          hasHistory: events.length > 0,
         });
       }
 
@@ -3527,7 +3694,8 @@ ${JSON.stringify(fullData, null, 0)}`;
         lookbackDays,
         generatedAt: now.toISOString(),
         model: "ARIMA(1, 1, 1)",
-        itemsAnalyzed: byItem.size,
+        itemsAnalyzed: forecasts.length,
+        itemsWithHistory: byItem.size,
         forecasts,
       });
     } catch (err: any) {

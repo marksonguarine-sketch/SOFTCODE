@@ -12,6 +12,9 @@ import {
   AlertTriangle,
   ArrowRightLeft,
   CheckCircle2,
+  Mail,
+  Send,
+  Pencil,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
@@ -37,8 +40,49 @@ export default function MaintenancePage() {
   const [uploadConfirmed, setUploadConfirmed] = useState(false);
   const [uploadCountdown, setUploadCountdown] = useState(5);
   const [isUploading, setIsUploading] = useState(false);
+  const [restorePassword, setRestorePassword] = useState("");
+  const [restoreAccept, setRestoreAccept] = useState("");
 
   const [historyPage, setHistoryPage] = useState(1);
+
+  // ── Backup email (Resend recipient) ──────────────────────────────────────
+  const { data: backupEmailData } = useQuery<{ success: boolean; data: { email: string } }>({
+    queryKey: ["/api/maintenance/backup-email"],
+    enabled: isAdmin,
+  });
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [emailDraft, setEmailDraft] = useState("");
+  const [emailPassword, setEmailPassword] = useState("");
+  useEffect(() => {
+    if (backupEmailData?.data?.email) setEmailDraft(backupEmailData.data.email);
+  }, [backupEmailData]);
+
+  const saveEmailMutation = useMutation({
+    mutationFn: async (data: { email: string; password: string }) => {
+      const res = await apiRequest("PATCH", "/api/maintenance/backup-email", data);
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/maintenance/backup-email"] });
+      setEditingEmail(false);
+      setEmailPassword("");
+      toast({ title: "Backup email updated" });
+    },
+    onError: (err: Error) => toast({ title: "Could not update email", description: err.message, variant: "destructive" }),
+  });
+
+  const emailBackupNowMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/maintenance/backup/email");
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Failed");
+      return json;
+    },
+    onSuccess: (json: any) => toast({ title: "Backup emailed", description: json?.data?.message }),
+    onError: (err: Error) => toast({ title: "Email failed", description: err.message, variant: "destructive" }),
+  });
 
   const { data: backupSettings } = useQuery<{ success: boolean; data: { enabled: boolean; intervalValue: number; intervalUnit: string } }>({
     queryKey: ["/api/maintenance/auto-backup/settings"],
@@ -91,6 +135,8 @@ export default function MaintenancePage() {
       setUploadConfirmed(false);
       setUploadCountdown(5);
       setUploadFile(null);
+      setRestorePassword("");
+      setRestoreAccept("");
       return;
     }
     if (!uploadConfirmed) {
@@ -125,8 +171,17 @@ export default function MaintenancePage() {
 
   const handleUploadRestore = async () => {
     if (!uploadFile) return;
+    if (restoreAccept.trim().toUpperCase() !== "ACCEPT") {
+      toast({ title: "Type ACCEPT to confirm", variant: "destructive" });
+      return;
+    }
     setIsUploading(true);
     try {
+      // Verify the admin password before overwriting the database.
+      const verify = await apiRequest("POST", "/api/auth/verify-password", { password: restorePassword });
+      const verifyJson = await verify.json();
+      if (!verifyJson.success) throw new Error("Incorrect admin password");
+
       const text = await uploadFile.text();
       const backupData = JSON.parse(text);
       const res = await apiRequest("POST", "/api/maintenance/backup/upload", backupData);
@@ -209,6 +264,71 @@ export default function MaintenancePage() {
                 <Upload className="mr-1 h-4 w-4" /> Upload Backup
               </Button>
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Mail className="h-4 w-4" /> Backup Email
+            </CardTitle>
+            <CardDescription>
+              Auto backups are emailed here as a JSON attachment (via Resend). Editing requires your admin password.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {!editingEmail ? (
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="font-medium text-sm break-all" data-testid="text-backup-email">
+                  {backupEmailData?.data?.email || "marksonguarine@gmail.com"}
+                </div>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setEditingEmail(true)} data-testid="button-edit-backup-email">
+                    <Pencil className="h-3.5 w-3.5 mr-1" /> Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => emailBackupNowMutation.mutate()}
+                    disabled={emailBackupNowMutation.isPending}
+                    data-testid="button-email-backup-now"
+                  >
+                    {emailBackupNowMutation.isPending ? <Loader2 className="animate-spin mr-1 h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5 mr-1" />}
+                    Email Backup Now
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <Input
+                  type="email"
+                  value={emailDraft}
+                  onChange={(e) => setEmailDraft(e.target.value)}
+                  placeholder="recipient@email.com"
+                  data-testid="input-backup-email"
+                />
+                <Input
+                  type="password"
+                  value={emailPassword}
+                  onChange={(e) => setEmailPassword(e.target.value)}
+                  placeholder="Confirm with your admin password"
+                  data-testid="input-backup-email-password"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => saveEmailMutation.mutate({ email: emailDraft, password: emailPassword })}
+                    disabled={saveEmailMutation.isPending || !emailDraft || !emailPassword}
+                    data-testid="button-save-backup-email"
+                  >
+                    {saveEmailMutation.isPending && <Loader2 className="animate-spin mr-1 h-3.5 w-3.5" />}
+                    Save Email
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setEditingEmail(false); setEmailPassword(""); setEmailDraft(backupEmailData?.data?.email || ""); }}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -446,10 +566,29 @@ export default function MaintenancePage() {
                 I understand this will overwrite all existing data
               </label>
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Admin password</label>
+              <Input
+                type="password"
+                value={restorePassword}
+                onChange={(e) => setRestorePassword(e.target.value)}
+                placeholder="Enter your admin password"
+                data-testid="input-restore-password"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Type <span className="font-mono text-destructive">ACCEPT</span> to confirm</label>
+              <Input
+                value={restoreAccept}
+                onChange={(e) => setRestoreAccept(e.target.value)}
+                placeholder="ACCEPT"
+                data-testid="input-restore-accept"
+              />
+            </div>
             <Button
               variant="destructive"
               className="w-full"
-              disabled={!uploadFile || !uploadConfirmed || uploadCountdown > 0 || isUploading}
+              disabled={!uploadFile || !uploadConfirmed || uploadCountdown > 0 || isUploading || !restorePassword || restoreAccept.trim().toUpperCase() !== "ACCEPT"}
               onClick={handleUploadRestore}
               data-testid="button-confirm-restore"
             >

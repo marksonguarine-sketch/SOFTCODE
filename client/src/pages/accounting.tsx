@@ -38,6 +38,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -228,6 +230,9 @@ export default function AccountingPage() {
   const { isAdmin } = useAuth();
   const [addEntryOpen, setAddEntryOpen] = useState(false);
   const [dateFilter, setDateFilter] = useState("");
+  const [accountFilter, setAccountFilter] = useState("all");
+  const [ledgerPage, setLedgerPage] = useState(1);
+  const LEDGER_PAGE_SIZE = 20;
   const [exportingPdf, setExportingPdf] = useState(false);
 
   const { data: accountsData, isLoading: accountsLoading } = useQuery<{
@@ -242,6 +247,12 @@ export default function AccountingPage() {
     data: { entries: IGeneralLedgerEntry[]; total: number };
   }>({
     queryKey: ["/api/accounting/ledger"],
+    queryFn: async () => {
+      // Fetch a large page so date/account filtering and the 20-per-page
+      // pagination below can operate over the full ledger client-side.
+      const res = await apiRequest("GET", "/api/accounting/ledger?pageSize=100000");
+      return res.json();
+    },
     refetchInterval: 30_000,
   });
 
@@ -258,9 +269,22 @@ export default function AccountingPage() {
   const summaryEntries = summaryData?.data || [];
 
   const filteredEntries = useMemo(
-    () => (dateFilter ? ledgerEntries.filter((e) => e.date.startsWith(dateFilter)) : ledgerEntries),
-    [ledgerEntries, dateFilter],
+    () => ledgerEntries.filter((e) =>
+      (!dateFilter || e.date.startsWith(dateFilter)) &&
+      (accountFilter === "all" || e.accountName === accountFilter)
+    ),
+    [ledgerEntries, dateFilter, accountFilter],
   );
+
+  // Unique account names present in the ledger, for the Account filter dropdown
+  const ledgerAccountNames = useMemo(
+    () => Array.from(new Set(ledgerEntries.map((e) => e.accountName))).sort(),
+    [ledgerEntries],
+  );
+
+  const ledgerTotalPages = Math.max(1, Math.ceil(filteredEntries.length / LEDGER_PAGE_SIZE));
+  const ledgerPageSafe = Math.min(ledgerPage, ledgerTotalPages);
+  const pagedEntries = filteredEntries.slice((ledgerPageSafe - 1) * LEDGER_PAGE_SIZE, ledgerPageSafe * LEDGER_PAGE_SIZE);
 
   // Totals derive from the full-ledger summary so they don't change with
   // pagination of the ledger table. summaryEntries already aggregates every
@@ -839,15 +863,26 @@ export default function AccountingPage() {
               <Input
                 type="date"
                 value={dateFilter}
-                onChange={(e) => setDateFilter(e.target.value)}
+                onChange={(e) => { setDateFilter(e.target.value); setLedgerPage(1); }}
                 className="w-[200px]"
                 data-testid="input-date-filter"
               />
-              {dateFilter && (
+              <Select value={accountFilter} onValueChange={(v) => { setAccountFilter(v); setLedgerPage(1); }}>
+                <SelectTrigger className="w-[220px]" data-testid="select-account-filter">
+                  <SelectValue placeholder="All Accounts" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Accounts</SelectItem>
+                  {ledgerAccountNames.map((name) => (
+                    <SelectItem key={name} value={name}>{name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {(dateFilter || accountFilter !== "all") && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setDateFilter("")}
+                  onClick={() => { setDateFilter(""); setAccountFilter("all"); setLedgerPage(1); }}
                   data-testid="button-clear-filter"
                 >
                   Clear
@@ -878,7 +913,7 @@ export default function AccountingPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredEntries.map((entry) => (
+                      pagedEntries.map((entry) => (
                         <TableRow key={entry._id} data-testid={`row-ledger-${entry._id}`}>
                           <TableCell className="text-muted-foreground text-sm">
                             {formatDate(entry.date)}
@@ -905,6 +940,24 @@ export default function AccountingPage() {
                 </Table>
               </CardContent>
             </Card>
+
+            {/* Pagination — 20 per page */}
+            {filteredEntries.length > LEDGER_PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Showing {(ledgerPageSafe - 1) * LEDGER_PAGE_SIZE + 1}–{Math.min(ledgerPageSafe * LEDGER_PAGE_SIZE, filteredEntries.length)} of {filteredEntries.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" className="h-8 text-xs" disabled={ledgerPageSafe <= 1} onClick={() => setLedgerPage((p) => Math.max(1, p - 1))} data-testid="button-ledger-prev">
+                    <ChevronLeft className="h-3.5 w-3.5 mr-1" />Prev
+                  </Button>
+                  <span className="text-xs text-muted-foreground">Page {ledgerPageSafe} of {ledgerTotalPages}</span>
+                  <Button variant="outline" size="sm" className="h-8 text-xs" disabled={ledgerPageSafe >= ledgerTotalPages} onClick={() => setLedgerPage((p) => Math.min(ledgerTotalPages, p + 1))} data-testid="button-ledger-next">
+                    Next <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </div>
+              </div>
+            )}
 
             {/* Ledger Totals Footer */}
             {filteredEntries.length > 0 && (
