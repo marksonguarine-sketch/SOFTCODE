@@ -1,32 +1,67 @@
 import { cn } from "@/lib/utils";
-import { ArrowUp, ArrowDown } from "lucide-react";
+import { ArrowUp, ArrowDown, Maximize2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface KPICardProps {
   label: string;
   value: ReactNode;
   icon?: LucideIcon;
-  tone?: "amber" | "green" | "blue" | "red" | "slate";
+  tone?: "amber" | "green" | "blue" | "red" | "slate" | "purple";
   delta?: string;
   deltaDir?: "up" | "down";
   sub?: ReactNode;
   spark?: ReactNode;
   className?: string;
+  /** Optional bigger renderer for the maximized view. Falls back to value+spark. */
+  expanded?: ReactNode;
+  /** Hide the maximize affordance (e.g. for purely-textual KPIs). */
+  disableMaximize?: boolean;
 }
 
-const TONE_BG: Record<NonNullable<KPICardProps["tone"]>, string> = {
-  amber: "bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300",
-  green: "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400",
-  blue: "bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-400",
-  red: "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400",
-  slate: "bg-muted text-muted-foreground",
+const TONE: Record<NonNullable<KPICardProps["tone"]>, { chip: string; grad: string; accent: string }> = {
+  amber: {
+    chip: "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300",
+    grad: "from-amber-500/15 via-amber-500/[0.04] to-transparent",
+    accent: "text-amber-600 dark:text-amber-400",
+  },
+  green: {
+    chip: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300",
+    grad: "from-emerald-500/15 via-emerald-500/[0.04] to-transparent",
+    accent: "text-emerald-600 dark:text-emerald-400",
+  },
+  blue: {
+    chip: "bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300",
+    grad: "from-sky-500/15 via-sky-500/[0.04] to-transparent",
+    accent: "text-sky-600 dark:text-sky-400",
+  },
+  red: {
+    chip: "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300",
+    grad: "from-red-500/15 via-red-500/[0.04] to-transparent",
+    accent: "text-red-600 dark:text-red-400",
+  },
+  purple: {
+    chip: "bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300",
+    grad: "from-purple-500/15 via-purple-500/[0.04] to-transparent",
+    accent: "text-purple-600 dark:text-purple-400",
+  },
+  slate: {
+    chip: "bg-muted text-muted-foreground",
+    grad: "from-slate-500/10 via-transparent to-transparent",
+    accent: "text-foreground",
+  },
 };
 
 /**
  * KPICard — single metric card used in dashboard / page KPI strips.
- * Matches the prototype's KPI design: label uppercase, large mono value,
- * delta pill, optional sparkline below.
+ *
+ * Round-5 overhaul: tinted gradient backplate, larger icon medallion, colored
+ * value when there's a delta, hover-only maximize button in the top-right
+ * that opens a dialog showing the sparkline blown up (or whatever the page
+ * supplies via `expanded`).
  */
 export function KPICard({
   label,
@@ -38,57 +73,106 @@ export function KPICard({
   sub,
   spark,
   className,
+  expanded,
+  disableMaximize,
 }: KPICardProps) {
+  const [open, setOpen] = useState(false);
+  const t = TONE[tone];
+
   return (
-    <div
-      className={cn(
-        "flex flex-col gap-2 p-4 rounded-lg border bg-card",
-        "border-card-border",
-        className
-      )}
-      data-testid="kpi-card"
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-        {Icon && (
-          <span
-            className={cn(
-              "w-7 h-7 rounded-md grid place-items-center shrink-0",
-              TONE_BG[tone]
-            )}
-          >
-            <Icon className="w-3.5 h-3.5" />
-          </span>
+    <>
+      <div
+        className={cn(
+          "relative group flex flex-col gap-2 p-4 rounded-xl border bg-card overflow-hidden",
+          "border-card-border hover:shadow-md transition-shadow",
+          className,
         )}
-      </div>
-      <div className="font-mono text-[26px] font-semibold tracking-tight leading-none tabular-nums">
-        {value}
-      </div>
-      {(delta || sub) && (
-        <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
-          {delta && (
-            <span
-              className={cn(
-                "inline-flex items-center gap-0.5 font-mono font-semibold px-1.5 py-0.5 rounded-full text-[11px]",
-                deltaDir === "up"
-                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
-                  : "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
-              )}
-            >
-              {deltaDir === "up" ? (
-                <ArrowUp className="w-3 h-3" />
-              ) : (
-                <ArrowDown className="w-3 h-3" />
-              )}
-              {delta}
+        data-testid="kpi-card"
+      >
+        {/* Subtle gradient backplate matching the tone */}
+        <div className={cn("absolute inset-0 pointer-events-none bg-gradient-to-br opacity-90", t.grad)} />
+        <div className="relative z-[1]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+              {label}
             </span>
+            <div className="flex items-center gap-1">
+              {!disableMaximize && (
+                <button
+                  onClick={() => setOpen(true)}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                  title="Maximize"
+                  data-testid="kpi-card-maximize"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+              {Icon && (
+                <span className={cn("w-8 h-8 rounded-lg grid place-items-center shrink-0", t.chip)}>
+                  <Icon className="w-4 h-4" />
+                </span>
+              )}
+            </div>
+          </div>
+          <div className={cn("font-mono text-[28px] font-bold tracking-tight leading-none tabular-nums mt-2.5", t.accent)}>
+            {value}
+          </div>
+          {(delta || sub) && (
+            <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground mt-2">
+              {delta && (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-0.5 font-mono font-semibold px-1.5 py-0.5 rounded-full text-[11px]",
+                    deltaDir === "up"
+                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                      : "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
+                  )}
+                >
+                  {deltaDir === "up" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />}
+                  {delta}
+                </span>
+              )}
+              {sub && <span>{sub}</span>}
+            </div>
           )}
-          {sub && <span>{sub}</span>}
+          {spark && <div className="mt-2 -mx-1">{spark}</div>}
         </div>
-      )}
-      {spark && <div className="mt-1">{spark}</div>}
-    </div>
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>{label}</span>
+              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className={cn("font-mono text-[44px] font-bold tracking-tight leading-none tabular-nums", t.accent)}>
+              {value}
+            </div>
+            {(delta || sub) && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                {delta && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-0.5 font-mono font-semibold px-2 py-1 rounded-full text-xs",
+                      deltaDir === "up"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "bg-red-100 text-red-700"
+                    )}
+                  >
+                    {deltaDir === "up" ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />}
+                    {delta}
+                  </span>
+                )}
+                {sub}
+              </div>
+            )}
+            <div className="min-h-[320px] -mx-2">{expanded ?? spark}</div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

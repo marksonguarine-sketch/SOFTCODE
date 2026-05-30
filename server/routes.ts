@@ -2349,10 +2349,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       await Order.findByIdAndUpdate(parsed.data.orderId, { paymentStatus: newPaymentStatus });
 
+      // Double-entry ledger: Cash/GCash debit + Sales Revenue credit so the
+      // accounting dashboard moves the same way the slow /billing/pay path
+      // does. Without this quick-pay revenue silently never reached the
+      // ledger / Gross Margin / Account Type Distribution.
+      const accountName = "Cash/GCash";
+      await GeneralLedgerEntry.create([
+        { date: new Date(), accountName, debit: parsed.data.amount, credit: 0, description: `Quick payment for order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+        { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: parsed.data.amount, description: `Revenue from order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+      ]);
+      await Promise.all([
+        AccountingAccount.findOneAndUpdate({ accountName }, { $inc: { balance: parsed.data.amount } }, { upsert: true }),
+        AccountingAccount.findOneAndUpdate({ accountName: "Sales Revenue" }, { $inc: { balance: parsed.data.amount } }, { upsert: true }),
+      ]);
+
       await logAction("QUICK_PAYMENT_RECORDED", req.user!.username, order.trackingNumber, {
         amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, newPaymentStatus,
       });
       emitEvent("PAYMENT_LOGGED", { orderId: order._id });
+      emitEvent("LEDGER_POSTED");
+      emitEvent("DASHBOARD_STATS_UPDATED");
       return ok(res, { payment, newPaymentStatus, remaining: Math.max(0, remaining - parsed.data.amount) });
     } catch (err: any) {
       return fail(res, 500, err.message);

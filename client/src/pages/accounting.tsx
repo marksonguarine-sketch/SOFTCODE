@@ -710,64 +710,128 @@ export default function AccountingPage() {
       {/* Charts Row */}
       {(accountChartData.length > 0 || accountTypeData.length > 0) && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {/* Debits vs Credits Bar Chart */}
+          {/* Debits vs Credits — gradient stacked bars with floating labels.
+              Replaces the old bland twin-bar variant per REQUEST.pdf round 5. */}
           {accountChartData.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <BarChart3 className="h-4 w-4" />
-                  Debits vs Credits by Account
-                </CardTitle>
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-2 border-b bg-gradient-to-r from-blue-50/50 via-transparent to-emerald-50/50 dark:from-blue-950/40 dark:via-transparent dark:to-emerald-950/40">
+                <div className="flex items-center justify-between gap-2">
+                  <CardTitle className="text-sm flex items-center gap-2">
+                    <BarChart3 className="h-4 w-4 text-primary" />
+                    Debits vs Credits by Account
+                  </CardTitle>
+                  <div className="flex items-center gap-3 text-[11px]">
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-gradient-to-b from-blue-400 to-blue-600" /> Debit</span>
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-gradient-to-b from-emerald-400 to-emerald-600" /> Credit</span>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={accountChartData.slice(0, 8)} margin={{ bottom: 40 }}>
-                    <CartesianGrid strokeDasharray="3 3" />
+              <CardContent className="pt-4">
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={accountChartData.slice(0, 8)} margin={{ top: 8, right: 12, left: 0, bottom: 48 }} barGap={6}>
+                    <defs>
+                      <linearGradient id="debit-grad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(217,91%,62%)" stopOpacity={1} />
+                        <stop offset="100%" stopColor="hsl(217,91%,48%)" stopOpacity={1} />
+                      </linearGradient>
+                      <linearGradient id="credit-grad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="hsl(152,68%,55%)" stopOpacity={1} />
+                        <stop offset="100%" stopColor="hsl(152,68%,38%)" stopOpacity={1} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 4" vertical={false} />
                     <XAxis
                       dataKey="label"
-                      tick={{ fontSize: 9 }}
-                      angle={-30}
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      angle={-22}
                       textAnchor="end"
                       interval={0}
+                      tickLine={false}
+                      axisLine={{ stroke: "hsl(var(--border))" }}
                     />
-                    <YAxis tick={{ fontSize: 9 }} tickFormatter={(v) => `₱${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                    <Legend iconSize={8} wrapperStyle={{ fontSize: "10px" }} />
-                    <Bar dataKey="debit" name="Debit" fill="hsl(217,91%,60%)" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="credit" name="Credit" fill="hsl(142,72%,45%)" radius={[3, 3, 0, 0]} />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                      tickFormatter={(v) => (v >= 1000 ? `₱${(v / 1000).toFixed(0)}k` : `₱${v}`)}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <Tooltip
+                      cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
+                      contentStyle={{
+                        background: "hsl(var(--popover))",
+                        border: "1px solid hsl(var(--border))",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        boxShadow: "0 8px 24px -8px rgba(0,0,0,.25)",
+                      }}
+                      formatter={(v: number, name: string) => [formatCurrency(v), name]}
+                    />
+                    <Bar dataKey="debit" name="Debit" fill="url(#debit-grad)" radius={[6, 6, 0, 0]} maxBarSize={28} />
+                    <Bar dataKey="credit" name="Credit" fill="url(#credit-grad)" radius={[6, 6, 0, 0]} maxBarSize={28} />
                   </BarChart>
                 </ResponsiveContainer>
               </CardContent>
             </Card>
           )}
 
-          {/* Account Type Pie Chart */}
+          {/* Account Type Distribution — legend stays on the side with proper
+              spacing so labels stop overlapping the donut */}
           {accountTypeData.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Account Type Distribution</CardTitle>
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-2 border-b bg-gradient-to-r from-purple-50/50 via-transparent to-amber-50/50 dark:from-purple-950/40 dark:via-transparent dark:to-amber-950/40">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <BarChart3 className="h-4 w-4 text-primary" />
+                  Account Type Distribution
+                </CardTitle>
               </CardHeader>
-              <CardContent>
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie
-                      data={accountTypeData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={85}
-                      dataKey="value"
-                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      labelLine={false}
-                    >
-                      {accountTypeData.map((_, i) => (
-                        <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v: number) => formatCurrency(v)} />
-                    <Legend iconSize={8} wrapperStyle={{ fontSize: "10px" }} />
-                  </PieChart>
-                </ResponsiveContainer>
+              <CardContent className="pt-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 min-w-0">
+                    <ResponsiveContainer width="100%" height={220}>
+                      <PieChart>
+                        <Pie
+                          data={accountTypeData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={56}
+                          outerRadius={88}
+                          dataKey="value"
+                          paddingAngle={2}
+                          stroke="hsl(var(--background))"
+                          strokeWidth={2}
+                        >
+                          {accountTypeData.map((_, i) => (
+                            <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            background: "hsl(var(--popover))",
+                            border: "1px solid hsl(var(--border))",
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
+                          formatter={(v: number) => formatCurrency(v)}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="shrink-0 w-[150px] space-y-1.5">
+                    {accountTypeData.map((d, i) => {
+                      const total = accountTypeData.reduce((s, x) => s + x.value, 0);
+                      const pct = total > 0 ? ((d.value / total) * 100).toFixed(0) : "0";
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-1.5 text-[12px]">
+                          <span className="flex items-center gap-1.5 min-w-0">
+                            <span className="w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                            <span className="truncate">{d.name}</span>
+                          </span>
+                          <span className="font-mono tabular-nums text-muted-foreground">{pct}%</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </CardContent>
             </Card>
           )}
