@@ -20,7 +20,6 @@ import {
   UserCircle,
   Inbox,
   UserSquare2,
-  ChevronUp,
 } from "lucide-react";
 import {
   Sidebar,
@@ -39,7 +38,6 @@ import { useAuth } from "@/lib/auth";
 import { useSettings, GRADIENT_OPTIONS } from "@/lib/settings-context";
 import { useQuery } from "@tanstack/react-query";
 import type { DashboardStats } from "@shared/schema";
-import { USER_ROLE_LABELS } from "@shared/schema";
 import { cn } from "@/lib/utils";
 import { JoapLogo } from "@/components/joap-logo";
 
@@ -107,7 +105,7 @@ function NavBadge({ count, tone = "amber" }: { count: number; tone?: "amber" | "
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const { isAdmin, isInventoryManager, user } = useAuth();
+  const { isAdmin, isInventoryManager } = useAuth();
   const { settings } = useSettings();
 
   // Inventory managers only ever see the Inventory page.
@@ -167,34 +165,6 @@ export function AppSidebar() {
       sidebarInner.classList.remove("sidebar-gradient");
     };
   }, [hasGradient]);
-
-  // Initials for the bottom user card
-  const initials =
-    user?.username
-      ?.replace(/[._-]/g, " ")
-      .split(" ")
-      .map((p) => p[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase() || "??";
-
-  // Display name from username (best-effort)
-  const displayName =
-    user?.username
-      ?.replace(/[._-]/g, " ")
-      .split(" ")
-      .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-      .join(" ") || "User";
-
-  // Shift label — derived from current PHT hour
-  const shift = (() => {
-    const h = new Date().toLocaleString("en-US", {
-      hour: "numeric",
-      hour12: false,
-      timeZone: "Asia/Manila",
-    });
-    return parseInt(h, 10) < 12 ? "AM SHIFT" : "PM SHIFT";
-  })();
 
   return (
     <Sidebar>
@@ -362,7 +332,7 @@ export function AppSidebar() {
 
       <SidebarSeparator />
 
-      {/* ── Footer: help/about + user profile card ─────────────────────── */}
+      {/* ── Footer: help / about only — user-profile card moved to header ── */}
       <SidebarFooter className="px-2 pb-3">
         <SidebarMenu>
           {footerNav.map((item) => (
@@ -386,30 +356,6 @@ export function AppSidebar() {
             </SidebarMenuItem>
           ))}
         </SidebarMenu>
-
-        {/* User profile card */}
-        {user && (
-          <div
-            className="mx-1 mt-2 flex items-center gap-2 px-2 py-1.5 rounded-md border border-border bg-card hover:bg-accent transition-colors cursor-default"
-            data-testid="sidebar-user-card"
-          >
-            <div className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold shrink-0">
-              {initials}
-            </div>
-            <div className="flex flex-col min-w-0 leading-tight flex-1">
-              <span
-                className="text-[12.5px] font-semibold truncate"
-                data-testid="text-current-user"
-              >
-                {displayName}
-              </span>
-              <span className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                {USER_ROLE_LABELS[user.role as keyof typeof USER_ROLE_LABELS] || user.role} · {shift}
-              </span>
-            </div>
-            <ChevronUp className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-          </div>
-        )}
       </SidebarFooter>
     </Sidebar>
   );

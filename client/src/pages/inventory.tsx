@@ -549,10 +549,10 @@ export default function InventoryPage() {
                       <TableCell>
                         <Badge
                           className={cn(
-                            "border-transparent text-white",
-                            status === "Critical" && "bg-red-500",
-                            status === "Low" && "bg-amber-500",
-                            status === "Normal" && "bg-green-500"
+                            "border-transparent text-white font-semibold",
+                            status === "Critical" && "bg-red-600 hover:bg-red-600",
+                            status === "Low" && "bg-amber-500 hover:bg-amber-500",
+                            status === "Normal" && "bg-emerald-600 hover:bg-emerald-600"
                           )}
                         >
                           <span className="w-1.5 h-1.5 rounded-full bg-current mr-1" />
@@ -630,18 +630,31 @@ export default function InventoryPage() {
                         {item.currentQuantity} on hand
                       </span>
                     </div>
-                    <div className="h-1 rounded-full bg-muted overflow-hidden">
-                      <div
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full",
+                            status === "Critical"
+                              ? "bg-red-500"
+                              : status === "Low"
+                                ? "bg-amber-400"
+                                : "bg-green-500"
+                          )}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span
                         className={cn(
-                          "h-full rounded-full",
-                          status === "Critical"
-                            ? "bg-red-500"
-                            : status === "Low"
-                              ? "bg-amber-400"
-                              : "bg-green-500"
+                          "inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border",
+                          status === "Critical" && "bg-red-500 border-red-600 text-white",
+                          status === "Low" && "bg-amber-500 border-amber-600 text-white",
+                          status === "Normal" && "bg-emerald-500 border-emerald-600 text-white",
                         )}
-                        style={{ width: `${pct}%` }}
-                      />
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-current" />
+                        {status === "Normal" ? "OK" : status}
+                      </span>
                     </div>
                   </div>
                 </div>

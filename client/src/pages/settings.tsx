@@ -209,7 +209,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-6 pb-10">
+    <div className="p-3 sm:p-6 space-y-4 pb-6 max-w-5xl">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (
@@ -220,7 +220,10 @@ export default function SettingsPage() {
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))} className="grid gap-5 lg:grid-cols-2 items-start max-w-5xl">
+        <form
+          onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))}
+          className="[column-fill:balance] columns-1 lg:columns-2 gap-4 [&_>_*]:break-inside-avoid [&_>_*]:mb-4"
+        >
 
           {/* ── SYSTEM SETTINGS (admin only) ────────────────────────── */}
           {isAdmin && (
@@ -512,20 +515,27 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* Save button (only for admin-saveable settings) */}
-          {isAdmin && (
-            <div className="lg:col-span-2">
-              <Button type="submit" disabled={saveMutation.isPending} data-testid="button-save-settings" className="w-full sm:w-auto">
-                {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                Save Settings
-              </Button>
-            </div>
-          )}
         </form>
       </Form>
 
+      {/* Save button — pulled out of the columns so it always sits at the bottom of the form */}
+      {isAdmin && (
+        <div>
+          <Button
+            type="button"
+            onClick={form.handleSubmit((data) => saveMutation.mutate(data))}
+            disabled={saveMutation.isPending}
+            data-testid="button-save-settings"
+            className="w-full sm:w-auto"
+          >
+            {saveMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Settings
+          </Button>
+        </div>
+      )}
+
       {/* ── APPEARANCE TWEAKS (device-local, no server save) ────── */}
-      <div className="max-w-5xl">
+      <div>
       <Card data-testid="card-appearance-tweaks">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">

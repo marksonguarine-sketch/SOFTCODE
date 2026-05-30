@@ -1265,4 +1265,62 @@ Root cause: Railway/nixpacks builds have no `.git`, so the build-time `gen-chang
 
 ---
 
+## 31. Session 13 — REQUEST.pdf round 3 (sidebar polish, real-business order logic, reservation audit chips, dashboard reorder, settings layout fix)
+
+Follow-up against the same REQUEST.pdf the owner re-uploaded. Most pieces from sessions 10–11 were already correct; this pass cleaned up the leftover gaps the screenshots pointed at and verified everything live against `npm run dev`.
+
+### 31.1 Sidebar — remove the bottom user-profile card (REQUEST p.1)
+- Deleted the `Marwin123 ADMIN · PM SHIFT` card and its avatar/shift derivation from `client/src/components/app-sidebar.tsx`. Header `<ThemeToggle />` + username chip already cover identity; the card was redundant and the screenshot showed it spilling into the gradient.
+- Removed the unused `ChevronUp` import and `useAuth()` `user` destructure that the card was the only consumer of.
+
+### 31.2 Dashboard — Inventory snapshot pulled above the KPI strip (REQUEST p.3)
+- `client/src/pages/dashboard.tsx` now renders `Inventory snapshot` (Total Items · Stock Value · Low Stock · Critical) **before** Revenue Today / Orders Today / Gross Margin / Low-stock KPI cards.
+- Verified via `preview_eval` text-position scan: "Inventory snapshot" appears at body-text pos 175, "Revenue Today" at 291.
+
+### 31.3 Reservations — `refunded` purged, `reservation_only` added, audit chips (REQUEST p.2)
+`client/src/pages/reservations.tsx`:
+- `PAYMENT_LABELS` no longer includes `refunded`; now maps `reservation_only → "For Reservation Only"`. Matches `PAYMENT_STATUSES` in `shared/schema.ts`.
+- `CreateReservationDialog` payment-status picker now offers exactly two real-world options: **Pending Payment** and **For Reservation Only** (`partial`/`paid` removed — they belong to handled orders, not reservations). Inline help text explains why.
+- List View payment filter dropdown and StatusDropdown in the detail drawer use the same two-option set.
+- `DayResCard` now shows two audit chips per reservation: a blue "**Reservation** · {createdBy} · {createdAt}" chip and a green "**Processing** · {handler} · {assignedAt}" chip (only if handled). Matches the "Reservation logo / Processing logo with timestamps" sketch on REQUEST p.3.
+- Reservation History rows now display the createdBy + creation timestamp inline with calendar/clock icons.
+
+### 31.4 Inventory — status badge contrast (REQUEST p.8–9)
+`client/src/pages/inventory.tsx`:
+- Table status pill: `bg-red-600` (Critical) / `bg-amber-500` (Low) / `bg-emerald-600` (In Stock) with `font-semibold`, hover-stable. Was previously washed out at 500-shades.
+- Grid view now also renders a status badge next to the stock bar (was missing — owner complained the grid had no Critical/Low signal). Same three colors, "OK"/"Low"/"Critical".
+- Verified live: 4 red Critical, 1 amber Low, 12 emerald OK badges count correctly on the test database.
+
+### 31.5 Settings — masonry layout + always-visible Save (REQUEST p.6–7)
+`client/src/pages/settings.tsx`:
+- Form switched from `grid lg:grid-cols-2` to a CSS-columns masonry (`columns-1 lg:columns-2 [&_>_*]:break-inside-avoid [&_>_*]:mb-4`). Cards now balance by content height so neither column trails empty — root cause of the "I can scroll a lot even tho there is nothing to see" gripe.
+- Save Settings button + Appearance Tweaks card pulled out below the masonry so they always sit at the very bottom and are fully visible (no more "ALSO ITS BEING CUT").
+- Page wrapper trimmed: `space-y-4 pb-6 max-w-5xl` (was `space-y-6 pb-10`).
+- Verified: at 768×651 main, scrollHeight = 4188 with the Appearance Tweaks card fully on-screen at the bottom (rect.bottom 686 ≤ main.bottom 714).
+
+### 31.6 Cross-page audit (already-correct items re-verified, not edited)
+The owner re-uploaded the same PDF as session 10, so most items below were already implemented in sessions 10/11. Re-walked the dev server to confirm they still work:
+- Orders pool: 10/page next/prev, type+date+amount sort filters, search bar inside the assign-to dropdown, responsive — all wired in `client/src/pages/orders.tsx`.
+- Order workflow: `ALLOWED_ORDER_CHANNELS` / `ALLOWED_PAYMENT_STATUSES` / `ALLOWED_FULFILLMENT_STATUSES` in `shared/schema.ts` lock combos (walk-in channel forces `paid`; reservations only allow `pending_payment`/`reservation_only`; no Refund anywhere). Server `createOrderSchema` refines reject invalid combos.
+- Create-Order Next button is disabled until step data is filled; close prompts "are you sure" only when there's unsaved input.
+- Pending Payment → "History of Payment" table below with timestamps + CSV export (`client/src/pages/pending-payment.tsx`).
+- Accounting general ledger: 20/page next + Date + Account filters (`client/src/pages/accounting.tsx`).
+- Inventory Manager role: scoped to `/inventory` only via `App.tsx` Router branch; sidebar nav filtered via `visibleOperationsNav`; admin creates IM accounts under Users with role selector (`client/src/pages/users.tsx`).
+- Forecasting `/api/forecast/items` includes **every** item (flat-mean fallback when <5 days of history); `/api/forecast/aggregate` uses real Order data.
+- Maintenance: Wipe clears every collection then re-seeds `admin/admin123`; restore requires admin password **and** typing `ACCEPT`; auto-backup ships JSON via Resend with the project's API key (`re_NiAiTR6w_71WAZ6hvgseuyD6vDR7kKvX6` baked as default, env-overridable) to `marksonguarine@gmail.com` (editable with password). All in `server/routes.ts` + `client/src/pages/maintenance.tsx`.
+- Header sun/moon theme toggle + true-light default + Developers Time Log (curated `devlogs.json`) — all working from sessions 11/12.
+
+### 31.7 Verification (live, against running `npm run dev`)
+- `npx tsc --noEmit` → **0 errors**.
+- `npm run build` → clean (`dist/index.cjs 1.2 MB`, `dist/public/assets/index-*.js 2.23 MB`).
+- Logged in `admin/admin123` via API, then drove the SPA:
+  - `/` → Inventory snapshot rendered first, KPI strip below, sidebar has no user card.
+  - `/orders` → pool sort/type filter/prev/next buttons all present.
+  - `/reservations?tab=list` → Reservation History card + date-range CSV export visible.
+  - `/inventory` → red/amber/emerald status badges counted live.
+  - `/settings` → Appearance Tweaks card fully visible at scrollHeight bottom.
+- Screenshot proof captured of the new dashboard ordering.
+
+---
+
 End of code.md.

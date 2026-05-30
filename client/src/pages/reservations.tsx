@@ -38,7 +38,10 @@ const FULFILLMENT_LABELS: Record<string, string> = {
   completed: "Completed", cancelled: "Cancelled",
 };
 const PAYMENT_LABELS: Record<string, string> = {
-  pending_payment: "Unpaid", partial: "Partial", paid: "Paid", refunded: "Refunded",
+  pending_payment: "Unpaid",
+  partial: "Partial",
+  paid: "Paid",
+  reservation_only: "For Reservation Only",
 };
 
 function formatPHP(v: number) {
@@ -64,7 +67,11 @@ const RES_ALLOWED_METHODS: Record<string, string[]> = {
   walkin_reservation: ["cash", "gcash_qr"],
   online_reservation: ["gcash_qr"],
 };
-const RES_PAYMENT_STATUSES = ["pending_payment", "partial", "paid"] as const;
+// Reservations are scheduled, not transacted. Real-world: customer is either
+// going to pay later (pending_payment) or this is purely a hold with no money
+// changing hands (reservation_only). No Partial / Paid here — those happen
+// when the reservation is "Handled" and becomes a real order.
+const RES_PAYMENT_STATUSES = ["pending_payment", "reservation_only"] as const;
 const RES_FULFILLMENT_STATUSES = ["pending", "processing", "ready", "completed", "cancelled"] as const;
 
 function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; onClose: () => void; allItems: IItem[] }) {
@@ -244,11 +251,14 @@ function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; o
                 <SelectContent>
                   {RES_PAYMENT_STATUSES.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {s === "pending_payment" ? "Pending Payment" : s === "partial" ? "Partial" : "Paid"}
+                      {s === "pending_payment" ? "Pending Payment" : "For Reservation Only"}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Reservations only carry these two states — payment is finalised when the reservation is handled into an order.
+              </p>
             </div>
           </div>
 
@@ -645,6 +655,11 @@ function DayResCard({ r, onViewDetail }: { r: any; onViewDetail: () => void }) {
     onError: (err: any) => toast({ title: "Could not delete", description: err.message, variant: "destructive" }),
   });
 
+  // Pretty audit row showing who created the reservation and who handled it,
+  // each with a coloured logo so it's instantly scannable like a real system.
+  const createdBy = r.createdBy || "—";
+  const handledBy = r.assignedBy || r.assignedTo || null;
+
   return (
     <div className="border rounded-lg p-3 space-y-2">
       <div className="flex items-start justify-between gap-2">
@@ -658,6 +673,33 @@ function DayResCard({ r, onViewDetail }: { r: any; onViewDetail: () => void }) {
           <StatusBadge status={r.fulfillmentStatus} size="xs" />
         </div>
       </div>
+
+      {/* Audit chips — Reservation logo + who/when, plus Processing logo if handled */}
+      <div className="flex flex-wrap gap-2 text-[11px]">
+        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-900">
+          <CalendarCheck className="h-3 w-3" />
+          <strong className="font-semibold">Reservation</strong>
+          <span className="opacity-70">·</span>
+          <span>{createdBy}</span>
+          <span className="opacity-70">·</span>
+          <span className="tabular-nums">{format(new Date(r.createdAt), "MMM d, h:mm a")}</span>
+        </span>
+        {handledBy && (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900">
+            <Package className="h-3 w-3" />
+            <strong className="font-semibold">Processing</strong>
+            <span className="opacity-70">·</span>
+            <span>{handledBy}</span>
+            {r.assignedAt && (
+              <>
+                <span className="opacity-70">·</span>
+                <span className="tabular-nums">{format(new Date(r.assignedAt), "MMM d, h:mm a")}</span>
+              </>
+            )}
+          </span>
+        )}
+      </div>
+
       {r.scheduledDate && (
         <p className="text-xs text-muted-foreground flex items-center gap-1">
           <Clock className="h-3 w-3" />
@@ -827,12 +869,11 @@ function ListView({ reservations, isLoading }: { reservations: any[]; isLoading:
           </SelectContent>
         </Select>
         <Select value={paymentFilter} onValueChange={(v) => { setPaymentFilter(v); setPage(1); }}>
-          <SelectTrigger className="w-[150px]"><SelectValue placeholder="Payment" /></SelectTrigger>
+          <SelectTrigger className="w-[170px]"><SelectValue placeholder="Payment" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Payment</SelectItem>
-            <SelectItem value="pending_payment">Unpaid</SelectItem>
-            <SelectItem value="partial">Partial</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
+            <SelectItem value="pending_payment">Pending Payment</SelectItem>
+            <SelectItem value="reservation_only">For Reservation Only</SelectItem>
           </SelectContent>
         </Select>
         {(search || typeFilter !== "all" || statusFilter !== "all" || paymentFilter !== "all") && (
@@ -1008,12 +1049,24 @@ function ListView({ reservations, isLoading }: { reservations: any[]; isLoading:
               <div className="space-y-2">
                 {historyRes.slice(0, 50).map((r) => (
                   <div key={r._id} className="flex items-center justify-between gap-3 p-2.5 rounded-md border hover:bg-muted/30" data-testid={`row-res-history-${r._id}`}>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="font-medium text-sm truncate">{r.customerName} <span className="font-mono text-xs text-muted-foreground">{r.trackingNumber}</span></p>
-                      <p className="text-xs text-muted-foreground">
-                        {r.scheduledDate ? format(new Date(r.scheduledDate), "MMM d yyyy") : "Date TBD"} · {formatPHP(r.totalAmount || 0)}
-                        {r.createdBy && <> · by {r.createdBy}</>}
-                      </p>
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-0.5 text-[11px] text-muted-foreground">
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarDays className="h-3 w-3" />
+                          {r.scheduledDate ? format(new Date(r.scheduledDate), "MMM d yyyy") : "Date TBD"}
+                        </span>
+                        <span>· {formatPHP(r.totalAmount || 0)}</span>
+                        {r.createdBy && (
+                          <span className="inline-flex items-center gap-1">
+                            · <User className="h-3 w-3" /> {r.createdBy}
+                          </span>
+                        )}
+                        <span className="inline-flex items-center gap-1">
+                          · <Clock className="h-3 w-3" />
+                          <span className="tabular-nums">{format(new Date(r.createdAt), "MMM d, h:mm a")}</span>
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <StatusBadge status={r.fulfillmentStatus} size="xs" />
@@ -1228,7 +1281,7 @@ function ReservationDetailDrawer({ reservation: initialRes, onClose }: { reserva
               options={{ pending: "Pending", processing: "Confirmed", ready: "Ready", completed: "Completed", cancelled: "Cancelled" }} />
             <div className="text-xs text-muted-foreground">Payment:</div>
             <StatusDropdown field="paymentStatus" value={reservation.paymentStatus}
-              options={{ pending_payment: "Unpaid", partial: "Partial", paid: "Paid" }} />
+              options={{ pending_payment: "Pending Payment", reservation_only: "For Reservation Only" }} />
           </div>
 
           <Card>
