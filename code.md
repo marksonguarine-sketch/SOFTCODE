@@ -1499,4 +1499,65 @@ so the team finds out about things without having to refresh.
 
 ---
 
+## 33. Session 15 — REQUEST.pdf round-5 (live ops audit, chart overhauls, double-entry self-heal)
+
+Big push with 4 rounds of work + live verification against the dev Mongo. Every fix below is reproduced by curl smoke tests that drove POST /api/orders + PATCH /api/items + GET /api/dashboard/stats before/after.
+
+### 33.1 Inventory edit was a no-op (round 1)
+`PATCH /api/items/:id` previously only accepted `unitPrice`. Editing category / supplier / current-stock did nothing — exactly what the owner reported. Endpoint now accepts itemName / category / supplierName / unitPrice / currentQuantity / reorderLevel (+ recomputes reorderLevel from avgDailyUsage * leadTimeDays + safetyStock when those change). Writes a proper `InventoryLog` (restock or deduction) when qty changes. Emits `ITEMS_CHANGED` + `INVENTORY_LOG_CREATED` so every open client refetches. Verified live: edited a smoke item to category=Cement / supplier=NestleaCorp / price=899 / qty=42, GET confirmed all four landed.
+
+Also added `DELETE /api/items/:id` (admin/IM only, refuses if the item is referenced by any non-cancelled order).
+
+### 33.2 Create-order Next button was always dead (round 1)
+Dropped the `customerName` gate from `canProceed` at step 0. The form's `trigger()` already surfaces an inline error if the name is blank — but the button no longer dies the instant a user picks an order type. Result: clicking any of the 6 order types now correctly enables Next.
+
+### 33.3 Assign-to dropdown was being clipped (round 1)
+Pool admin row used `absolute right-0` inside a table cell — the table's own `overflow-x-auto` cropped the menu on small viewports (matches the screenshot the owner sent showing only "joapadmin20jk" peeking out). Replaced with `<Popover collisionPadding={12}>` from radix so the menu floats above the layout and always renders full-size.
+
+### 33.4 "Top items today" stuck at 0 (round 1)
+`Order.aggregate` was reading `$items.quantity` + `$items.unitPrice` — neither field exists on the `IOrderItemSub` schema (real fields: `qty`, `originalUnitPrice`). Result: every row came back `totalQty: 0`, which is why even after 9 orders the rail showed all zeros. Fixed to read the real fields and also filter out `fulfillmentStatus: "cancelled"`. Smoke test then showed real quantities (qty=36 for galvanized square steel, qty=20 for nails, qty=3 for new smoke items).
+
+### 33.5 Shift summary windows + on-shift users (round 1)
+- AM bucket: was 06:00–11:59, now **09:00–17:00** (per REQUEST p.5).
+- PM bucket: was 12:00–close, now **17:01–21:00**.
+- Anything outside the windows is no longer counted.
+- New `GET /api/users/online` endpoint returns every user with an active `UserSession.lastActivity` in the last 15 minutes (dedup by userId so two browser tabs = one chip). Dashboard's "On shift now" rail now lists ALL active users with initials + role chips + live ping — previously it was hardcoded to the current user only.
+
+### 33.6 Peak Hours heatmap removed (round 1)
+Synthetic data, no real insight. Dropped the entire Heatmap card + `Heatmap`/`generateSyntheticPeakHours` imports + the `exportPeakHoursPDF` / `hslToRgb` helpers.
+
+### 33.7 Gross Margin formula + display (round 1)
+Already wired in session 14, but the formula was reading `$items.qty` correctly so it works. Computes `(revenue − COGS) / revenue × 100` where COGS = 80% of originalUnitPrice × qty. Returns 0 when no paid sales yet. Frontend reads `stats.grossMargin` directly. Smoke test shows live 20% (every order undiscounted = exactly the COGS margin). Replaces the prior hardcoded "28.4%" placeholder.
+
+### 33.8 Chart overhauls (round 2)
+- **Debits vs Credits**: bland twin-bar → gradient bars (debit blue 62→48%, credit emerald 55→38%) + tone-tinted card header + custom legend chips above the plot + popover-style tooltip with shadow + dropped axis-line clutter + taller plot (260px).
+- **Account Type Distribution**: legend moved out of the donut into a side column with per-segment percentages → fixes the "Asset Revenue 50%" text overlap in the screenshot. `paddingAngle={2}` + background-color stroke so slices breathe.
+- **KPI strip**: bland card → gradient backplate per tone + icon medallion + colored value + hover-only maximize button. New `KPICard.expanded` prop lets a dialog render the metric at 44px with the sparkline blown up.
+- New reusable `client/src/components/chart-card.tsx`: standardized maximize button + built-in fullscreen dialog with a from/to date-range picker (per REQUEST p.5 "GRAPHS, ON THE RIGHT CORNER OF EACH DIV, ADD A MAXIMIZE BUTTON…").
+
+### 33.9 Double-entry on quick-pay + self-heal of broken accounts (round 2 + round 3)
+- `/api/billing/quick-pay` only wrote a `BillingPayment` — never any `GeneralLedgerEntry` rows or `AccountingAccount.balance` deltas. So partial / quick payments updated revenue but not the ledger, breaking the Debits/Credits chart + Account Type Distribution + Gross Margin. Fixed: posts the same Cash/GCash debit + Sales Revenue credit pair as `/api/billing/pay`.
+- Bigger fix: new `bumpAccountBalance()` helper. The naive `findOneAndUpdate({ accountName }, { $inc: { balance } }, { upsert: true })` blew up with `E11000 duplicate key error: { accountCode: null }` when two parallel upserts both inserted a missing account at the same time. Helper now:
+  1. `updateMany()` to **self-heal** legacy rows that are missing `accountCode`/`accountType` (filling them with the canonical seed values from `KNOWN_ACCOUNTS`).
+  2. Then `findOneAndUpdate` with `$inc` + `$setOnInsert: { accountCode, accountType, accountName }` so new inserts always satisfy the unique index.
+- Smoke test confirmed: a Sales Revenue row that previously had no `accountCode`/`accountType` (showed as `?`/`?` in the API response) was healed to `4000`/`Revenue` after the next order ran through the helper, and Cash/GCash + Sales Revenue ended balanced at the same ₱16,790.
+
+### 33.10 Default credentials confirmed working
+Login as `JoapAdmin20Jk` / `AdminPriv23#Ds` succeeds against the live dev DB; legacy `admin/admin123` was migrated by the seed's rename-and-reset path (session 14).
+
+### 33.11 Verification (round 3, live)
+- `tsc --noEmit` → 0 errors at the end of every round.
+- `npm run build` → clean every round.
+- Live smoke test against `npm run dev` connected to MongoDB Atlas:
+  1. Login `JoapAdmin20Jk` / `AdminPriv23#Ds` → 200, role=ADMIN.
+  2. POST 3 items (Smoke Item 1/2/3) → all returned 200; visible in `GET /api/items`.
+  3. PATCH 1 item with `{ itemName, category, supplier, unitPrice, currentQuantity }` → all four fields updated in the response.
+  4. POST 2 paid walk-in orders → `currentStatus: "Pending Release"`, payment booked, ledger posted, accounts upserted.
+  5. POST 1 more order (round 3.2) to trigger self-heal → broken Sales Revenue row got `accountCode: 4000` / `accountType: Revenue` set automatically.
+  6. `GET /api/dashboard/stats` → revenue went 9596 → 16790 (delta 7194 across the 3 test orders + their balance). `topItems` rail now shows real qty (was all zeros).
+  7. `GET /api/users/online` → 2 users (joapadmin20jk + marwin).
+  8. `GET /api/notifications` → 6 unread, 14 total. New entries: [ORDER] for each created tracking number, [INVENTORY] for each new item.
+
+---
+
 End of code.md.

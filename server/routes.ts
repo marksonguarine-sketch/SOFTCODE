@@ -100,6 +100,54 @@ async function logAction(action: string, actor: string, target = "", metadata: R
 }
 
 /**
+ * Bump (or seed-and-bump) the balance on a single accounting account.
+ *
+ * The naive `findOneAndUpdate({ accountName }, { $inc: { balance } },
+ * { upsert: true })` blew up with a duplicate-key error on `accountCode_1`
+ * whenever the account didn't yet exist — two parallel upserts both inserted
+ * an "accountCode: null" row at the same time. This helper supplies a
+ * deterministic accountCode + accountType via `$setOnInsert` so the upsert
+ * is always safe even on a fresh DB.
+ */
+const KNOWN_ACCOUNTS: Record<string, { accountCode: string; accountType: string }> = {
+  "Cash/GCash": { accountCode: "1000", accountType: "Asset" },
+  "Accounts Receivable": { accountCode: "1100", accountType: "Asset" },
+  "Inventory": { accountCode: "1200", accountType: "Asset" },
+  "Accounts Payable": { accountCode: "2000", accountType: "Liability" },
+  "Owner's Equity": { accountCode: "3000", accountType: "Equity" },
+  "Sales Revenue": { accountCode: "4000", accountType: "Revenue" },
+  "Cost of Goods Sold": { accountCode: "5000", accountType: "Expense" },
+  "Operating Expenses": { accountCode: "5100", accountType: "Expense" },
+};
+async function bumpAccountBalance(accountName: string, delta: number) {
+  const meta = KNOWN_ACCOUNTS[accountName] || {
+    accountCode: `9${Date.now().toString().slice(-5)}`,
+    accountType: "Asset",
+  };
+  // Self-heal any legacy rows that are missing accountCode/accountType
+  // (left over from earlier upserts that failed the unique-key check).
+  await AccountingAccount.updateMany(
+    {
+      accountName,
+      $or: [
+        { accountCode: { $exists: false } },
+        { accountCode: null },
+        { accountCode: "" },
+      ],
+    },
+    { $set: { accountCode: meta.accountCode, accountType: meta.accountType } },
+  );
+  return AccountingAccount.findOneAndUpdate(
+    { accountName },
+    {
+      $inc: { balance: delta },
+      $setOnInsert: { accountCode: meta.accountCode, accountType: meta.accountType, accountName },
+    },
+    { upsert: true, new: true },
+  );
+}
+
+/**
  * Fire-and-forget notification creator. Persists a Notification doc and
  * emits a socket event so every connected client refetches its bell.
  * Errors are swallowed — a notification failure must never break the
@@ -2198,8 +2246,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: order.totalAmount, description: `Revenue from walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
         ]);
         await Promise.all([
-          AccountingAccount.findOneAndUpdate({ accountName }, { $inc: { balance: order.totalAmount } }, { upsert: true }),
-          AccountingAccount.findOneAndUpdate({ accountName: "Sales Revenue" }, { $inc: { balance: order.totalAmount } }, { upsert: true }),
+          bumpAccountBalance(accountName, order.totalAmount),
+          bumpAccountBalance("Sales Revenue", order.totalAmount),
         ]);
         order.statusHistory.push({ status: "Paid", timestamp: new Date(), actor: req.user!.username, note: `₱${order.totalAmount.toFixed(2)} received at counter · Txn: ${txn}` });
         await order.save();
@@ -2359,8 +2407,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: parsed.data.amount, description: `Revenue from order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
       ]);
       await Promise.all([
-        AccountingAccount.findOneAndUpdate({ accountName }, { $inc: { balance: parsed.data.amount } }, { upsert: true }),
-        AccountingAccount.findOneAndUpdate({ accountName: "Sales Revenue" }, { $inc: { balance: parsed.data.amount } }, { upsert: true }),
+        bumpAccountBalance(accountName, parsed.data.amount),
+        bumpAccountBalance("Sales Revenue", parsed.data.amount),
       ]);
 
       await logAction("QUICK_PAYMENT_RECORDED", req.user!.username, order.trackingNumber, {
@@ -2456,16 +2504,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       ]);
       // Sync AccountingAccount balances (asset accounts: balance += debit-credit; revenue: balance += credit-debit)
       await Promise.all([
-        AccountingAccount.findOneAndUpdate(
-          { accountName },
-          { $inc: { balance: parsed.data.amountPaid } }, // asset: debit increases balance
-          { upsert: true }
-        ),
-        AccountingAccount.findOneAndUpdate(
-          { accountName: "Sales Revenue" },
-          { $inc: { balance: parsed.data.amountPaid } }, // revenue: credit increases balance
-          { upsert: true }
-        ),
+        bumpAccountBalance(accountName, parsed.data.amountPaid),
+        bumpAccountBalance("Sales Revenue", parsed.data.amountPaid),
       ]);
 
       await logAction("PAYMENT_LOGGED", req.user!.username, order.trackingNumber, { amount: parsed.data.amountPaid, method: parsed.data.paymentMethod, transactionCode });
