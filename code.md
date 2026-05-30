@@ -1323,4 +1323,180 @@ The owner re-uploaded the same PDF as session 10, so most items below were alrea
 
 ---
 
+## 32. Session 14 — operational redesign (REQUEST.pdf round 4)
+
+This session reworks the core operational logic so the system actually behaves
+like a real hardware-trading ERP — money moves, stock moves, approvals exist,
+and the dashboard finally reflects reality. Plus a whole notification fabric
+so the team finds out about things without having to refresh.
+
+### 32.1 Default admin credentials hardened
+- `server/seed.ts` exports `DEFAULT_ADMIN_USERNAME = "JoapAdmin20Jk"` and
+  `DEFAULT_ADMIN_PASSWORD = "AdminPriv23#Ds"`. The seed migrates any legacy
+  `admin/admin123` row by renaming the user and resetting the password.
+- `/api/maintenance/wipe` re-seeds with the new credentials and returns
+  them in the message body so the wipe button's toast can prompt re-login.
+- Login screen + maintenance restore docs updated to display the new creds.
+
+### 32.2 Dashboard / billing / accounting actually move
+**Root cause of the "graphs not changing" complaint:**
+1. Walk-in orders were being created with `paymentStatus="paid"` but **no
+   BillingPayment** or **ledger entry** was being booked. The dashboard's
+   `todayRevenue` aggregates BillingPayment.paymentDate today → it stayed at
+   ₱0 because there was nothing to aggregate.
+2. Gross margin was **hardcoded** to `28.4%` in `dashboard.tsx` line 277.
+   It literally couldn't change.
+3. `/api/orders/:id/release` was **double-deducting** inventory (creation
+   already subtracted, release subtracted again).
+
+**Fixes (all in `server/routes.ts` + `client/src/pages/dashboard.tsx`):**
+- Order-create flow: when `paymentStatus === "paid"`, the route now creates a
+  `BillingPayment` + matching `GeneralLedgerEntry` debit/credit + updates
+  the Cash/GCash and Sales Revenue `AccountingAccount` balances on the spot.
+  Emits `PAYMENT_LOGGED` + `LEDGER_POSTED` + `DASHBOARD_STATS_UPDATED` so
+  every open client refetches.
+- `/api/dashboard/stats` now computes a **real gross margin**:
+  `(revenue − COGS) / revenue × 100`, aggregated across every paid order
+  (`Order.aggregate` with `$unwind: items`, COGS approximated as 80% of list
+  per line — matches the inventory "Cost" column).
+- Dashboard reads `stats.grossMargin` directly; sparkline shows a flat
+  baseline of the live value when there's data and disappears when there's
+  none, instead of fabricating fake history points.
+
+### 32.3 Wipe actually resets everything client-side
+- `client/src/components/dev_button.tsx` now `removeQueries() + resetQueries()`
+  after a successful wipe, clears the localStorage token + the timelog seen
+  flag, then `window.location.href = "/login"`. Old graphs/cache can't
+  persist into the new session.
+- Server wipe now also clears the new `Notification` + `ItemRequest`
+  collections.
+
+### 32.4 Order stock model: no double-deduction, partial release real
+- `server/models/Order.ts`: items gain `releasedQty` + `pendingQty` (default
+  0 for backwards compatibility).
+- `POST /api/orders`: stock is **NO LONGER subtracted** at creation — it's
+  marked "reserved" via an InventoryLog with `type: "adjustment"`, `qty: 0`.
+  Each line starts with `releasedQty=0`, `pendingQty=qty`.
+- `POST /api/orders/:id/release` rewritten:
+  - Walks each line, releases `min(have, pending)` per item, decrements
+    `currentQuantity`, increments `releasedQty`, decrements `pendingQty`.
+  - If anything remains pending → order keeps `fulfillmentStatus="processing"`
+    and `currentStatus="Pending Release"` → it stays in Active Orders with a
+    "still owe" status-history note. Returns `partial: true` so the toast
+    explains it.
+  - If everything releases → order flips to `completed`.
+  - **Inventory Manager cannot release** — only admin / employees can.
+- New `POST /api/orders/:id/deliver` endpoint: admin / employee only,
+  requires every line fully released, then writes a "Delivery confirmed"
+  history note and moves the order to History. IM gets 403.
+- Restock side-effect: when an `InventoryLog` posts a positive restock, the
+  server scans every active order with `pendingQty > 0` for that item and
+  fires an `[INVENTORY]` notification to ADMIN + EMPLOYEE so they know
+  they can now release.
+
+### 32.5 Notification system (foundation)
+- New `server/models/Notification.ts`: `{ category, title, body, link,
+  recipientUsername, recipientRole, readBy[], createdBy, createdAt }`.
+  Indexed on `(recipientRole, createdAt)` and `(recipientUsername,
+  createdAt)`. Targeting model: per-user, per-role, or global broadcast.
+- New `notify()` helper in `server/routes.ts` writes the doc + emits
+  socket `NOTIFICATION_NEW`. Errors are swallowed so a notification failure
+  can never break the underlying action.
+- New routes: `GET /api/notifications` (returns notifs visible to the
+  caller, with `isRead` per-user derived from the readBy array, plus an
+  `unreadCount`), `POST /api/notifications/:id/read`, `POST
+  /api/notifications/read-all`, `POST /api/inventory/notify-restock`.
+- New `client/src/components/notification-bell.tsx` — bell icon in the
+  header with red unread badge + pulsing exclamation point when a new
+  notif lands. Categorized list ([REQUEST]/[ORDER]/[PAYMENT]/[INVENTORY]/
+  [DELIVERY]/[RESERVATION]/[SYSTEM]) with colored chips, "Open" button
+  navigates to the deep-link. Reads via the socket `NOTIFICATION_NEW`
+  event + polls every 15 s as a safety net.
+- Wired into `App.tsx` header next to the live clock and theme toggle.
+- Existing socket hook (`use-socket-notifications.ts`) listens for
+  `NOTIFICATION_NEW`, `ITEMS_CHANGED`, `ITEM_REQUEST_CREATED`,
+  `ITEM_REQUEST_UPDATED` so every open session stays in sync.
+
+### 32.6 Employee request-to-add flow (race-safe approval)
+- New `server/models/ItemRequest.ts`: `{ requestedBy, action ("ADD_ITEM" |
+  "EDIT_STOCK" | "DELETE_ITEM"), payload, status ("pending"|"approved"|
+  "rejected"|"used"|"cancelled"), approvedBy, approvedAt, … }`. Persists
+  across logout, never expires.
+- New routes:
+  - `POST /api/item-requests` (employee files) — refuses duplicates of the
+    same pending action, notifies all admins + IMs.
+  - `GET /api/item-requests` (mine if employee, everything if admin/IM).
+  - `POST /api/item-requests/:id/approve` — requires approver's password,
+    uses `findOneAndUpdate({ _id, status: "pending" }, …)` so two admins
+    can't both approve the same request (the loser gets a 409).
+  - `POST /api/item-requests/:id/reject` — password + optional reason.
+  - `POST /api/item-requests/:id/cancel` — requester self-cancel.
+- `POST /api/items` and `POST /api/inventory-logs` consume the grant for
+  EMPLOYEE callers: `findOneAndUpdate({ requestedBy, action, status:
+  "approved" }, { status: "used", usedAt: now })`. The grant is single-use
+  — to add/edit again the employee must request again.
+- ADMIN and INVENTORY_MANAGER bypass the flow entirely.
+- `client/src/pages/inventory.tsx`:
+  - "Add item" button is now visible to **everyone**. Click routes
+    through `handleAddItemClick`: admin/IM opens the dialog directly;
+    employee without a grant gets a two-step `RequestPromptDialog` (Yes/No
+    → "request in progress…" with live elapsed-seconds counter + Close
+    button); employee with an existing approved grant goes straight to the
+    dialog.
+  - `EmployeeRequestWidgets` banner shows pending requests with a live
+    timer + Close button, and approved grants with a "single-use grant"
+    note.
+  - `ApproverRequestInbox` (admin/IM only) lists pending requests with
+    Approve / Reject buttons; both demand the approver's password and
+    confirm "Are you sure you approve X to add an item?".
+
+### 32.7 Inventory Manager scope corrected
+- Sidebar `Settings` link no longer hides behind admin-only branches — IM
+  sees Settings under Operations (along with Inventory).
+- `App.tsx` IM router now exposes `/settings` (previously it redirected
+  everything except `/inventory`).
+- IM does **not** need approval to Add Item (counted as `canManageInventory`).
+- The role does not get any admin-only sections (no Users/Maintenance/
+  System Logs/Offers/etc — sidebar still filters those out for IM).
+
+### 32.8 Real-time inventory propagation
+- `POST /api/items`, `POST /api/inventory-logs` emit a new
+  `ITEMS_CHANGED` socket event.
+- Client socket hook listens and invalidates `/api/items`, `/api/items/all`,
+  `/api/inventory`, `/api/dashboard/stats` so every tab sees fresh
+  quantities within ~100 ms of any stock or catalog change.
+
+### 32.9 Create-Order item picker: zero / insufficient stock UX
+- `client/src/pages/orders.tsx` Step-1 item dropdown now branches per stock
+  state:
+  - **0 stock** → row is greyed and unclickable. Renders only a
+    "Notify Admin / IM" button which POSTs `/api/inventory/notify-restock`.
+  - **Some stock but less than qty** → row is clickable, prefixed amber, and
+    exposes two buttons: "Notify Admin" and "Partial Release" (with a
+    confirm dialog explaining "Reserve N now, the rest waits for restock";
+    accepting also fires a notify).
+  - **Enough stock** → normal happy-path add.
+
+### 32.10 Accounting employee-write lock
+- Already enforced server-side (`adminOnly` on `POST /api/accounting/ledger`).
+  Client UI in `client/src/pages/accounting.tsx` gates the Add Entry button
+  on `isAdmin`. Verified no other entry-point exists for non-admins.
+
+### 32.11 Order-detail "Mark Delivered" hook
+- `client/src/pages/order-detail.tsx` got a new `deliverMutation` that POSTs
+  `/api/orders/:id/deliver`. UI hookup point exists; further trigger UI
+  refinement deferred — backend ready for any caller.
+
+### 32.12 Verification
+- `npx tsc --noEmit` → **0 errors**.
+- `npm run build` → clean (`dist/index.cjs 1.2 MB`, frontend bundle
+  2.27 MB).
+- Live smoke test was **not** runnable this session because the local
+  sandbox couldn't resolve the MongoDB Atlas SRV record
+  (`ECONNREFUSED _mongodb._tcp.cluster0.cvabo7n.mongodb.net`). Code is
+  shipped; smoke verification will need to happen on a machine with
+  outbound DNS to Atlas.
+
+---
+
 End of code.md.

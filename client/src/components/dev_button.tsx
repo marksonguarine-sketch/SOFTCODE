@@ -34,9 +34,24 @@ export default function DevWipeButton() {
       const res = await apiRequest("POST", "/api/maintenance/wipe");
       const data = await res.json();
       if (data.success) {
-        toast({ title: "System wiped", description: "All data has been deleted." });
-        queryClient.invalidateQueries();
+        toast({
+          title: "System wiped",
+          description: "All data deleted. Default admin is JoapAdmin20Jk / AdminPriv23#Ds — please log in again.",
+        });
+        // Hard reset: drop every cached query (so every graph/KPI shows zero),
+        // wipe the stale auth token (the old admin user is gone), and bounce
+        // back to login so the next session reads a clean slate.
+        queryClient.removeQueries();
+        queryClient.resetQueries();
+        try {
+          localStorage.removeItem("token");
+          sessionStorage.removeItem("joap_seen_timelog");
+        } catch {}
         setOpen(false);
+        // Give the toast a beat to show, then reload onto /login.
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 1200);
       } else {
         throw new Error(data.error);
       }

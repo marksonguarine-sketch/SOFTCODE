@@ -7,17 +7,33 @@ import AccountingAccount from "./models/AccountingAccount";
 import Settings from "./models/Settings";
 import { log } from "./index";
 
+// Default admin credentials. Hardcoded for the school project (the prof needs
+// to be able to log in cold). Change only by deleting the admin and re-seeding.
+export const DEFAULT_ADMIN_USERNAME = "JoapAdmin20Jk";
+export const DEFAULT_ADMIN_PASSWORD = "AdminPriv23#Ds";
+
 export async function seedDatabase() {
   try {
-    const existingAdmin = await User.findOne({ username: "admin" });
+    // Migrate legacy admin/admin123 → JoapAdmin20Jk/AdminPriv23#Ds. We just
+    // rename the existing user and reset the password so old DBs don't keep
+    // the insecure default after a code update.
+    const legacyAdmin = await User.findOne({ username: "admin" });
+    if (legacyAdmin) {
+      legacyAdmin.username = DEFAULT_ADMIN_USERNAME;
+      legacyAdmin.password = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
+      await legacyAdmin.save();
+      log(`Renamed legacy admin → ${DEFAULT_ADMIN_USERNAME} (password reset)`, "seed");
+    }
+
+    const existingAdmin = await User.findOne({ username: DEFAULT_ADMIN_USERNAME });
     if (!existingAdmin) {
       log("Seeding database...", "seed");
 
-      const adminPassword = await bcrypt.hash("admin123", 10);
+      const adminPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
       const employeePassword = await bcrypt.hash("employee123", 10);
 
       await User.create([
-        { username: "admin", password: adminPassword, role: "ADMIN", isActive: true },
+        { username: DEFAULT_ADMIN_USERNAME, password: adminPassword, role: "ADMIN", isActive: true },
         { username: "employee", password: employeePassword, role: "EMPLOYEE", isActive: true },
       ]);
 
@@ -65,7 +81,7 @@ export async function seedDatabase() {
       });
 
       log("Database seeded successfully!", "seed");
-      log("Admin credentials: username=admin, password=admin123", "seed");
+      log(`Admin credentials: username=${DEFAULT_ADMIN_USERNAME}, password=${DEFAULT_ADMIN_PASSWORD}`, "seed");
       log("Employee credentials: username=employee, password=employee123", "seed");
     }
 

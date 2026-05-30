@@ -247,7 +247,11 @@ export function AppSidebar() {
                 </SidebarMenuItem>
               )}
 
-              {/* Settings — for non-admins, lives here under Operations */}
+              {/* Settings — available to every role (employee, inventory
+                  manager, admin). Inventory managers used to have no Settings
+                  link at all because their sidebar was filtered to /inventory.
+                  Now it always shows for non-admins (admins get it under
+                  System below). */}
               {!isAdmin && (
                 <SidebarMenuItem>
                   <SidebarMenuButton

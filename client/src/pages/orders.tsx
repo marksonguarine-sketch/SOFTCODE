@@ -584,31 +584,85 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input className="pl-9" placeholder="Search items..." value={itemSearch} onChange={(e) => setItemSearch(e.target.value)} data-testid="input-order-item-search" />
                   {itemSearch && filteredItems.length > 0 && (
-                    <div className="absolute top-full left-0 right-0 z-50 bg-popover border rounded-md shadow-lg max-h-48 overflow-y-auto mt-1">
-                      {filteredItems.slice(0, 8).map((it) => (
-                        <button key={it._id} type="button" className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent text-left"
-                          onClick={() => {
-                            const item = allItems.find((i) => i._id === it._id);
-                            if (!item) return;
-                            if (itemQty > item.currentQuantity) {
-                              toast({ title: "Insufficient stock", description: `Only ${item.currentQuantity} available`, variant: "destructive" });
-                              return;
-                            }
-                            const exists = orderItems.find((oi) => oi.itemId === item._id);
-                            if (exists) {
-                              setOrderItems((prev) => prev.map((oi) => oi.itemId === item._id ? { ...oi, qty: oi.qty + itemQty, lineTotal: (oi.qty + itemQty) * oi.discountedUnitPrice } : oi));
-                            } else {
-                              setOrderItems((prev) => [...prev, { itemId: item._id, itemName: item.itemName, qty: itemQty, originalUnitPrice: item.unitPrice, discountedUnitPrice: item.unitPrice, discountApplied: false, offerName: "", lineTotal: itemQty * item.unitPrice }]);
-                            }
-                            setSelectedItemId("");
-                            setItemSearch("");
-                            setItemQty(1);
-                          }}
-                          data-testid={`option-order-item-${it._id}`}>
-                          <span>{it.itemName}</span>
-                          <span className="text-muted-foreground text-xs">{formatCurrency(it.unitPrice)} · {it.currentQuantity} avail</span>
-                        </button>
-                      ))}
+                    <div className="absolute top-full left-0 right-0 z-50 bg-popover border rounded-md shadow-lg max-h-72 overflow-y-auto mt-1">
+                      {filteredItems.slice(0, 12).map((it) => {
+                        const outOfStock = it.currentQuantity <= 0;
+                        const insufficient = !outOfStock && itemQty > it.currentQuantity;
+
+                        // Fire a notification to admins + inventory managers
+                        // asking them to restock this item.
+                        const requestRestock = async () => {
+                          try {
+                            await apiRequest("POST", "/api/inventory/notify-restock", {
+                              itemId: it._id,
+                              itemName: it.itemName,
+                              needed: itemQty,
+                              currentStock: it.currentQuantity,
+                            });
+                            toast({ title: "Restock requested", description: `Admin / IM notified about ${it.itemName}.` });
+                          } catch (e: any) {
+                            toast({ title: "Could not notify", description: e.message, variant: "destructive" });
+                          }
+                        };
+
+                        const addQty = (qty: number) => {
+                          const exists = orderItems.find((oi) => oi.itemId === it._id);
+                          if (exists) {
+                            setOrderItems((prev) => prev.map((oi) => oi.itemId === it._id ? { ...oi, qty: oi.qty + qty, lineTotal: (oi.qty + qty) * oi.discountedUnitPrice } : oi));
+                          } else {
+                            setOrderItems((prev) => [...prev, { itemId: it._id, itemName: it.itemName, qty, originalUnitPrice: it.unitPrice, discountedUnitPrice: it.unitPrice, discountApplied: false, offerName: "", lineTotal: qty * it.unitPrice }]);
+                          }
+                          setSelectedItemId("");
+                          setItemSearch("");
+                          setItemQty(1);
+                        };
+
+                        if (outOfStock) {
+                          return (
+                            <div key={it._id} className="px-3 py-2 border-b last:border-b-0 bg-red-50/40 dark:bg-red-950/20 cursor-not-allowed" data-testid={`option-order-item-${it._id}`}>
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-medium opacity-70">{it.itemName}</p>
+                                  <p className="text-[11px] text-red-600 dark:text-red-400">Out of stock — cannot be added</p>
+                                </div>
+                                <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={(e) => { e.stopPropagation(); requestRestock(); }} data-testid={`button-notify-restock-${it._id}`}>
+                                  Notify Admin / IM
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        if (insufficient) {
+                          return (
+                            <div key={it._id} className="px-3 py-2 border-b last:border-b-0 bg-amber-50/50 dark:bg-amber-950/30" data-testid={`option-order-item-${it._id}`}>
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <button type="button" className="text-sm font-medium hover:underline text-left" onClick={() => addQty(Math.min(itemQty, it.currentQuantity))}>
+                                    {it.itemName}
+                                  </button>
+                                  <p className="text-[11px] text-amber-700 dark:text-amber-300">Only {it.currentQuantity} available (need {itemQty}) — partial release possible</p>
+                                </div>
+                                <div className="flex gap-1 shrink-0">
+                                  <Button type="button" size="sm" variant="outline" className="h-7 text-[11px]" onClick={(e) => { e.stopPropagation(); requestRestock(); }} data-testid={`button-notify-restock-${it._id}`}>
+                                    Notify Admin
+                                  </Button>
+                                  <Button type="button" size="sm" className="h-7 text-[11px]" onClick={(e) => { e.stopPropagation(); if (window.confirm(`Partial release? Reserve ${itemQty} on the order (only ${it.currentQuantity} releasable now — the rest waits for restock).`)) { addQty(itemQty); requestRestock(); } }} data-testid={`button-partial-${it._id}`}>
+                                    Partial Release
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        }
+
+                        return (
+                          <button key={it._id} type="button" className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-accent text-left" onClick={() => addQty(itemQty)} data-testid={`option-order-item-${it._id}`}>
+                            <span>{it.itemName}</span>
+                            <span className="text-muted-foreground text-xs">{formatCurrency(it.unitPrice)} · {it.currentQuantity} avail</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

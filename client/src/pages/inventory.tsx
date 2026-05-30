@@ -14,7 +14,7 @@
  * The original 809-line inventory page is preserved as inventory-legacy.tsx.
  */
 
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -34,6 +34,7 @@ import {
   X,
   Edit2,
   Trash2,
+  CheckCircle2,
 } from "lucide-react";
 import {
   createItemSchema,
@@ -100,7 +101,10 @@ function stockStatus(item: IItem): "Critical" | "Low" | "Normal" {
 }
 
 export default function InventoryPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, isInventoryManager, user } = useAuth();
+  // Anyone with full write rights — admin OR inventory manager — bypasses the
+  // employee request-to-add flow and gets the buttons directly.
+  const canManageInventory = isAdmin || isInventoryManager;
   const { toast } = useToast();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<string>("All");
@@ -111,6 +115,34 @@ export default function InventoryPage() {
   const [editQty, setEditQty] = useState(0);
   const [editCategory, setEditCategory] = useState("");
   const [editSupplier, setEditSupplier] = useState("");
+  // Confirmation dialog shown to employees who click "Add item" without
+  // already having an approved request. Keeps the existing add-dialog
+  // open path intact for admins / IMs.
+  const [showRequestPrompt, setShowRequestPrompt] = useState(false);
+
+  // Has this employee got an approved (un-used) ADD_ITEM grant?
+  const { data: myReqRes } = useQuery<{ success: boolean; data: { requests: any[] } }>({
+    queryKey: ["/api/item-requests", "mine"],
+    queryFn: () => apiRequest("GET", "/api/item-requests").then((r) => r.json()),
+    enabled: !canManageInventory,
+    refetchInterval: 10_000,
+  });
+  const myAddGrant = (myReqRes?.data?.requests || []).find(
+    (r: any) => r.action === "ADD_ITEM" && r.status === "approved",
+  );
+
+  function handleAddItemClick() {
+    if (canManageInventory) {
+      setShowAddDialog(true);
+      return;
+    }
+    if (myAddGrant) {
+      // They have a fresh approval — bypass the prompt and let them add.
+      setShowAddDialog(true);
+      return;
+    }
+    setShowRequestPrompt(true);
+  }
 
   // ── Data ──────────────────────────────────────────────────────────────
   const { data: itemsRes, isLoading } = useQuery<{
@@ -332,15 +364,23 @@ export default function InventoryPage() {
               <Printer className="w-3.5 h-3.5 mr-1.5" />
               Print labels
             </Button>
-            {isAdmin && (
-              <Button size="sm" onClick={() => setShowAddDialog(true)} data-testid="button-add-item">
-                <Plus className="w-3.5 h-3.5 mr-1.5" />
-                Add item
-              </Button>
-            )}
+            <Button
+              size="sm"
+              onClick={() => handleAddItemClick()}
+              data-testid="button-add-item"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              Add item
+            </Button>
           </>
         }
       />
+
+      {/* Employee approval-request widgets — only shown to plain employees */}
+      <EmployeeRequestWidgets canManageInventory={canManageInventory} />
+
+      {/* Admin / IM pending-request inbox — only shown to approvers */}
+      <ApproverRequestInbox canApprove={canManageInventory} />
 
       {/* Hidden file input for admin item-image uploads (grid + table) */}
       <input
@@ -664,6 +704,15 @@ export default function InventoryPage() {
         )}
       </Card>
 
+      {/* Employee request-to-add prompt — shown when employee clicks Add
+          and has no approved grant yet. Confirms intent then files a
+          request with the server. Workflow matches REQUEST.pdf round 4. */}
+      <RequestPromptDialog
+        open={showRequestPrompt}
+        onClose={() => setShowRequestPrompt(false)}
+        action="ADD_ITEM"
+      />
+
       {/* Add item dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
         <DialogContent className="max-w-md">
@@ -880,5 +929,330 @@ function CategoryPill({
     >
       {label}
     </button>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Two-step prompt → file request → live progress.
+function RequestPromptDialog({
+  open,
+  onClose,
+  action,
+}: {
+  open: boolean;
+  onClose: () => void;
+  action: "ADD_ITEM" | "EDIT_STOCK" | "DELETE_ITEM";
+}) {
+  const { toast } = useToast();
+  // Step 0 = ask "do you want to request?"; Step 1 = "request in progress"
+  const [step, setStep] = useState(0);
+  const [createdAt, setCreatedAt] = useState<number | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) {
+      setStep(0);
+      setCreatedAt(null);
+      setRequestId(null);
+    }
+  }, [open]);
+
+  const createMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/item-requests", { action }),
+    onSuccess: async (res: any) => {
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Could not request");
+      setRequestId(json.data.request._id);
+      setCreatedAt(new Date(json.data.request.createdAt).getTime());
+      queryClient.invalidateQueries({ queryKey: ["/api/item-requests"] });
+      setStep(1);
+      toast({
+        title: json.data.alreadyPending ? "You already have a pending request" : "Request sent",
+        description: "Admin / inventory manager will be notified.",
+      });
+    },
+    onError: (err: Error) => toast({ title: "Could not send request", description: err.message, variant: "destructive" }),
+  });
+
+  // Live timer
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (step !== 1) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [step]);
+  const elapsed = createdAt ? Math.floor((Date.now() - createdAt) / 1000) : 0;
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-sm" data-testid="dialog-request-prompt">
+        {step === 0 ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Approval needed</DialogTitle>
+              <DialogDescription>
+                Adding an item requires <strong>Admin / Inventory Manager</strong> verification. Do you want to send a request?
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="ghost" onClick={onClose} data-testid="button-request-no">No</Button>
+              <Button
+                onClick={() => createMutation.mutate()}
+                disabled={createMutation.isPending}
+                data-testid="button-request-yes"
+              >
+                {createMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                Yes, send request
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" /> Request in progress…
+              </DialogTitle>
+              <DialogDescription>
+                Please wait — your request is being reviewed. You'll be notified the moment it's approved.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="text-center py-4">
+              <p className="text-3xl font-mono tabular-nums" data-testid="text-request-elapsed">
+                {elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Elapsed since request</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={onClose} data-testid="button-request-close">Close</Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Employee-facing request widget. Shows a banner with the user's pending /
+// approved / used add-item requests, including a live "waited Xs" counter
+// for pending ones. Approval persists across logout — backend has no TTL.
+function EmployeeRequestWidgets({ canManageInventory }: { canManageInventory: boolean }) {
+  const { toast } = useToast();
+  if (canManageInventory) return null;
+
+  const { data } = useQuery<{ success: boolean; data: { requests: any[] } }>({
+    queryKey: ["/api/item-requests", "mine"],
+    queryFn: () => apiRequest("GET", "/api/item-requests").then((r) => r.json()),
+    refetchInterval: 5_000,
+  });
+
+  const requests = data?.data?.requests || [];
+  const pending = requests.filter((r) => r.status === "pending");
+  const approved = requests.filter((r) => r.status === "approved");
+
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/item-requests/${id}/cancel`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/item-requests"] });
+      toast({ title: "Request cancelled" });
+    },
+  });
+
+  // Live-tick the elapsed counters every second.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (pending.length === 0 && approved.length === 0) return null;
+
+  return (
+    <div className="mb-3 space-y-2">
+      {pending.map((r) => {
+        const sec = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 1000));
+        return (
+          <div
+            key={r._id}
+            className="flex items-center justify-between gap-3 p-3 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200"
+            data-testid={`request-pending-${r._id}`}
+          >
+            <div className="flex items-center gap-2 min-w-0">
+              <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+              <div className="text-sm">
+                <span className="font-semibold">Request in progress…</span>{" "}
+                Waiting for admin / inventory-manager approval to{" "}
+                <span className="font-semibold">
+                  {r.action === "ADD_ITEM" ? "add an item" : r.action === "EDIT_STOCK" ? "edit stock" : "delete an item"}
+                </span>
+                .{" "}
+                <span className="tabular-nums" data-testid={`request-timer-${r._id}`}>
+                  {sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${sec % 60}s`}
+                </span>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs"
+              onClick={() => cancelMutation.mutate(r._id)}
+              data-testid={`button-cancel-request-${r._id}`}
+            >
+              <X className="h-3 w-3 mr-1" /> Close
+            </Button>
+          </div>
+        );
+      })}
+      {approved.map((r) => (
+        <div
+          key={r._id}
+          className="flex items-center gap-2 p-3 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 text-sm"
+          data-testid={`request-approved-${r._id}`}
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
+          <span>
+            <strong>Approved by {r.approvedBy}</strong> — you have a single-use grant to{" "}
+            <strong>{r.action === "ADD_ITEM" ? "add an item" : r.action === "EDIT_STOCK" ? "edit stock" : "delete an item"}</strong>.
+            Use it before the next action.
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Approver inbox — shown only to admins / IMs. Lists pending item requests
+// and exposes Approve / Reject buttons that demand the approver's password.
+function ApproverRequestInbox({ canApprove }: { canApprove: boolean }) {
+  const { toast } = useToast();
+  if (!canApprove) return null;
+
+  const { data } = useQuery<{ success: boolean; data: { requests: any[] } }>({
+    queryKey: ["/api/item-requests", "pending"],
+    queryFn: () => apiRequest("GET", "/api/item-requests?status=pending").then((r) => r.json()),
+    refetchInterval: 5_000,
+  });
+
+  const requests = data?.data?.requests || [];
+
+  const [target, setTarget] = useState<any | null>(null);
+  const [mode, setMode] = useState<"approve" | "reject" | null>(null);
+  const [password, setPassword] = useState("");
+  const [reason, setReason] = useState("");
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/item-requests/${id}/approve`, { password }),
+    onSuccess: async (res: any) => {
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Approve failed");
+      queryClient.invalidateQueries({ queryKey: ["/api/item-requests"] });
+      toast({ title: "Request approved" });
+      setTarget(null);
+      setMode(null);
+      setPassword("");
+    },
+    onError: (err: Error) => toast({ title: "Approve failed", description: err.message, variant: "destructive" }),
+  });
+
+  const rejectMutation = useMutation({
+    mutationFn: (id: string) => apiRequest("POST", `/api/item-requests/${id}/reject`, { password, reason }),
+    onSuccess: async (res: any) => {
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || "Reject failed");
+      queryClient.invalidateQueries({ queryKey: ["/api/item-requests"] });
+      toast({ title: "Request rejected" });
+      setTarget(null);
+      setMode(null);
+      setPassword("");
+      setReason("");
+    },
+    onError: (err: Error) => toast({ title: "Reject failed", description: err.message, variant: "destructive" }),
+  });
+
+  if (requests.length === 0) return null;
+
+  return (
+    <div className="mb-3" data-testid="approver-inbox">
+      <Card>
+        <CardHeader className="py-2.5 px-4 border-b">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-500" /> Pending Item Requests
+            <span className="ml-1 text-xs text-muted-foreground">({requests.length})</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="divide-y">
+            {requests.map((r) => (
+              <div key={r._id} className="flex items-center justify-between gap-3 px-4 py-2.5" data-testid={`pending-request-${r._id}`}>
+                <div className="text-sm">
+                  <p>
+                    <strong>{r.requestedBy}</strong> wants to{" "}
+                    <span className="font-semibold">
+                      {r.action === "ADD_ITEM" ? "add a new item" : r.action === "EDIT_STOCK" ? "edit stock" : "delete an item"}
+                    </span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString("en-PH")} {r.notes && `· ${r.notes}`}</p>
+                </div>
+                <div className="flex gap-2 shrink-0">
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setTarget(r); setMode("reject"); setPassword(""); setReason(""); }} data-testid={`button-reject-${r._id}`}>
+                    Reject
+                  </Button>
+                  <Button size="sm" className="h-7 text-xs" onClick={() => { setTarget(r); setMode("approve"); setPassword(""); }} data-testid={`button-approve-${r._id}`}>
+                    Approve
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!target && !!mode} onOpenChange={(v) => { if (!v) { setTarget(null); setMode(null); setPassword(""); setReason(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {mode === "approve" ? "Approve request" : "Reject request"}
+            </DialogTitle>
+            <DialogDescription>
+              {mode === "approve"
+                ? `Are you sure you approve ${target?.requestedBy} to ${target?.action === "ADD_ITEM" ? "add a new item" : target?.action === "EDIT_STOCK" ? "edit stock" : "delete an item"}? Enter your password to confirm — this is a single-use grant.`
+                : `Reject ${target?.requestedBy}'s request? Optional reason will be sent to them.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {mode === "reject" && (
+              <Input
+                placeholder="Reason (optional)"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                data-testid="input-reject-reason"
+              />
+            )}
+            <Input
+              type="password"
+              placeholder="Your password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              data-testid="input-approver-password"
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => { setTarget(null); setMode(null); setPassword(""); setReason(""); }}>Cancel</Button>
+            {mode === "approve" ? (
+              <Button onClick={() => approveMutation.mutate(target._id)} disabled={!password || approveMutation.isPending} data-testid="button-confirm-approve">
+                {approveMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                Confirm Approve
+              </Button>
+            ) : (
+              <Button variant="destructive" onClick={() => rejectMutation.mutate(target._id)} disabled={!password || rejectMutation.isPending} data-testid="button-confirm-reject">
+                {rejectMutation.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                Confirm Reject
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

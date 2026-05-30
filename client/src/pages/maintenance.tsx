@@ -471,7 +471,7 @@ export default function MaintenancePage() {
                 <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 font-bold text-xs">3</span>
                 <div>
                   <p className="font-medium">Log in with the default admin credentials</p>
-                  <p className="text-muted-foreground text-xs mt-0.5">The new empty database is automatically seeded with a default admin account: <strong>username: admin</strong> / <strong>password: admin123</strong>.</p>
+                  <p className="text-muted-foreground text-xs mt-0.5">The new empty database is automatically seeded with a default admin account: <strong>username: JoapAdmin20Jk</strong> / <strong>password: AdminPriv23#Ds</strong>.</p>
                 </div>
               </li>
               <li className="flex gap-3">

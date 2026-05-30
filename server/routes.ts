@@ -49,7 +49,10 @@ import RequestModel from "./models/Request";
 import Message from "./models/Message";
 import EmployeeProfile from "./models/EmployeeProfile";
 import SiteVisitor from "./models/SiteVisitor";
+import Notification from "./models/Notification";
+import ItemRequest from "./models/ItemRequest";
 import { arima, bucketByDay } from "./lib/arima";
+import { DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD } from "./seed";
 
 // ─── Resend transactional email (auto-backup delivery) ───────────────────────
 // The JSON backup is emailed as an attachment so the owner always has an
@@ -94,6 +97,45 @@ function emitEvent(event: string, data?: any) {
 
 async function logAction(action: string, actor: string, target = "", metadata: Record<string, any> = {}) {
   await SystemLog.create({ action, actor, target, metadata });
+}
+
+/**
+ * Fire-and-forget notification creator. Persists a Notification doc and
+ * emits a socket event so every connected client refetches its bell.
+ * Errors are swallowed — a notification failure must never break the
+ * primary action that triggered it.
+ */
+async function notify(opts: {
+  category: "REQUEST" | "ORDER" | "PAYMENT" | "INVENTORY" | "DELIVERY" | "RESERVATION" | "SYSTEM";
+  title: string;
+  body?: string;
+  link?: string;
+  recipientUsername?: string;
+  recipientRole?: string;
+  createdBy?: string;
+}) {
+  try {
+    const doc = await Notification.create({
+      category: opts.category,
+      title: opts.title,
+      body: opts.body || "",
+      link: opts.link || "",
+      recipientUsername: opts.recipientUsername || "",
+      recipientRole: opts.recipientRole || "",
+      createdBy: opts.createdBy || "system",
+    });
+    emitEvent("NOTIFICATION_NEW", {
+      _id: doc._id.toString(),
+      category: doc.category,
+      title: doc.title,
+      recipientUsername: doc.recipientUsername,
+      recipientRole: doc.recipientRole,
+    });
+    return doc;
+  } catch (err) {
+    console.warn("[notify] failed:", err);
+    return null;
+  }
 }
 
 function ok(res: Response, data: any) {
@@ -457,6 +499,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const orderChannelCounts: Record<string, number> = {};
       orderChannelAgg.forEach((a: any) => { orderChannelCounts[a._id || "unknown"] = a.count; });
 
+      // ── Gross margin (real) ───────────────────────────────────────────────
+      // (revenue − cost-of-goods-sold) ÷ revenue, computed across PAID orders.
+      // COGS approximated as 80% of unitPrice per line (matches the Inventory
+      // table's Cost column). Returns a percentage 0–100; 0 if no revenue yet.
+      const paidOrderItems = await Order.aggregate([
+        { $match: { paymentStatus: "paid" } },
+        { $unwind: "$items" },
+        {
+          $group: {
+            _id: null,
+            revenue: { $sum: "$items.lineTotal" },
+            cost: { $sum: { $multiply: ["$items.originalUnitPrice", "$items.qty", 0.8] } },
+          },
+        },
+      ]);
+      const rev = paidOrderItems[0]?.revenue || 0;
+      const cost = paidOrderItems[0]?.cost || 0;
+      const grossMargin = rev > 0 ? Math.round(((rev - cost) / rev) * 1000) / 10 : 0;
+
       return ok(res, {
         totalOrdersToday,
         completedOrders,
@@ -464,6 +525,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         pendingReleases,
         todayRevenue: todayPayments[0]?.total || 0,
         totalRevenue: allPayments[0]?.total || 0,
+        grossMargin, // live %, 0 when no sales
         activeUsers,
         totalItems,
         criticalStock,
@@ -1035,6 +1097,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const parsed = createItemSchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
 
+      // Employees need an APPROVED ADD_ITEM request to add. Admins and
+      // inventory managers add directly. The grant is single-use: as soon
+      // as the item lands, we flip the request to "used" so they need to
+      // request again for the next one.
+      let grant: any = null;
+      if (req.user!.role === "EMPLOYEE") {
+        grant = await ItemRequest.findOneAndUpdate(
+          { requestedBy: req.user!.username, action: "ADD_ITEM", status: "approved" },
+          { $set: { status: "used", usedAt: new Date() } },
+          { sort: { approvedAt: 1 }, new: true },
+        );
+        if (!grant) {
+          return fail(
+            res,
+            403,
+            "Adding items requires admin / inventory-manager approval. Open Inventory → Request to Add Item to ask for permission.",
+          );
+        }
+      }
+
       const { avgDailyUsage, leadTimeDays, safetyStock } = parsed.data;
       const reorderLevel = Math.ceil((avgDailyUsage * leadTimeDays) + safetyStock);
 
@@ -1051,8 +1133,17 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         });
       }
 
-      await logAction("ITEM_CREATED", req.user!.username, item.itemName);
+      await logAction("ITEM_CREATED", req.user!.username, item.itemName, { grantedBy: grant?.approvedBy });
+      await notify({
+        category: "INVENTORY",
+        title: `New item added: ${item.itemName}`,
+        body: `By ${req.user!.username}. Stock starts at ${item.currentQuantity}.`,
+        link: "/inventory",
+        recipientRole: "ADMIN",
+        createdBy: req.user!.username,
+      });
       emitEvent("INVENTORY_LOG_CREATED");
+      emitEvent("ITEMS_CHANGED");
       return ok(res, item);
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -1297,6 +1388,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const parsed = inventoryLogSchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed");
 
+      // Employees can only edit stock with an approved EDIT_STOCK grant
+      // (single-use). Admins and inventory managers have direct access.
+      let grant: any = null;
+      if (req.user!.role === "EMPLOYEE") {
+        grant = await ItemRequest.findOneAndUpdate(
+          { requestedBy: req.user!.username, action: "EDIT_STOCK", status: "approved" },
+          { $set: { status: "used", usedAt: new Date() } },
+          { sort: { approvedAt: 1 }, new: true },
+        );
+        if (!grant) {
+          return fail(
+            res,
+            403,
+            "Editing stock requires admin / inventory-manager approval. Open Inventory → Request to Edit Stock to ask for permission.",
+          );
+        }
+      }
+
       const item = await Item.findById(parsed.data.itemId);
       if (!item) return fail(res, 404, "Item not found");
 
@@ -1316,8 +1425,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         actor: req.user!.username,
       });
 
+      // If new stock arrives (restock with positive qty), see if any partially
+      // released orders are now fulfilable and notify the team.
+      if (quantityChange > 0) {
+        try {
+          const blockedOrders = await Order.find({
+            fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+            "items.itemId": item._id,
+            "items.pendingQty": { $gt: 0 },
+          })
+            .select("trackingNumber customerName")
+            .lean();
+          for (const o of blockedOrders) {
+            await notify({
+              category: "INVENTORY",
+              title: `Stock arrived for order ${o.trackingNumber}`,
+              body: `${item.itemName} restocked by ${quantityChange}. Customer ${o.customerName} may now be releasable.`,
+              link: `/orders/${o._id}`,
+              recipientRole: "ADMIN",
+              createdBy: req.user!.username,
+            });
+            await notify({
+              category: "INVENTORY",
+              title: `Stock arrived for order ${o.trackingNumber}`,
+              body: `${item.itemName} restocked by ${quantityChange}. May now be releasable.`,
+              link: `/orders/${o._id}`,
+              recipientRole: "EMPLOYEE",
+              createdBy: req.user!.username,
+            });
+          }
+        } catch {}
+      }
+
       await logAction("INVENTORY_LOG_CREATED", req.user!.username, item.itemName, { type: parsed.data.type, quantity: quantityChange });
       emitEvent("INVENTORY_LOG_CREATED", { itemId: item._id });
+      emitEvent("ITEMS_CHANGED");
       return ok(res, logEntry);
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -1833,11 +1975,22 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const addressData = parsed.data.address;
       const hasAddress = addressData && Object.values(addressData).some((v) => v && v.trim() !== "");
 
+      // Compute per-line released/pending tallies for partial-release tracking.
+      // On creation everything starts pending; release routes will decrement.
+      const itemsWithRelease = processedItems.map((p) => ({ ...p, releasedQty: 0, pendingQty: p.qty }));
+
+      // Walk-in non-reservation orders are settled at the counter. The order's
+      // paymentStatus is already "paid" at this point — record the payment +
+      // ledger entries here so the dashboard/billing/accounting actually move
+      // the second the order is created (previously revenue only moved when
+      // /api/billing/pay ran, so walk-in paid orders left every metric at zero).
+      const walkInPaid = parsed.data.paymentStatus === "paid";
+
       const order = await Order.create({
         trackingNumber,
         ...(parsed.data.customerId ? { customerId: parsed.data.customerId } : {}),
         customerName: parsed.data.customerName,
-        items: processedItems,
+        items: itemsWithRelease,
         totalAmount: Math.round(totalAmount * 100) / 100,
         subtotal: Math.round(subtotal * 100) / 100,
         deliveryFee: parsed.data.deliveryFee || 0,
@@ -1850,21 +2003,56 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         createdBy: req.user!.username,
         notes: parsed.data.notes,
         scheduledDate: parsed.data.scheduledDate ? new Date(parsed.data.scheduledDate) : undefined,
-        currentStatus: parsed.data.fulfillmentStatus,
+        currentStatus: walkInPaid ? "Pending Release" : parsed.data.fulfillmentStatus,
         statusHistory: [{ status: parsed.data.fulfillmentStatus, timestamp: new Date(), actor: req.user!.username, note: "Order created" }],
         ...(hasAddress ? { address: addressData } : {}),
       });
 
-      for (const oi of processedItems) {
-        const item = await Item.findById(oi.itemId);
-        if (item) {
-          item.currentQuantity = Math.max(0, item.currentQuantity - oi.qty);
-          await item.save();
-          await InventoryLog.create({
-            itemId: item._id, itemName: item.itemName, type: "deduction",
-            quantity: -oi.qty, reason: `Order ${trackingNumber}`, actor: req.user!.username,
-          });
-        }
+      // Stock model: on creation we DO NOT subtract from `currentQuantity`. The
+      // physical stock is only debited when an order is released (so partial
+      // releases can leave a balance). Keeping inventory untouched here also
+      // means the "release stock" button can correctly say "have X, need Y".
+      // We still write an inventory log entry (type "reservation") so audit
+      // trails stay complete.
+      for (const oi of itemsWithRelease) {
+        await InventoryLog.create({
+          itemId: oi.itemId,
+          itemName: oi.itemName,
+          type: "adjustment",
+          quantity: 0,
+          reason: `Reserved by order ${trackingNumber} (qty ${oi.qty})`,
+          actor: req.user!.username,
+        });
+      }
+
+      // Walk-in PAID: book the payment + ledger NOW so dashboard reflects it.
+      if (walkInPaid) {
+        const txn = generateTransactionCode();
+        const payment = await BillingPayment.create({
+          orderId: order._id.toString(),
+          paymentMethod: parsed.data.paymentMethod,
+          gcashNumber: "",
+          gcashReferenceNumber: txn,
+          amountPaid: order.totalAmount,
+          paymentDate: new Date(),
+          proofNote: "Auto-recorded at order creation (walk-in paid)",
+          loggedBy: req.user!.username,
+          transactionCode: txn,
+          isFullPayment: true,
+        });
+        const accountName = "Cash/GCash";
+        await GeneralLedgerEntry.create([
+          { date: new Date(), accountName, debit: order.totalAmount, credit: 0, description: `Payment for walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+          { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: order.totalAmount, description: `Revenue from walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+        ]);
+        await Promise.all([
+          AccountingAccount.findOneAndUpdate({ accountName }, { $inc: { balance: order.totalAmount } }, { upsert: true }),
+          AccountingAccount.findOneAndUpdate({ accountName: "Sales Revenue" }, { $inc: { balance: order.totalAmount } }, { upsert: true }),
+        ]);
+        order.statusHistory.push({ status: "Paid", timestamp: new Date(), actor: req.user!.username, note: `₱${order.totalAmount.toFixed(2)} received at counter · Txn: ${txn}` });
+        await order.save();
+        emitEvent("PAYMENT_LOGGED", { orderId: order._id, transactionCode: txn });
+        emitEvent("LEDGER_POSTED");
       }
 
       for (const [offerId, { totalSavings: savings }] of Array.from(offersUsed)) {
@@ -1874,7 +2062,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
 
       await logAction("ORDER_CREATED", req.user!.username, order.trackingNumber, { totalAmount, totalSavings });
+
+      // Notification to admins + employees so the floor team picks it up.
+      await notify({
+        category: "ORDER",
+        title: `New order ${order.trackingNumber}`,
+        body: `${order.customerName} · ₱${order.totalAmount.toFixed(2)} · ${parsed.data.orderType.replace("_", " ")}`,
+        link: `/orders/${order._id}`,
+        recipientRole: "ADMIN",
+        createdBy: req.user!.username,
+      });
+      await notify({
+        category: "ORDER",
+        title: `New order ${order.trackingNumber}`,
+        body: `${order.customerName} · ₱${order.totalAmount.toFixed(2)}`,
+        link: `/orders/${order._id}`,
+        recipientRole: "EMPLOYEE",
+        createdBy: req.user!.username,
+      });
+
       emitEvent("ORDER_CREATED", { orderId: order._id });
+      emitEvent("DASHBOARD_STATS_UPDATED");
+      emitEvent("INVENTORY_LOG_CREATED");
       return ok(res, { order, totalSavings: Math.round(totalSavings * 100) / 100 });
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -2103,57 +2312,134 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── ORDER RELEASE ──────────────────────────────────────
+  // Release stock for an order — supports PARTIAL release.
+  //  • If every line has enough stock → full release, status becomes "completed".
+  //  • If some lines have less → release whatever's available now; the rest
+  //    stays in `pendingQty` and the order keeps its place in the active
+  //    Orders tab with a "Partial Release" badge. The Release Stock button
+  //    becomes available again whenever new stock comes in.
+  // Inventory Managers may NOT release — only admin / employees.
   app.post("/api/orders/:id/release", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
+      if (req.user!.role === "INVENTORY_MANAGER") {
+        return fail(res, 403, "Inventory managers cannot release orders — that's the floor team's call.");
+      }
       const order = await Order.findById(req.params.id);
       if (!order) return fail(res, 404, "Order not found");
-      if (!["Paid", "Pending Release"].includes(order.currentStatus)) {
-        return fail(res, 400, "Order must be Paid or Pending Release to release items");
+      if (order.currentStatus === "Completed" || order.fulfillmentStatus === "completed") {
+        return fail(res, 400, "Order is already fully released.");
       }
 
-      const insufficientItems: string[] = [];
-      for (const oi of order.items) {
+      let anyReleased = false;
+      let anyPending = false;
+      const releaseSummary: string[] = [];
+      const partialSummary: string[] = [];
+
+      for (const oi of order.items as any[]) {
+        const pending = oi.pendingQty ?? oi.qty ?? 0;
+        if (pending <= 0) continue;
+
         const item = await Item.findById(oi.itemId);
-        const qty = (oi as any).qty ?? (oi as any).quantity ?? 0;
-        if (!item || item.currentQuantity < qty) {
-          insufficientItems.push(`${oi.itemName}: need ${qty}, have ${item?.currentQuantity ?? 0}`);
+        const have = item?.currentQuantity ?? 0;
+        if (!item || have <= 0) {
+          anyPending = true;
+          partialSummary.push(`${oi.itemName}: need ${pending}, have ${have}`);
+          continue;
         }
-      }
-      if (insufficientItems.length > 0) {
-        return fail(res, 400, `Insufficient stock: ${insufficientItems.join("; ")}`);
+        const releaseNow = Math.min(have, pending);
+        item.currentQuantity = have - releaseNow;
+        await item.save();
+        oi.releasedQty = (oi.releasedQty ?? 0) + releaseNow;
+        oi.pendingQty = pending - releaseNow;
+        if (oi.pendingQty > 0) {
+          anyPending = true;
+          partialSummary.push(`${oi.itemName}: released ${releaseNow}/${pending}, still owe ${oi.pendingQty}`);
+        }
+        anyReleased = true;
+        releaseSummary.push(`${oi.itemName} ×${releaseNow}`);
+        await InventoryLog.create({
+          itemId: item._id,
+          itemName: item.itemName,
+          type: "deduction",
+          quantity: -releaseNow,
+          reason: `Released for order ${order.trackingNumber}${pending > releaseNow ? " (partial)" : ""}`,
+          actor: req.user!.username,
+        });
       }
 
-      for (const oi of order.items) {
-        const item = await Item.findById(oi.itemId);
-        const qty = (oi as any).qty ?? (oi as any).quantity ?? 0;
-        if (item) {
-          item.currentQuantity -= qty;
-          await item.save();
-          await InventoryLog.create({
-            itemId: item._id,
-            itemName: item.itemName,
-            type: "deduction",
-            quantity: -qty,
-            reason: `Released for order ${order.trackingNumber}`,
-            actor: req.user!.username,
-          });
-        }
+      if (!anyReleased) {
+        return fail(res, 400, `Nothing to release — stock unchanged.\n${partialSummary.join("\n")}`);
       }
 
+      if (anyPending) {
+        order.currentStatus = "Pending Release";
+        order.fulfillmentStatus = "processing"; // stays in active orders tab
+        order.statusHistory.push({
+          status: "Released",
+          timestamp: new Date(),
+          actor: req.user!.username,
+          note: `Partial release: ${releaseSummary.join(", ")} · still owed: ${partialSummary.join(", ")}`,
+        });
+        order.markModified("items");
+        await order.save();
+        await logAction("ORDER_PARTIAL_RELEASE", req.user!.username, order.trackingNumber, { released: releaseSummary, pending: partialSummary });
+      } else {
+        order.currentStatus = "Completed";
+        order.fulfillmentStatus = "completed";
+        order.completedProcessingAt = new Date();
+        order.statusHistory.push(
+          { status: "Released", timestamp: new Date(), actor: req.user!.username, note: `Full release: ${releaseSummary.join(", ")}` },
+          { status: "Completed", timestamp: new Date(), actor: req.user!.username, note: "Order fulfilled" },
+        );
+        order.markModified("items");
+        await order.save();
+        await logAction("ORDER_RELEASED", req.user!.username, order.trackingNumber);
+      }
+
+      emitEvent("ORDER_RELEASED", { orderId: order._id, partial: anyPending });
+      emitEvent("INVENTORY_LOG_CREATED");
+      emitEvent("DASHBOARD_STATS_UPDATED");
+      return ok(res, {
+        order,
+        partial: anyPending,
+        releasedNow: releaseSummary,
+        stillPending: partialSummary,
+        message: anyPending
+          ? `Partial release recorded. Order stays in Active until stock catches up.`
+          : `Order fully released. Inventory + revenue updated.`,
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Mark order as DELIVERED — only admin / employee (NOT inventory manager).
+  // Once delivered the order is moved to history (fulfillmentStatus="completed").
+  app.post("/api/orders/:id/deliver", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      if (req.user!.role === "INVENTORY_MANAGER") {
+        return fail(res, 403, "Only admin or employees can confirm delivery.");
+      }
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+      const stillPending = (order.items as any[]).some((oi) => (oi.pendingQty ?? 0) > 0);
+      if (stillPending) {
+        return fail(res, 400, "Order still has pending items — release the full quantity before marking delivered.");
+      }
       order.currentStatus = "Completed";
       order.fulfillmentStatus = "completed";
       order.completedProcessingAt = new Date();
-      order.statusHistory.push(
-        { status: "Released", timestamp: new Date(), actor: req.user!.username, note: "Items released from inventory" },
-        { status: "Completed", timestamp: new Date(), actor: req.user!.username, note: "Order fulfilled" }
-      );
+      order.statusHistory.push({
+        status: "Completed",
+        timestamp: new Date(),
+        actor: req.user!.username,
+        note: `Delivery confirmed${req.body?.note ? `: ${req.body.note}` : ""}`,
+      });
       await order.save();
-
-      await logAction("ORDER_RELEASED", req.user!.username, order.trackingNumber);
+      await logAction("ORDER_DELIVERED", req.user!.username, order.trackingNumber, { note: req.body?.note });
       emitEvent("ORDER_RELEASED", { orderId: order._id });
-      emitEvent("INVENTORY_LOG_CREATED");
       emitEvent("DASHBOARD_STATS_UPDATED");
-      return ok(res, { order, message: "Order released. Inventory updated. Revenue updated." });
+      return ok(res, { order, message: "Marked delivered, moved to History." });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -2568,6 +2854,278 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Restock request — fired by Create Order when employees try to add an
+  // item that's out of stock or only partially available. Notifies all
+  // admins + inventory managers so they can react.
+  app.post("/api/inventory/notify-restock", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { itemId, itemName, needed, currentStock } = req.body || {};
+      if (!itemName) return fail(res, 400, "Item name required.");
+      const body = `${req.user!.username} needs ${needed ?? "?"} of "${itemName}" (only ${currentStock ?? "?"} in stock).`;
+      await notify({
+        category: "INVENTORY",
+        title: `Restock requested: ${itemName}`,
+        body,
+        link: `/inventory`,
+        recipientRole: "ADMIN",
+        createdBy: req.user!.username,
+      });
+      await notify({
+        category: "INVENTORY",
+        title: `Restock requested: ${itemName}`,
+        body,
+        link: `/inventory`,
+        recipientRole: "INVENTORY_MANAGER",
+        createdBy: req.user!.username,
+      });
+      await logAction("RESTOCK_REQUESTED", req.user!.username, itemName, { itemId, needed, currentStock });
+      return ok(res, { sent: true });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── NOTIFICATIONS ─────────────────────────────────────────────
+  // Every logged-in user sees: notifs targeted at their username, notifs
+  // targeted at their role, and global broadcasts (no recipient at all).
+  app.get("/api/notifications", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const username = req.user!.username;
+      const role = req.user!.role;
+      const docs = await Notification.find({
+        $or: [
+          { recipientUsername: username },
+          { recipientRole: role },
+          { recipientUsername: "", recipientRole: "" },
+        ],
+      })
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .lean();
+      const enriched = docs.map((d: any) => ({ ...d, isRead: (d.readBy || []).includes(username) }));
+      const unreadCount = enriched.filter((d) => !d.isRead).length;
+      return ok(res, { notifications: enriched, unreadCount });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Mark a single notification read (push username into readBy).
+  app.post("/api/notifications/:id/read", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const username = req.user!.username;
+      await Notification.findByIdAndUpdate(req.params.id, { $addToSet: { readBy: username } });
+      return ok(res, { ok: true });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Mark every visible notification read for this user.
+  app.post("/api/notifications/read-all", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const username = req.user!.username;
+      const role = req.user!.role;
+      await Notification.updateMany(
+        {
+          $or: [
+            { recipientUsername: username },
+            { recipientRole: role },
+            { recipientUsername: "", recipientRole: "" },
+          ],
+          readBy: { $ne: username },
+        },
+        { $addToSet: { readBy: username } },
+      );
+      return ok(res, { ok: true });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── ITEM REQUESTS (employee → admin/IM approval) ─────────────
+  // Employees create a pending request when they want to add or edit stock.
+  // Approval needs the approver's password; the grant is single-use and
+  // consumed when the underlying create/update endpoint runs.
+
+  // Create a new request (employee).
+  app.post("/api/item-requests", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      if (req.user!.role === "ADMIN" || req.user!.role === "INVENTORY_MANAGER") {
+        return fail(res, 400, "Admins and inventory managers do not need to request — you have direct access.");
+      }
+      const { action, payload, notes } = req.body as {
+        action?: string;
+        payload?: Record<string, any>;
+        notes?: string;
+      };
+      if (!action || !["ADD_ITEM", "EDIT_STOCK", "DELETE_ITEM"].includes(action)) {
+        return fail(res, 400, "Invalid action — must be ADD_ITEM, EDIT_STOCK, or DELETE_ITEM");
+      }
+      // Block duplicates: one pending request of the same action per user.
+      const existing = await ItemRequest.findOne({
+        requestedBy: req.user!.username,
+        action,
+        status: "pending",
+      });
+      if (existing) {
+        return ok(res, { request: existing, alreadyPending: true });
+      }
+      const reqDoc = await ItemRequest.create({
+        requestedBy: req.user!.username,
+        action,
+        payload: payload || {},
+        notes: notes || "",
+      });
+      await notify({
+        category: "REQUEST",
+        title: `${req.user!.username} wants to ${action === "ADD_ITEM" ? "add a new item" : action === "EDIT_STOCK" ? "edit stock" : "delete an item"}`,
+        body: notes || "Awaiting approval. Open Inventory → Pending Requests to review.",
+        link: "/inventory",
+        recipientRole: "ADMIN",
+        createdBy: req.user!.username,
+      });
+      await notify({
+        category: "REQUEST",
+        title: `${req.user!.username} wants to ${action === "ADD_ITEM" ? "add a new item" : action === "EDIT_STOCK" ? "edit stock" : "delete an item"}`,
+        body: notes || "Awaiting approval. Open Inventory → Pending Requests to review.",
+        link: "/inventory",
+        recipientRole: "INVENTORY_MANAGER",
+        createdBy: req.user!.username,
+      });
+      emitEvent("ITEM_REQUEST_CREATED", { requestId: reqDoc._id });
+      return ok(res, { request: reqDoc, alreadyPending: false });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // List requests. Employees see their own; admins/IMs see everything.
+  app.get("/api/item-requests", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const username = req.user!.username;
+      const role = req.user!.role;
+      const status = (req.query.status as string) || "";
+      const filter: any = {};
+      if (status) filter.status = status;
+      if (role !== "ADMIN" && role !== "INVENTORY_MANAGER") {
+        filter.requestedBy = username;
+      }
+      const requests = await ItemRequest.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+      return ok(res, { requests });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Race-safe approval. Requires the approver's password. The atomic
+  // findOneAndUpdate guarantees only one approver can flip a pending
+  // request to approved — duplicate approvers get a 409.
+  app.post("/api/item-requests/:id/approve", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const role = req.user!.role;
+      if (role !== "ADMIN" && role !== "INVENTORY_MANAGER") {
+        return fail(res, 403, "Only admin or inventory manager can approve requests.");
+      }
+      const { password } = req.body as { password?: string };
+      if (!password) return fail(res, 400, "Your password is required to approve.");
+      const approver = await User.findById(req.user!._id).select("+password");
+      const valid = approver && (await bcrypt.compare(password, (approver as any).password));
+      if (!valid) return fail(res, 401, "Incorrect password.");
+
+      const updated = await ItemRequest.findOneAndUpdate(
+        { _id: req.params.id, status: "pending" },
+        {
+          $set: {
+            status: "approved",
+            approvedBy: req.user!.username,
+            approvedAt: new Date(),
+          },
+        },
+        { new: true },
+      );
+      if (!updated) {
+        return fail(res, 409, "This request is no longer pending — somebody else already handled it.");
+      }
+      await notify({
+        category: "REQUEST",
+        title: `Your request was approved by ${req.user!.username}`,
+        body: `You can now ${updated.action === "ADD_ITEM" ? "add a new item" : updated.action === "EDIT_STOCK" ? "edit stock" : "delete an item"} once. To do it again you'll need to request again.`,
+        link: "/inventory",
+        recipientUsername: updated.requestedBy,
+        createdBy: req.user!.username,
+      });
+      await logAction("ITEM_REQUEST_APPROVED", req.user!.username, updated.requestedBy, { action: updated.action, requestId: updated._id });
+      emitEvent("ITEM_REQUEST_UPDATED", { requestId: updated._id, status: "approved" });
+      return ok(res, { request: updated });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Reject a pending request.
+  app.post("/api/item-requests/:id/reject", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const role = req.user!.role;
+      if (role !== "ADMIN" && role !== "INVENTORY_MANAGER") {
+        return fail(res, 403, "Only admin or inventory manager can reject requests.");
+      }
+      const { reason, password } = req.body as { reason?: string; password?: string };
+      if (!password) return fail(res, 400, "Your password is required to reject.");
+      const approver = await User.findById(req.user!._id).select("+password");
+      const valid = approver && (await bcrypt.compare(password, (approver as any).password));
+      if (!valid) return fail(res, 401, "Incorrect password.");
+
+      const updated = await ItemRequest.findOneAndUpdate(
+        { _id: req.params.id, status: "pending" },
+        {
+          $set: {
+            status: "rejected",
+            rejectedBy: req.user!.username,
+            rejectedAt: new Date(),
+            rejectionReason: reason || "",
+          },
+        },
+        { new: true },
+      );
+      if (!updated) return fail(res, 409, "This request is no longer pending.");
+      await notify({
+        category: "REQUEST",
+        title: `Your request was rejected by ${req.user!.username}`,
+        body: reason || "No reason given.",
+        link: "/inventory",
+        recipientUsername: updated.requestedBy,
+        createdBy: req.user!.username,
+      });
+      await logAction("ITEM_REQUEST_REJECTED", req.user!.username, updated.requestedBy, { reason, requestId: updated._id });
+      emitEvent("ITEM_REQUEST_UPDATED", { requestId: updated._id, status: "rejected" });
+      return ok(res, { request: updated });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Requester can cancel their own pending request (e.g. they changed their
+  // mind while waiting).
+  app.post("/api/item-requests/:id/cancel", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const reqDoc = await ItemRequest.findById(req.params.id);
+      if (!reqDoc) return fail(res, 404, "Request not found.");
+      if (reqDoc.requestedBy !== req.user!.username) {
+        return fail(res, 403, "You can only cancel your own request.");
+      }
+      if (reqDoc.status !== "pending") {
+        return fail(res, 400, "Only pending requests can be cancelled.");
+      }
+      reqDoc.status = "cancelled";
+      await reqDoc.save();
+      emitEvent("ITEM_REQUEST_UPDATED", { requestId: reqDoc._id, status: "cancelled" });
+      return ok(res, { request: reqDoc });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   // ─── MAINTENANCE (backup/restore) ──────────────────────
   app.get("/api/maintenance/backup", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
@@ -2968,6 +3526,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         SiteVisitor.deleteMany({}),
         Settings.deleteMany({}),
         User.deleteMany({}),
+        Notification.deleteMany({}),
+        ItemRequest.deleteMany({}),
       ]);
 
       const uploadFiles = fs.readdirSync(UPLOADS_DIR);
@@ -2980,15 +3540,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       });
 
       // Re-seed only a minimal baseline so the system isn't bricked: a single
-      // default admin (admin / admin123) + a fresh Settings doc. Everything else
-      // (inventory, offers, employees, customers) is left empty to repopulate
-      // manually or by uploading an old JSON backup.
-      const adminPassword = await bcrypt.hash("admin123", 10);
-      await User.create({ username: "admin", password: adminPassword, role: "ADMIN", isActive: true });
+      // default admin (JoapAdmin20Jk / AdminPriv23#Ds) + a fresh Settings doc.
+      // Everything else (inventory, offers, employees, customers) is left empty
+      // to repopulate manually or by uploading an old JSON backup.
+      const adminPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
+      await User.create({ username: DEFAULT_ADMIN_USERNAME, password: adminPassword, role: "ADMIN", isActive: true });
       await Settings.create({});
 
-      await logAction("SYSTEM_WIPE", req.user!.username, "", { action: "complete_wipe", reseeded: "admin/admin123" });
-      return ok(res, { message: "All data wiped. A default admin (admin / admin123) was recreated so you can log back in and repopulate." });
+      await logAction("SYSTEM_WIPE", req.user!.username, "", { action: "complete_wipe", reseeded: `${DEFAULT_ADMIN_USERNAME}/${DEFAULT_ADMIN_PASSWORD}` });
+      return ok(res, { message: `All data wiped. A default admin (${DEFAULT_ADMIN_USERNAME} / ${DEFAULT_ADMIN_PASSWORD}) was recreated so you can log back in and repopulate.` });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

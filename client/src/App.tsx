@@ -13,6 +13,7 @@ import { Loader2, LogOut, Sun, Moon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { LiveClock } from "@/components/live-clock";
+import { NotificationBell } from "@/components/notification-bell";
 import { getTweaks, setDark, THEME_EVENT } from "@/lib/theme";
 import {
   AlertDialog,
@@ -96,12 +97,15 @@ function AdminRoute({ component: Component }: { component: React.ComponentType }
 function Router() {
   const { isInventoryManager } = useAuth();
 
-  // Inventory managers are scoped to inventory only — everything else redirects
-  // to /inventory. They land there on login as well.
+  // Inventory managers are scoped to inventory + their own personal
+  // preferences. They can see /inventory, /settings (own appearance/calc/tts
+  // — admin-only settings sections are hidden inside the page itself), and
+  // the standard profile/help/about. Everything else redirects to /inventory.
   if (isInventoryManager) {
     return (
       <Switch>
         <Route path="/inventory" component={InventoryPage} />
+        <Route path="/settings" component={SettingsPage} />
         <Route path="/profile" component={ProfilePage} />
         <Route path="/help" component={HelpPage} />
         <Route path="/about" component={AboutPage} />
@@ -200,6 +204,7 @@ function AuthenticatedLayout() {
             <Breadcrumbs />
             <div className="flex-1" />
             <LiveClock />
+            <NotificationBell />
             <ThemeToggle />
             <span className="text-sm text-muted-foreground hidden md:inline pl-2 border-l border-border" data-testid="text-header-user">
               {user?.username}

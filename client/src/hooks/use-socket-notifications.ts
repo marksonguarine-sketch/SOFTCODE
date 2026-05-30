@@ -134,7 +134,32 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
     // ── Inventory log created ─────────────────────────────────────────────────
     socket.on("INVENTORY_LOG_CREATED", () => {
       queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items/all"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+    });
+
+    // ── Items collection changed (add/edit/delete) — push to every session ──
+    socket.on("ITEMS_CHANGED", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items/all"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+    });
+
+    // ── Item-request lifecycle ────────────────────────────────────────────────
+    socket.on("ITEM_REQUEST_CREATED", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/item-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    });
+    socket.on("ITEM_REQUEST_UPDATED", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/item-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+    });
+
+    // ── Notifications — refetch bell + counts ─────────────────────────────────
+    socket.on("NOTIFICATION_NEW", () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
     });
 
     return () => {

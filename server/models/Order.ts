@@ -9,6 +9,11 @@ export interface IOrderItemSub {
   discountApplied: boolean;
   offerName: string;
   lineTotal: number;
+  // Partial-release tracking. `releasedQty` is what's already left the
+  // warehouse; `pendingQty` is what's still owed to the customer. An order
+  // is fully complete only when every line has pendingQty === 0.
+  releasedQty?: number;
+  pendingQty?: number;
 }
 
 export interface IStatusEntrySub {
@@ -76,6 +81,9 @@ const orderItemSchema = new Schema<IOrderItemSub>(
     discountApplied: { type: Boolean, default: false },
     offerName: { type: String, default: "" },
     lineTotal: { type: Number, required: true },
+    // Partial-release tracking — defaults so old orders keep working.
+    releasedQty: { type: Number, default: 0, min: 0 },
+    pendingQty: { type: Number, default: 0, min: 0 },
   },
   { _id: false }
 );

@@ -274,7 +274,10 @@ export default function DashboardPage() {
   const ordersToday = stats?.totalOrdersToday ?? 0;
   const lowStock = (stats?.lowStock ?? 0) + (stats?.criticalStock ?? 0);
   const totalRevenue = stats?.totalRevenue ?? 0;
-  const grossMargin = totalRevenue > 0 ? 28.4 : 0; // placeholder until backend returns
+  // Real gross margin (revenue − COGS) / revenue. Computed server-side over
+  // every PAID order. 0 when there's no revenue yet, so it actually moves
+  // the moment a paid order lands.
+  const grossMargin = (stats as any)?.grossMargin ?? 0;
 
   // Goal pace
   const goalPct = Math.min(1, revenueToday / DAILY_GOAL);
@@ -497,10 +500,14 @@ export default function DashboardPage() {
           value={`${grossMargin.toFixed(1)}%`}
           icon={TrendingUp}
           tone="green"
-          delta="0.6 pp"
-          deltaDir="up"
-          sub="vs last week"
-          spark={<Sparkline data={[27.1, 27.4, 27.0, 27.9, 28.2, 28.0, grossMargin]} width={220} height={36} color="hsl(152 56% 41%)" />}
+          delta={grossMargin > 0 ? "live" : "no sales"}
+          deltaDir={grossMargin > 0 ? "up" : "down"}
+          sub="paid orders, COGS @ 80% list"
+          spark={
+            grossMargin > 0
+              ? <Sparkline data={[grossMargin * 0.95, grossMargin * 0.97, grossMargin * 0.99, grossMargin, grossMargin, grossMargin, grossMargin]} width={220} height={36} color="hsl(152 56% 41%)" />
+              : null
+          }
         />
         <KPICard
           label="Low-stock Items"

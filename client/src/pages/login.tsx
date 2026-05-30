@@ -124,9 +124,9 @@ export default function LoginPage() {
             order, item, and peso.
           </h2>
           <p className="text-slate-400 text-[14px] leading-relaxed">
-            for testing purpose only: account: admin password: admin123
+            for testing purpose only: account: <strong>JoapAdmin20Jk</strong> password: <strong>AdminPriv23#Ds</strong>
             <br></br>
-            account: john password: john123
+            account: <strong>john</strong> password: <strong>john123</strong>
           </p>
 
           {/* Mini metrics — live from server */}

@@ -782,16 +782,40 @@ export default function OrderDetailPage() {
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/orders/${orderId}/release`);
       const json = await res.json();
-      if (!res.ok) throw new Error(json?.message || "Release failed");
+      if (!res.ok) throw new Error(json?.error || json?.message || "Release failed");
+      return json;
+    },
+    onSuccess: (json: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/items"] });
+      toast({
+        title: json?.data?.partial ? "Partial release recorded" : "Items released — order completed!",
+        description: json?.data?.partial
+          ? "Order stays in Active until stock catches up."
+          : "Inventory + revenue updated.",
+      });
+    },
+    onError: (err: Error) => toast({ title: "Release failed", description: err.message, variant: "destructive" }),
+  });
+
+  // Mark this order as delivered. Admin / Employee only (not Inventory
+  // Manager). Once delivered the order leaves Active and moves to History.
+  const deliverMutation = useMutation({
+    mutationFn: async (note: string) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/deliver`, { note });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || json?.message || "Delivery confirmation failed");
       return json;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
       queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
-      toast({ title: "Items released — order is now Completed!" });
+      toast({ title: "Marked delivered", description: "Order moved to History." });
     },
-    onError: (err: Error) => toast({ title: "Release failed", description: err.message, variant: "destructive" }),
+    onError: (err: Error) => toast({ title: "Delivery confirmation failed", description: err.message, variant: "destructive" }),
   });
 
   const takeoverMutation = useMutation({
