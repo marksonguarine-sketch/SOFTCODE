@@ -669,10 +669,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           { $match: { createdAt: { $gte: range.start } } },
           { $group: { _id: "$sourceChannel", count: { $sum: 1 } } },
         ]),
+        // Top-items aggregation. PREVIOUSLY this read $items.quantity +
+        // $items.unitPrice — neither of which exist on the IOrderItem
+        // sub-document (real fields are `qty` and `originalUnitPrice`/
+        // `discountedUnitPrice`). Result: every row came back with totalQty=0,
+        // which is why the dashboard's "Top items today" rail always showed
+        // a flat zero. Fixed to use the actual schema fields.
         Order.aggregate([
-          { $match: { createdAt: { $gte: range.start } } },
+          { $match: { createdAt: { $gte: range.start }, fulfillmentStatus: { $ne: "cancelled" } } },
           { $unwind: "$items" },
-          { $group: { _id: { itemId: "$items.itemId", itemName: "$items.itemName" }, totalQty: { $sum: "$items.quantity" }, totalRevenue: { $sum: "$items.lineTotal" }, unitPrice: { $first: "$items.unitPrice" } } },
+          {
+            $group: {
+              _id: { itemId: "$items.itemId", itemName: "$items.itemName" },
+              totalQty: { $sum: "$items.qty" },
+              totalRevenue: { $sum: "$items.lineTotal" },
+              unitPrice: { $first: "$items.originalUnitPrice" },
+            },
+          },
           { $sort: { totalQty: -1 } },
           { $limit: 5 },
         ]),
@@ -1150,15 +1163,119 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // Full inventory edit. The previous version only accepted `unitPrice`,
+  // which is why "i tried changing the Category cement / Supplier nestea /
+  // Unit price 899 / Current stock etc as admin nothing applied". Now we
+  // accept every editable field, write a proper InventoryLog when the qty
+  // changes, and emit the broad ITEMS_CHANGED socket so every open client
+  // refetches their inventory grid + dashboard KPIs.
   app.patch("/api/items/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-      const { unitPrice } = req.body;
-      if (unitPrice !== undefined && unitPrice < 0) return fail(res, 400, "Price cannot be negative");
-      const item = await Item.findByIdAndUpdate(req.params.id, { unitPrice }, { new: true });
+      if (req.user!.role === "EMPLOYEE") {
+        return fail(res, 403, "Only admin or inventory manager can edit items.");
+      }
+      const item = await Item.findById(req.params.id);
       if (!item) return fail(res, 404, "Item not found");
-      await logAction("ITEM_PRICE_ADJUSTED", req.user!.username, item.itemName, { unitPrice });
+
+      const updates: Record<string, any> = {};
+      const before = {
+        itemName: item.itemName,
+        category: item.category,
+        supplierName: (item as any).supplierName,
+        unitPrice: item.unitPrice,
+        currentQuantity: item.currentQuantity,
+        reorderLevel: item.reorderLevel,
+      };
+
+      const {
+        itemName,
+        category,
+        supplierName,
+        unitPrice,
+        currentQuantity,
+        reorderLevel,
+        avgDailyUsage,
+        leadTimeDays,
+        safetyStock,
+      } = req.body || {};
+
+      if (typeof itemName === "string" && itemName.trim()) updates.itemName = itemName.trim();
+      if (typeof category === "string" && category.trim()) updates.category = category.trim();
+      if (typeof supplierName === "string") updates.supplierName = supplierName.trim();
+      if (typeof unitPrice === "number") {
+        if (unitPrice < 0) return fail(res, 400, "Price cannot be negative");
+        updates.unitPrice = unitPrice;
+      }
+      if (typeof currentQuantity === "number") {
+        if (currentQuantity < 0) return fail(res, 400, "Current quantity cannot be negative");
+        updates.currentQuantity = Math.floor(currentQuantity);
+      }
+      if (typeof reorderLevel === "number" && reorderLevel >= 0) updates.reorderLevel = Math.floor(reorderLevel);
+      // Reorder formula: avg daily × lead days + safety. Only recompute when
+      // the caller actually changed those inputs.
+      if (typeof avgDailyUsage === "number" || typeof leadTimeDays === "number" || typeof safetyStock === "number") {
+        const a = typeof avgDailyUsage === "number" ? avgDailyUsage : (item as any).avgDailyUsage || 0;
+        const l = typeof leadTimeDays === "number" ? leadTimeDays : (item as any).leadTimeDays || 0;
+        const s = typeof safetyStock === "number" ? safetyStock : (item as any).safetyStock || 0;
+        updates.reorderLevel = Math.ceil(a * l + s);
+        if (typeof avgDailyUsage === "number") updates.avgDailyUsage = avgDailyUsage;
+        if (typeof leadTimeDays === "number") updates.leadTimeDays = leadTimeDays;
+        if (typeof safetyStock === "number") updates.safetyStock = safetyStock;
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return fail(res, 400, "Nothing to update.");
+      }
+
+      const updated = await Item.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true });
+      if (!updated) return fail(res, 404, "Item not found");
+
+      // Log a stock adjustment when quantity changed manually.
+      if (updates.currentQuantity !== undefined && updates.currentQuantity !== before.currentQuantity) {
+        const delta = updates.currentQuantity - before.currentQuantity;
+        await InventoryLog.create({
+          itemId: updated._id,
+          itemName: updated.itemName,
+          type: delta >= 0 ? "restock" : "deduction",
+          quantity: delta,
+          reason: `Manual adjustment by ${req.user!.username} (was ${before.currentQuantity}, now ${updates.currentQuantity})`,
+          actor: req.user!.username,
+        });
+      }
+
+      await logAction("ITEM_UPDATED", req.user!.username, updated.itemName, {
+        before,
+        after: { ...before, ...updates },
+        fields: Object.keys(updates),
+      });
       emitEvent("INVENTORY_LOG_CREATED");
-      return ok(res, item);
+      emitEvent("ITEMS_CHANGED");
+      return ok(res, updated);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Delete an item — admin / IM only. Refuses if the item is referenced
+  // by any non-cancelled order.
+  app.delete("/api/items/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      if (req.user!.role === "EMPLOYEE") {
+        return fail(res, 403, "Only admin or inventory manager can delete items.");
+      }
+      const item = await Item.findById(req.params.id);
+      if (!item) return fail(res, 404, "Item not found");
+
+      const inUse = await Order.exists({
+        "items.itemId": item._id,
+        fulfillmentStatus: { $nin: ["cancelled"] },
+      });
+      if (inUse) return fail(res, 400, "Cannot delete — item appears in active orders.");
+
+      await Item.findByIdAndDelete(req.params.id);
+      await logAction("ITEM_DELETED", req.user!.username, item.itemName);
+      emitEvent("ITEMS_CHANGED");
+      return ok(res, { deleted: item.itemName });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -1866,6 +1983,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const users = await User.find({ isActive: true }).select("username role").sort({ role: 1, username: 1 }).lean();
       return ok(res, users);
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Currently-online users — anyone with an active session in the last 15 min.
+  // Drives the dashboard "On shift now" rail. Visible to all logged-in users.
+  app.get("/api/users/online", authMiddleware, async (_req: AuthRequest, res: Response) => {
+    try {
+      const cutoff = new Date(Date.now() - 15 * 60 * 1000);
+      const sessions = await UserSession.find({
+        isActive: true,
+        lastActivity: { $gte: cutoff },
+      })
+        .select("userId lastActivity")
+        .sort({ lastActivity: -1 })
+        .lean();
+      const userIds = Array.from(new Set(sessions.map((s: any) => String(s.userId))));
+      const users = userIds.length
+        ? await User.find({ _id: { $in: userIds }, isActive: true }).select("username role").lean()
+        : [];
+      const lastByUser = new Map<string, Date>();
+      for (const s of sessions as any[]) {
+        const k = String(s.userId);
+        const cur = lastByUser.get(k);
+        if (!cur || new Date(s.lastActivity) > cur) lastByUser.set(k, new Date(s.lastActivity));
+      }
+      const out = users
+        .map((u: any) => ({
+          username: u.username,
+          role: u.role,
+          lastActivity: (lastByUser.get(String(u._id)) || new Date()).toISOString(),
+        }))
+        .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime());
+      return ok(res, { users: out });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

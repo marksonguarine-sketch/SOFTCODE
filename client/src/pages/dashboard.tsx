@@ -62,7 +62,7 @@ import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/page-header";
 import { KPICard } from "@/components/kpi-card";
 import { Sparkline, Ring } from "@/components/charts";
-import { Heatmap, generateSyntheticPeakHours } from "@/components/heatmap";
+// Heatmap component removed — Peak Hours card was dropped per REQUEST.pdf round 5.
 import { cn } from "@/lib/utils";
 
 // ── Types from the existing /api/dashboard/advanced endpoint ────────────────
@@ -325,7 +325,13 @@ export default function DashboardPage() {
     return Array.from(buckets.values()).sort((a, b) => b.spend - a.spend).slice(0, 5);
   }, [ordersRes]);
 
-  // Shift summary — split today's orders by hour
+  // Shift summary — split today's orders by the JOAP shift windows:
+  //   AM = 09:00 – 17:00  (9 AM – 5 PM)
+  //   PM = 17:01 – 21:00  (5:01 PM – 9 PM)
+  // Anything outside those windows is "off-shift" and not counted.
+  // The previous version split at noon which didn't match how the store
+  // actually operates; result was AM showing ₱0 for orders booked
+  // before 12:00.
   const shiftSummary = useMemo(() => {
     const orders = Array.isArray(ordersRes?.data) ? ordersRes!.data : ordersRes?.data?.items || [];
     const todayStart = new Date();
@@ -335,16 +341,29 @@ export default function DashboardPage() {
     for (const o of orders) {
       const d = new Date(o.createdAt);
       if (d < todayStart) continue;
-      const isPM = d.getHours() >= 12;
-      const bucket = isPM ? pm : am;
-      bucket.orders += 1;
-      bucket.revenue += o.totalAmount || 0;
+      const minutes = d.getHours() * 60 + d.getMinutes();
+      // 09:00 (540) … 17:00 (1020) → AM ; 17:01 (1021) … 21:00 (1260) → PM
+      if (minutes >= 540 && minutes <= 1020) {
+        am.orders += 1;
+        am.revenue += o.totalAmount || 0;
+      } else if (minutes >= 1021 && minutes <= 1260) {
+        pm.orders += 1;
+        pm.revenue += o.totalAmount || 0;
+      }
     }
     return { am, pm };
   }, [ordersRes]);
 
-  // Peak hours — synthetic until a real endpoint exists
-  const peakHours = useMemo(() => generateSyntheticPeakHours(42), []);
+  // Who is on shift right now — live list of users with an active session in
+  // the last hour (server already tracks UserSession.lastActivity). Replaces
+  // the static "you are on shift" placeholder.
+  const { data: onlineRes } = useQuery<{ success: boolean; data: { users: Array<{ username: string; role: string; lastActivity: string }> } }>({
+    queryKey: ["/api/users/online"],
+    queryFn: () => apiRequest("GET", "/api/users/online").then((r) => r.json()),
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+  const onShiftUsers = onlineRes?.data?.users || [];
 
   // Greeting
   const greeting = useMemo(() => {
@@ -668,7 +687,7 @@ export default function DashboardPage() {
               <div className="p-3.5 rounded-md bg-amber-50 dark:bg-amber-950/40">
                 <div className="flex items-center justify-between mb-2">
                   <Badge className="bg-primary text-primary-foreground border-transparent text-[10px] px-2 py-0.5">AM</Badge>
-                  <span className="font-mono text-[10.5px] text-muted-foreground">06:00 – 11:59</span>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">09:00 – 17:00</span>
                 </div>
                 <div className="font-mono text-[20px] font-semibold tabular-nums">{peso(shiftSummary.am.revenue)}</div>
                 <div className="text-[11.5px] text-muted-foreground mt-0.5">
@@ -678,7 +697,7 @@ export default function DashboardPage() {
               <div className="p-3.5 rounded-md bg-muted/40 border border-border">
                 <div className="flex items-center justify-between mb-2">
                   <Badge variant="secondary" className="text-[10px] px-2 py-0.5">PM</Badge>
-                  <span className="font-mono text-[10.5px] text-muted-foreground">12:00 – close</span>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">17:01 – 21:00</span>
                 </div>
                 <div className="font-mono text-[20px] font-semibold tabular-nums">{peso(shiftSummary.pm.revenue)}</div>
                 <div className="text-[11.5px] text-muted-foreground mt-0.5">
@@ -687,27 +706,40 @@ export default function DashboardPage() {
               </div>
             </div>
             <div className="border-t border-border mt-4 pt-3">
-              <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium mb-2">
-                On shift now
-              </div>
-              <div className="flex items-center gap-2.5 py-1.5">
-                <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold">
-                  {initialsOf(firstNameCap)}
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground font-medium">
+                  On shift now
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-[13px] font-semibold truncate">{firstNameCap}</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {new Date().getHours() < 12 ? "AM" : "PM"} shift
-                  </div>
-                </div>
-                <Badge className="badge-success text-[10.5px] flex items-center gap-1.5">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
-                  </span>
-                  Active
-                </Badge>
+                <span className="text-[10.5px] font-mono tabular-nums text-muted-foreground">{onShiftUsers.length} online</span>
               </div>
+              {onShiftUsers.length === 0 ? (
+                <p className="text-[11.5px] text-muted-foreground text-center py-2">Nobody is logged in.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1">
+                  {onShiftUsers.map((u) => {
+                    const colors = ["bg-amber-100 text-amber-700", "bg-blue-100 text-blue-700", "bg-emerald-100 text-emerald-700", "bg-purple-100 text-purple-700", "bg-rose-100 text-rose-700"];
+                    const color = colors[u.username.charCodeAt(0) % colors.length];
+                    return (
+                      <div key={u.username} className="flex items-center gap-2.5 py-1" data-testid={`online-user-${u.username}`}>
+                        <div className={cn("w-7 h-7 rounded-full grid place-items-center text-[11px] font-mono font-bold", color)}>
+                          {initialsOf(u.username)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[12.5px] font-semibold truncate">{u.username}</div>
+                          <div className="text-[10.5px] text-muted-foreground">{u.role.replace(/_/g, " ").toLowerCase()}</div>
+                        </div>
+                        <Badge className="badge-success text-[10.5px] flex items-center gap-1.5">
+                          <span className="relative flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500" />
+                          </span>
+                          Active
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -907,137 +939,11 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 07. Peak hours heatmap */}
-      <Card className="mb-4" id="peak-hours-card">
-        <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Peak hours</CardTitle>
-            <div className="text-[12px] text-muted-foreground mt-0.5">Order volume by hour of day · last 4 weeks</div>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => exportPeakHoursPDF(peakHours.map((r) => r.values))}
-            data-testid="button-export-peak-hours"
-          >
-            <Download className="w-3.5 h-3.5 mr-1.5" />
-            Export
-          </Button>
-        </CardHeader>
-        <CardContent className="px-5 py-4">
-          <Heatmap grid={peakHours} />
-          <div className="flex items-center gap-2 text-[11px] text-muted-foreground mt-3">
-            <span>Low</span>
-            {[0.1, 0.3, 0.5, 0.7, 1].map((t, i) => (
-              <span
-                key={i}
-                className="w-[22px] h-[10px] rounded-sm"
-                style={{ background: `oklch(${0.96 - t * 0.32} ${0.05 + t * 0.13} 75)` }}
-              />
-            ))}
-            <span>High</span>
-            <span className="ml-auto">Hover any cell to see the count.</span>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Peak Hours heatmap removed per REQUEST.pdf round 5 — the data was
+          synthetic and the chart added clutter without insight. */}
 
     </div>
   );
-}
-
-/** "2 hours ago" relative formatter — keeps things terse like the prototype. */
-/**
- * Export the Peak Hours heatmap to a polished PDF.
- * Uses jspdf to render the title + a heatmap table + a legend with the same
- * amber gradient as the on-screen heatmap.
- */
-async function exportPeakHoursPDF(grid: number[][]) {
-  const { default: jsPDF } = await import("jspdf");
-  const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-
-  // Title block
-  doc.setFontSize(20);
-  doc.setFont("helvetica", "bold");
-  doc.text("Peak hours — JOAP Hardware Trading", 40, 50);
-  doc.setFontSize(11);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(120);
-  doc.text("Order volume by hour of day · last 4 weeks", 40, 70);
-  doc.text(
-    `Generated ${new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila", hour12: true })}`,
-    40,
-    86
-  );
-  doc.setTextColor(0);
-
-  // Grid: 7 rows × 24 columns
-  const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  const startX = 90;
-  const startY = 130;
-  const cellW = 28;
-  const cellH = 26;
-  const max = Math.max(1, ...grid.flat());
-
-  // Hour labels (every 3)
-  doc.setFontSize(8);
-  doc.setTextColor(140);
-  for (let h = 0; h < 24; h++) {
-    if (h % 3 === 0) doc.text(String(h).padStart(2, "0"), startX + h * cellW + cellW / 2 - 5, startY - 6);
-  }
-
-  // Day labels + cells
-  doc.setFontSize(9);
-  for (let r = 0; r < days.length; r++) {
-    doc.setTextColor(80);
-    doc.text(days[r], startX - 35, startY + r * cellH + cellH / 2 + 3);
-    for (let c = 0; c < 24; c++) {
-      const v = grid[r]?.[c] ?? 0;
-      const t = v / max;
-      // amber gradient: hsl(38 92% 95% → 50%)
-      const lightness = Math.round(95 - t * 45);
-      const [R, G, B] = hslToRgb(38 / 360, 0.92, lightness / 100);
-      doc.setFillColor(R, G, B);
-      doc.rect(startX + c * cellW, startY + r * cellH, cellW - 2, cellH - 2, "F");
-    }
-  }
-
-  // Legend
-  const legendY = startY + days.length * cellH + 24;
-  doc.setTextColor(140);
-  doc.setFontSize(9);
-  doc.text("Low", startX - 35, legendY + 12);
-  doc.text("High", startX + 24 * cellW + 4, legendY + 12);
-  for (let i = 0; i < 5; i++) {
-    const t = (i + 1) / 5;
-    const l = Math.round(95 - t * 45);
-    const [R, G, B] = hslToRgb(38 / 360, 0.92, l / 100);
-    doc.setFillColor(R, G, B);
-    doc.rect(startX + i * 36, legendY, 30, 10, "F");
-  }
-
-  doc.save(`peak-hours-${new Date().toISOString().slice(0, 10)}.pdf`);
-}
-
-function hslToRgb(h: number, s: number, l: number): [number, number, number] {
-  let r: number, g: number, b: number;
-  if (s === 0) {
-    r = g = b = l;
-  } else {
-    const hue2rgb = (p: number, q: number, t: number) => {
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1 / 3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1 / 3);
-  }
-  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
 }
 
 function relativeTime(d: Date): string {

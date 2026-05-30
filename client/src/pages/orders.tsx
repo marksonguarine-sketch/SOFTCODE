@@ -32,6 +32,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 type OrderItemLocal = { itemId: string; itemName: string; qty: number; originalUnitPrice: number; discountedUnitPrice: number; discountApplied: boolean; offerName: string; lineTotal: number };
 
@@ -49,65 +50,66 @@ function PoolAdminRow({ order, allUsers, onAssignClick, onNavigate }: {
       <TableCell className="text-right cursor-pointer" onClick={onNavigate}>{formatCurrency(order.totalAmount)}</TableCell>
       <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
       <TableCell onClick={(e) => e.stopPropagation()} className="py-1.5">
-        {/* SaaS-style assign button — shows user avatar stack then drops a clean list */}
-        <div className="relative">
-          <button
-            className="flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full border border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all text-xs font-medium text-muted-foreground hover:text-foreground group"
-            onClick={() => setOpen((v) => !v)}
-            data-testid={`button-pool-assign-${order._id}`}
+        {/* Floating dropdown via Popover so it never gets clipped by the
+            table overflow-x-auto (used to render with absolute right-0 and
+            get cut on small viewports — see REQUEST.pdf round-5 screenshot). */}
+        <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setEmpSearch(""); }}>
+          <PopoverTrigger asChild>
+            <button
+              className="flex items-center gap-1.5 pl-2 pr-3 py-1.5 rounded-full border border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all text-xs font-medium text-muted-foreground hover:text-foreground group"
+              data-testid={`button-pool-assign-${order._id}`}
+            >
+              <UserCheck className="h-3.5 w-3.5 group-hover:text-primary transition-colors shrink-0" />
+              <span>Assign to…</span>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            sideOffset={6}
+            collisionPadding={12}
+            className="w-[260px] p-0 border-border bg-popover shadow-xl"
           >
-            <UserCheck className="h-3.5 w-3.5 group-hover:text-primary transition-colors shrink-0" />
-            <span>Assign to…</span>
-          </button>
-          {open && (
-            <>
-              {/* Backdrop */}
-              <div className="fixed inset-0 z-40" onClick={() => { setOpen(false); setEmpSearch(""); }} />
-              {/* Dropdown */}
-              <div className="absolute right-0 top-full mt-1.5 z-50 w-[240px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-popover shadow-xl overflow-hidden animate-in fade-in-0 zoom-in-95 duration-150">
-                <div className="px-3 py-2 border-b">
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Assign to staff</p>
-                  <div className="relative">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <Input
-                      autoFocus
-                      placeholder="Search staff..."
-                      className="pl-8 h-8 text-xs"
-                      value={empSearch}
-                      onChange={(e) => setEmpSearch(e.target.value)}
-                      data-testid={`input-assign-search-${order._id}`}
-                    />
-                  </div>
-                </div>
-                <div className="max-h-[200px] overflow-y-auto py-1">
-                  {visibleUsers.length === 0 ? (
-                    <p className="text-xs text-muted-foreground px-3 py-2 text-center">{allUsers.length === 0 ? "No staff available" : "No match"}</p>
-                  ) : visibleUsers.map((u) => {
-                    const initials = u.username.slice(0, 2).toUpperCase();
-                    const colors = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-rose-500", "bg-cyan-500"];
-                    const color = colors[u.username.charCodeAt(0) % colors.length];
-                    return (
-                      <button
-                        key={u.username}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent text-sm transition-colors text-left"
-                        onClick={() => { onAssignClick(u.username); setOpen(false); }}
-                        data-testid={`assign-to-${u.username}-${order._id}`}
-                      >
-                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-bold shrink-0 ${color}`}>
-                          {initials}
-                        </span>
-                        <span className="font-medium truncate">{u.username}</span>
-                        {u.role === "ADMIN" && (
-                          <span className="ml-auto text-[9px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">Admin</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
+            <div className="px-3 py-2 border-b">
+              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Assign to staff</p>
+              <div className="relative">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  autoFocus
+                  placeholder="Search staff..."
+                  className="pl-8 h-8 text-xs"
+                  value={empSearch}
+                  onChange={(e) => setEmpSearch(e.target.value)}
+                  data-testid={`input-assign-search-${order._id}`}
+                />
               </div>
-            </>
-          )}
-        </div>
+            </div>
+            <div className="max-h-[260px] overflow-y-auto py-1">
+              {visibleUsers.length === 0 ? (
+                <p className="text-xs text-muted-foreground px-3 py-2 text-center">{allUsers.length === 0 ? "No staff available" : "No match"}</p>
+              ) : visibleUsers.map((u) => {
+                const initials = u.username.slice(0, 2).toUpperCase();
+                const colors = ["bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-purple-500", "bg-rose-500", "bg-cyan-500"];
+                const color = colors[u.username.charCodeAt(0) % colors.length];
+                return (
+                  <button
+                    key={u.username}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent text-sm transition-colors text-left"
+                    onClick={() => { onAssignClick(u.username); setOpen(false); }}
+                    data-testid={`assign-to-${u.username}-${order._id}`}
+                  >
+                    <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-white text-[10px] font-bold shrink-0 ${color}`}>
+                      {initials}
+                    </span>
+                    <span className="font-medium truncate">{u.username}</span>
+                    {u.role === "ADMIN" && (
+                      <span className="ml-auto text-[9px] font-medium px-1.5 py-0.5 rounded bg-primary/10 text-primary shrink-0">Admin</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </PopoverContent>
+        </Popover>
       </TableCell>
     </TableRow>
   );
@@ -406,8 +408,13 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const watchedPaymentMethod = form.watch("paymentMethod");
   const watchedPaymentStatus = form.watch("paymentStatus");
   const watchedFulfillment = form.watch("fulfillmentStatus");
+  // The Next button is enabled as long as the user has selected the order
+  // type + channel (defaults already valid) — the customer-name field gets
+  // validated inline via form.trigger when they click Next. Previously the
+  // button stayed dead until they typed a name, which made "next button
+  // cannot be click" the most common complaint when picking a new type.
   const canProceed = (() => {
-    if (step === 0) return !!watchedCustomerName?.trim() && !!orderType && !!orderChannel;
+    if (step === 0) return !!orderType && !!orderChannel;
     if (step === 1) return orderItems.length > 0;
     if (step === 2) return !!watchedPaymentMethod && !!watchedPaymentStatus;
     if (step === 3) return !!watchedFulfillment;
