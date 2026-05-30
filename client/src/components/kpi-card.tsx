@@ -140,19 +140,26 @@ export function KPICard({
       </div>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center justify-between">
-              <span>{label}</span>
-              <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
-            </DialogTitle>
+        <DialogContent
+          className={cn(
+            "p-0 gap-0 flex flex-col overflow-hidden",
+            // Near-fullscreen like ChartCard so the metric + sparkline get
+            // room to breathe; close stays one click away.
+            "fixed !left-2 !right-2 !top-2 !bottom-2 sm:!left-6 sm:!right-6 sm:!top-6 sm:!bottom-6",
+            "!translate-x-0 !translate-y-0",
+            "max-w-none w-auto h-auto rounded-xl",
+          )}
+        >
+          <DialogHeader className="border-b px-5 py-3 flex-row items-center justify-between gap-3 shrink-0">
+            <DialogTitle className="text-base font-semibold">{label}</DialogTitle>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className={cn("font-mono text-[44px] font-bold tracking-tight leading-none tabular-nums", t.accent)}>
+          <div className="flex-1 min-h-0 overflow-auto p-6 space-y-5">
+            <div className={cn("font-mono text-[52px] sm:text-[64px] font-bold tracking-tight leading-none tabular-nums", t.accent)}>
               {value}
             </div>
             {(delta || sub) && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
                 {delta && (
                   <span
                     className={cn(
@@ -169,7 +176,7 @@ export function KPICard({
                 {sub}
               </div>
             )}
-            <div className="min-h-[320px] -mx-2">{expanded ?? spark}</div>
+            <div className="w-full h-[60vh] min-h-[320px]">{expanded ?? spark}</div>
           </div>
         </DialogContent>
       </Dialog>

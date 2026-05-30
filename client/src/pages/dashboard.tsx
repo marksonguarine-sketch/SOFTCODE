@@ -63,6 +63,7 @@ import { PageHeader } from "@/components/page-header";
 import { KPICard } from "@/components/kpi-card";
 import { Sparkline, Ring } from "@/components/charts";
 // Heatmap component removed — Peak Hours card was dropped per REQUEST.pdf round 5.
+import { ChartCard } from "@/components/chart-card";
 import { cn } from "@/lib/utils";
 
 // ── Types from the existing /api/dashboard/advanced endpoint ────────────────
@@ -283,14 +284,11 @@ export default function DashboardPage() {
   const goalPct = Math.min(1, revenueToday / DAILY_GOAL);
   const goalRemaining = Math.max(0, DAILY_GOAL - revenueToday);
 
-  // Overdue banner
-  const overdueCount = stats?.pendingPayments ?? 0;
-  const overdueAmount = useMemo(() => {
-    if (!stats?.recentOrders) return 0;
-    return stats.recentOrders
-      .filter((o: any) => o.paymentStatus === "pending_payment")
-      .reduce((s: number, o: any) => s + (o.totalAmount || 0), 0);
-  }, [stats]);
+  // Overdue banner — sums ALL pending+partial orders, not just the 10 most
+  // recent. The old client-side reduce over `recentOrders` was the reason the
+  // banner said "₱73" while the Pending Payment page showed ₱773.
+  const overdueCount = (stats as any)?.pendingPaymentsCount ?? stats?.pendingPayments ?? 0;
+  const overdueAmount = (stats as any)?.pendingPaymentsTotal ?? 0;
 
   // Payment-mix donut from channelBreakdown (advanced) keyed by payment method
   const paymentPie = useMemo(() => {
@@ -549,14 +547,11 @@ export default function DashboardPage() {
 
       {/* 04. Revenue trend + Daily goal */}
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mb-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4 py-3.5 px-5 border-b">
-            <div>
-              <CardTitle className="text-[13.5px] font-semibold tracking-tight">Revenue trend</CardTitle>
-              <div className="text-[12px] text-muted-foreground mt-0.5">
-                {trendPeriod === "weekly" ? "Last 7 days" : trendPeriod === "daily" ? "Last 14 days" : trendPeriod === "monthly" ? "Last 30 days" : "Last 90 days"} · Philippine peso
-              </div>
-            </div>
+        <ChartCard
+          title="Revenue trend"
+          subtitle={`${trendPeriod === "weekly" ? "Last 7 days" : trendPeriod === "daily" ? "Last 14 days" : trendPeriod === "monthly" ? "Last 30 days" : "Last 90 days"} · Philippine peso`}
+          data-testid="card-revenue-trend"
+          headerExtras={
             <div className="inline-flex bg-muted border border-border rounded-md p-0.5 gap-0.5">
               {TREND_PERIODS.map((p) => (
                 <button
@@ -574,64 +569,104 @@ export default function DashboardPage() {
                 </button>
               ))}
             </div>
-          </CardHeader>
-          <CardContent className="px-5 py-4">
-            <div className="flex items-start gap-6 mb-3 flex-wrap">
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">This period</div>
-                <div className="font-mono text-[22px] font-semibold tracking-tight tabular-nums">{peso(adv?.totalRevenue ?? 0)}</div>
-              </div>
-              <div>
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">vs prior</div>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[22px] font-semibold tracking-tight tabular-nums">
-                    {adv?.earnings?.trend !== undefined
-                      ? `${adv.earnings.trend >= 0 ? "+" : ""}${adv.earnings.trend.toFixed(1)}%`
-                      : "—"}
-                  </span>
+          }
+          renderFullscreen={(range) => {
+            // Client-side filter the existing series to the chosen range.
+            // (The /api/dashboard/advanced endpoint already returns a series
+            // covering the longest period; we just trim it to the date range
+            // the user picked in the maximize panel.)
+            const full = adv?.revenueChart || [];
+            const from = new Date(range.from + "T00:00:00").getTime();
+            const to = new Date(range.to + "T23:59:59").getTime();
+            const filtered = full.filter((d) => {
+              const lbl = d.label;
+              const tryDate = new Date(`${new Date().getFullYear()}-${lbl}`).getTime();
+              if (Number.isNaN(tryDate)) return true;
+              return tryDate >= from && tryDate <= to;
+            });
+            const totalInRange = filtered.reduce((s, d) => s + (d.revenue || 0), 0);
+            return (
+              <div className="h-full flex flex-col gap-4">
+                <div className="flex items-baseline gap-6 flex-wrap">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">In range</div>
+                    <div className="font-mono text-[28px] font-semibold tracking-tight tabular-nums">{peso(totalInRange)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Points</div>
+                    <div className="font-mono text-[28px] font-semibold tracking-tight tabular-nums">{filtered.length}</div>
+                  </div>
+                </div>
+                <div className="flex-1 min-h-[360px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RechartsArea data={filtered} margin={{ top: 16, right: 24, left: 8, bottom: 8 }}>
+                      <defs>
+                        <linearGradient id="rev-grad-fs" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="hsl(38 92% 50%)" stopOpacity={0.4} />
+                          <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} />
+                      <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickLine={false} axisLine={false} tickFormatter={pesoCompact} />
+                      <RechartsTooltip
+                        contentStyle={{ fontSize: 13, borderRadius: 8, border: "1px solid hsl(var(--border))", boxShadow: "var(--shadow-md)", padding: "10px 12px", backgroundColor: "hsl(var(--popover))", color: "hsl(var(--popover-foreground))" }}
+                        formatter={(v: number) => [peso(v), "Revenue"]}
+                      />
+                      <Area type="monotone" dataKey="revenue" stroke="hsl(38 92% 50%)" strokeWidth={2.5} fill="url(#rev-grad-fs)"
+                        activeDot={{ r: 5, fill: "hsl(var(--card))", stroke: "hsl(38 92% 50%)", strokeWidth: 2 }} />
+                    </RechartsArea>
+                  </ResponsiveContainer>
                 </div>
               </div>
+            );
+          }}
+        >
+          <div className="flex items-start gap-6 mb-3 flex-wrap">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">This period</div>
+              <div className="font-mono text-[22px] font-semibold tracking-tight tabular-nums">{peso(adv?.totalRevenue ?? 0)}</div>
             </div>
-            <div className="h-[260px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsArea
-                  data={adv?.revenueChart || []}
-                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="rev-grad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="hsl(38 92% 50%)" stopOpacity={0.3} />
-                      <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} style={{ fontFamily: "var(--font-mono)" }} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} tickFormatter={pesoCompact} style={{ fontFamily: "var(--font-mono)" }} />
-                  <RechartsTooltip
-                    contentStyle={{
-                      fontSize: 12,
-                      borderRadius: 6,
-                      border: "1px solid hsl(var(--border))",
-                      boxShadow: "var(--shadow-md)",
-                      padding: "8px 10px",
-                      backgroundColor: "hsl(var(--popover))",
-                      color: "hsl(var(--popover-foreground))",
-                    }}
-                    formatter={(v: number) => [peso(v), "Revenue"]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="revenue"
-                    stroke="hsl(38 92% 50%)"
-                    strokeWidth={2}
-                    fill="url(#rev-grad)"
-                    activeDot={{ r: 4, fill: "hsl(var(--card))", stroke: "hsl(38 92% 50%)", strokeWidth: 2 }}
-                  />
-                </RechartsArea>
-              </ResponsiveContainer>
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">vs prior</div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-[22px] font-semibold tracking-tight tabular-nums">
+                  {adv?.earnings?.trend !== undefined
+                    ? `${adv.earnings.trend >= 0 ? "+" : ""}${adv.earnings.trend.toFixed(1)}%`
+                    : "—"}
+                </span>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+          <div className="h-[260px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <RechartsArea data={adv?.revenueChart || []} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="rev-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="hsl(38 92% 50%)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} style={{ fontFamily: "var(--font-mono)" }} />
+                <YAxis stroke="hsl(var(--muted-foreground))" fontSize={10} tickLine={false} axisLine={false} tickFormatter={pesoCompact} style={{ fontFamily: "var(--font-mono)" }} />
+                <RechartsTooltip
+                  contentStyle={{
+                    fontSize: 12, borderRadius: 6,
+                    border: "1px solid hsl(var(--border))",
+                    boxShadow: "var(--shadow-md)",
+                    padding: "8px 10px",
+                    backgroundColor: "hsl(var(--popover))",
+                    color: "hsl(var(--popover-foreground))",
+                  }}
+                  formatter={(v: number) => [peso(v), "Revenue"]}
+                />
+                <Area type="monotone" dataKey="revenue" stroke="hsl(38 92% 50%)" strokeWidth={2} fill="url(#rev-grad)"
+                  activeDot={{ r: 4, fill: "hsl(var(--card))", stroke: "hsl(38 92% 50%)", strokeWidth: 2 }} />
+              </RechartsArea>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
 
         {/* Daily goal */}
         <Card>

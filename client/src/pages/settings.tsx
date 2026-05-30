@@ -209,7 +209,10 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="p-3 sm:p-6 space-y-4 pb-6 max-w-5xl">
+    // pb-12 so the last card never sits flush against the bottom edge when
+    // the outer <main> scrollbar appears; max-w-5xl mx-auto keeps the page
+    // centered on big monitors.
+    <div className="p-3 sm:p-6 space-y-4 pb-12 max-w-5xl mx-auto">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold" data-testid="text-settings-title">Settings</h1>
         {!isAdmin && (
@@ -220,9 +223,14 @@ export default function SettingsPage() {
       </div>
 
       <Form {...form}>
+        {/* Switched off CSS-columns masonry — it played badly with the outer
+            <main> scroll container (when the mouse was inside a column,
+            scrolling clipped the inner cards). A plain 2-column grid with
+            items-start is more predictable: each card sits in its column,
+            scroll wheel bubbles to <main>, no cutting. */}
         <form
           onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))}
-          className="[column-fill:balance] columns-1 lg:columns-2 gap-4 [&_>_*]:break-inside-avoid [&_>_*]:mb-4"
+          className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start"
         >
 
           {/* ── SYSTEM SETTINGS (admin only) ────────────────────────── */}

@@ -186,8 +186,11 @@ export const createItemSchema = z.object({
   itemName: z.string().min(1, "Item name is required"),
   category: z.string().min(1, "Category is required"),
   supplierName: z.string().optional().default(""),
-  unitPrice: z.number().min(0, "Unit price must be positive"),
-  currentQuantity: z.number().int().min(0, "Quantity must be non-negative"),
+  unitPrice: z.number().min(0.01, "Unit price must be greater than 0"),
+  // Block zero stock on initial create — an item with 0 on-hand cannot be
+  // ordered and pollutes the inventory KPIs. The user can still adjust qty
+  // down to 0 later via Edit if needed (audited as an adjustment log).
+  currentQuantity: z.number().int().min(1, "Initial stock must be at least 1 — use Edit later to adjust down to 0"),
   avgDailyUsage: z.number().min(0, "Average daily usage must be non-negative").default(0),
   leadTimeDays: z.number().min(0, "Lead time must be non-negative").default(0),
   safetyStock: z.number().min(0, "Safety stock must be non-negative").default(0),

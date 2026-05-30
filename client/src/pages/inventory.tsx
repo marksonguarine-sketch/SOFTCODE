@@ -278,8 +278,22 @@ export default function InventoryPage() {
     setEditSupplier((item as any).supplierName || "");
   }
 
+  // Polished modal shown when the server (or client guard) refuses an Add
+  // Item because the initial stock is 0. Explains why and offers a one-click
+  // Close button so the user can correct the form.
+  const [addBlocked, setAddBlocked] = useState<string | null>(null);
+
   const addMutation = useMutation({
     mutationFn: async (data: CreateItemInput) => {
+      // Client-side guard so we never even hit the network when qty=0 — the
+      // dialog opens immediately with a friendly explanation instead of a
+      // generic toast.
+      if (!data.currentQuantity || data.currentQuantity < 1) {
+        throw new Error("Initial stock must be at least 1 — use Edit later if you want to deplete to 0.");
+      }
+      if (!data.unitPrice || data.unitPrice <= 0) {
+        throw new Error("Unit price must be greater than 0.");
+      }
       const res = await apiRequest("POST", "/api/items", data);
       return res.json();
     },
@@ -291,11 +305,14 @@ export default function InventoryPage() {
       form.reset();
     },
     onError: (err: any) => {
-      toast({
-        title: "Failed to create item",
-        description: err.message || "Unknown error",
-        variant: "destructive",
-      });
+      const msg = err.message || "Unknown error";
+      // Surface zero-stock + zero-price errors as an explainer dialog so the
+      // user understands WHY the system refused. Other errors stay as toasts.
+      if (/stock|quantity|unit price/i.test(msg)) {
+        setAddBlocked(msg);
+      } else {
+        toast({ title: "Failed to create item", description: msg, variant: "destructive" });
+      }
     },
   });
 
@@ -712,6 +729,34 @@ export default function InventoryPage() {
         onClose={() => setShowRequestPrompt(false)}
         action="ADD_ITEM"
       />
+
+      {/* Zero-stock / zero-price explainer dialog (round 5 follow-up). Shown
+          when the validation refuses an Add Item — instead of a flash toast
+          we show a real explanation with a clear Close button. */}
+      <Dialog open={!!addBlocked} onOpenChange={(o) => !o && setAddBlocked(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertTriangle className="h-5 w-5" />
+              Cannot add this item yet
+            </DialogTitle>
+            <DialogDescription className="text-foreground/80 pt-2 leading-relaxed">
+              {addBlocked}
+              <br />
+              <br />
+              <span className="text-muted-foreground text-xs">
+                A new item must start with at least <strong>1 unit in stock</strong> and a
+                <strong> unit price greater than ₱0</strong>. This keeps the inventory KPIs accurate
+                and stops zero-stock items from cluttering Create Order. You can edit the quantity
+                down to 0 later via the row's Edit menu once the SKU exists.
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end">
+            <Button onClick={() => setAddBlocked(null)} data-testid="button-add-blocked-close">Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Add item dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>

@@ -566,10 +566,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const cost = paidOrderItems[0]?.cost || 0;
       const grossMargin = rev > 0 ? Math.round(((rev - cost) / rev) * 1000) / 10 : 0;
 
+      // ── Pending-payments total (real) ─────────────────────────────────────
+      // The dashboard banner used to sum the 10 most-recent orders only, so
+      // "3 orders ₱73" never matched the Pending Payment page total. Compute
+      // the true unpaid balance across ALL pending_payment + partial orders.
+      const pendingAgg = await Order.aggregate([
+        { $match: { paymentStatus: { $in: ["pending_payment", "partial"] }, fulfillmentStatus: { $nin: ["cancelled"] } } },
+        { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+      ]);
+      const pendingPaymentsTotal = pendingAgg[0]?.total || 0;
+      const pendingPaymentsCount = pendingAgg[0]?.count || 0;
+
       return ok(res, {
         totalOrdersToday,
         completedOrders,
         pendingPayments,
+        pendingPaymentsTotal, // true sum across ALL pending orders, not just recent
+        pendingPaymentsCount, // matches the pending-payment page row count
         pendingReleases,
         todayRevenue: todayPayments[0]?.total || 0,
         totalRevenue: allPayments[0]?.total || 0,
