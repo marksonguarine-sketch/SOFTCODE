@@ -100,6 +100,56 @@ async function logAction(action: string, actor: string, target = "", metadata: R
 }
 
 /**
+ * Stock-health helpers. New thresholds (REQUEST.pdf round 7):
+ *   Low      = currentQuantity ≤ startingStock × 0.25
+ *   Critical = currentQuantity ≤ startingStock × 0.125
+ * Fallback: if startingStock is 0 (legacy items pre-migration), fall back
+ * to currentQuantity itself so they never look "OK" when they shouldn't.
+ */
+function stockBands(item: { currentQuantity?: number; startingStock?: number }) {
+  const start = Math.max(0, item.startingStock || 0);
+  const q = Math.max(0, item.currentQuantity || 0);
+  if (start <= 0) {
+    return { critical: q <= 0, low: false, lowThreshold: 0, criticalThreshold: 0 };
+  }
+  const lowThreshold = start * 0.25;
+  const criticalThreshold = start * 0.125;
+  return {
+    critical: q <= criticalThreshold,
+    low: !item || q > criticalThreshold ? q <= lowThreshold : false,
+    lowThreshold,
+    criticalThreshold,
+  };
+}
+
+/**
+ * Fire a Reorder Point notification if currentQuantity just crossed the
+ * item's computed ROP downward. Called from every stock-decrement path.
+ */
+async function maybeFireROPAlert(item: any, before: number, after: number) {
+  try {
+    const rop = (item.avgDailyUsage || 0) * (item.leadTimeDays || 0) + (item.safetyStock || 0);
+    if (rop <= 0) return;
+    if (before > rop && after <= rop) {
+      await notify({
+        category: "INVENTORY",
+        title: `Reorder Point Reached: ${item.itemName}`,
+        body: `Current stock ${after} ≤ ROP ${Math.ceil(rop)} (avg daily ${item.avgDailyUsage} × lead ${item.leadTimeDays}d + safety ${item.safetyStock}). Reorder now.`,
+        link: "/inventory",
+        recipientRole: "ADMIN",
+      });
+      await notify({
+        category: "INVENTORY",
+        title: `Reorder Point Reached: ${item.itemName}`,
+        body: `Current stock ${after} ≤ ROP ${Math.ceil(rop)}.`,
+        link: "/inventory",
+        recipientRole: "INVENTORY_MANAGER",
+      });
+    }
+  } catch {}
+}
+
+/**
  * Bump (or seed-and-bump) the balance on a single accounting account.
  *
  * The naive `findOneAndUpdate({ accountName }, { $inc: { balance } },
@@ -531,38 +581,26 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }),
       ]);
 
-      // Critical = currentQuantity at or below per-item reorderLevel
-      //           (or zero stock outright).
-      // Low      = currentQuantity above reorderLevel but within +50% of it
-      //           (i.e. close to needing a reorder).
-      // This matches the inventory page's stockStatus() function so the
-      // dashboard counts stop disagreeing with the inventory page.
-      const criticalStock = items.filter((i) => {
-        const r = (i as any).reorderLevel || 0;
-        return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
-      }).length;
-      const lowStock = items.filter((i) => {
-        const r = (i as any).reorderLevel || 0;
-        if (r <= 0) return false;
-        return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
-      }).length;
-      // Critical items (full payload) for the dashboard "low-stock" KPI dialog
-      // — admin sees them, can restock; employee gets a notify-admin button.
+      // New thresholds (REQUEST.pdf round 7): low/critical against the
+      // item's startingStock snapshot, not its reorderLevel.
+      //   Low      = currentQuantity ≤ 25%  of startingStock
+      //   Critical = currentQuantity ≤ 12.5% of startingStock
+      // The two bands are mutually exclusive — Critical is the inner band.
+      const isCritical = (i: any) => stockBands(i).critical;
+      const isLow = (i: any) => {
+        const b = stockBands(i);
+        return !b.critical && b.low;
+      };
+      const criticalStock = items.filter(isCritical).length;
+      const lowStock = items.filter(isLow).length;
       const criticalItems = items
-        .filter((i) => {
-          const r = (i as any).reorderLevel || 0;
-          return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
-        })
-        .map((i) => ({ _id: i._id, itemName: i.itemName, currentQuantity: i.currentQuantity, reorderLevel: (i as any).reorderLevel || 0, unitPrice: i.unitPrice }))
+        .filter(isCritical)
+        .map((i: any) => ({ _id: i._id, itemName: i.itemName, currentQuantity: i.currentQuantity, reorderLevel: i.reorderLevel || 0, startingStock: i.startingStock || 0, unitPrice: i.unitPrice }))
         .sort((a, b) => a.currentQuantity - b.currentQuantity)
         .slice(0, 50);
       const lowStockItems = items
-        .filter((i) => {
-          const r = (i as any).reorderLevel || 0;
-          if (r <= 0) return false;
-          return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
-        })
-        .map((i) => ({ _id: i._id, itemName: i.itemName, currentQuantity: i.currentQuantity, reorderLevel: (i as any).reorderLevel || 0, unitPrice: i.unitPrice }))
+        .filter(isLow)
+        .map((i: any) => ({ _id: i._id, itemName: i.itemName, currentQuantity: i.currentQuantity, reorderLevel: i.reorderLevel || 0, startingStock: i.startingStock || 0, unitPrice: i.unitPrice }))
         .slice(0, 50);
       const totalInventoryValue = items.reduce((sum, i) => sum + i.unitPrice * i.currentQuantity, 0);
 
@@ -1078,13 +1116,29 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── Super-admin gating ────────────────────────────────────────────────
+  // The hardcoded super-admin (DEFAULT_ADMIN_USERNAME) is the only one
+  // allowed to deactivate / revoke other admins. Regular admins can still
+  // reset passwords on other admins, but they cannot touch the super-admin
+  // at all (even passwords). The super-admin's row is fully untouchable.
+  const isSuperAdmin = (username?: string) => (username || "").toLowerCase() === DEFAULT_ADMIN_USERNAME.toLowerCase();
+
   app.patch("/api/admin/users/:id/status", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
-      const user = await User.findByIdAndUpdate(req.params.id, { isActive: req.body.isActive }, { new: true }).select("-password");
-      if (!user) return fail(res, 404, "User not found");
-      if (!req.body.isActive) await UserSession.updateMany({ userId: user._id }, { isActive: false });
-      await logAction("USER_STATUS_CHANGED", req.user!.username, user.username, { isActive: user.isActive });
-      return ok(res, user);
+      const target = await User.findById(req.params.id);
+      if (!target) return fail(res, 404, "User not found");
+      if (isSuperAdmin(target.username)) {
+        return fail(res, 403, "The super admin cannot be deactivated.");
+      }
+      // Non-super-admins cannot deactivate any other admin (even peers).
+      if (target.role === "ADMIN" && !isSuperAdmin(req.user!.username)) {
+        return fail(res, 403, "Only the super admin can deactivate another admin account.");
+      }
+      target.isActive = !!req.body.isActive;
+      await target.save();
+      if (!target.isActive) await UserSession.updateMany({ userId: target._id }, { isActive: false });
+      await logAction("USER_STATUS_CHANGED", req.user!.username, target.username, { isActive: target.isActive });
+      return ok(res, target.toObject({ versionKey: false }));
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -1092,10 +1146,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.patch("/api/admin/users/:id/role", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
-      const user = await User.findByIdAndUpdate(req.params.id, { role: req.body.role }, { new: true }).select("-password");
-      if (!user) return fail(res, 404, "User not found");
-      await logAction("USER_ROLE_CHANGED", req.user!.username, user.username, { role: user.role });
-      return ok(res, user);
+      const target = await User.findById(req.params.id);
+      if (!target) return fail(res, 404, "User not found");
+      if (isSuperAdmin(target.username)) {
+        return fail(res, 403, "The super admin's role cannot be changed.");
+      }
+      // Demoting (revoking) an admin requires super-admin
+      if (target.role === "ADMIN" && req.body.role !== "ADMIN" && !isSuperAdmin(req.user!.username)) {
+        return fail(res, 403, "Only the super admin can revoke another admin's access.");
+      }
+      target.role = req.body.role;
+      await target.save();
+      await logAction("USER_ROLE_CHANGED", req.user!.username, target.username, { role: target.role });
+      return ok(res, target.toObject({ versionKey: false }));
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -1103,11 +1166,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/admin/users/:id/reset-password", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
+      const target = await User.findById(req.params.id);
+      if (!target) return fail(res, 404, "User not found");
+      // Even super-admins do not reset their OWN credentials through this
+      // endpoint — the super admin's password is the hardcoded one. Other
+      // admins can have their passwords reset by any admin (per spec).
+      if (isSuperAdmin(target.username)) {
+        return fail(res, 403, "The super admin's password cannot be reset from here.");
+      }
       const tempPass = Math.random().toString(36).slice(-8);
       const hashed = await bcrypt.hash(tempPass, 10);
-      const user = await User.findByIdAndUpdate(req.params.id, { password: hashed }).select("-password");
-      if (!user) return fail(res, 404, "User not found");
-      await logAction("USER_PASSWORD_RESET", req.user!.username, user.username);
+      target.password = hashed;
+      await target.save();
+      await logAction("USER_PASSWORD_RESET", req.user!.username, target.username);
       return ok(res, { temporaryPassword: tempPass });
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -1230,10 +1301,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       }
 
+      // Reorder Point = avg daily sales × lead time + safety stock.
+      // (Official ROP formula spec — REQUEST.pdf round 7.)
       const { avgDailyUsage, leadTimeDays, safetyStock } = parsed.data;
       const reorderLevel = Math.ceil((avgDailyUsage * leadTimeDays) + safetyStock);
 
-      const item = await Item.create({ ...parsed.data, reorderLevel });
+      // Snapshot the starting stock so low/critical thresholds can later
+      // compare against the original — not against an ever-shrinking
+      // currentQuantity. Without this, every item would always read "OK".
+      const item = await Item.create({
+        ...parsed.data,
+        reorderLevel,
+        startingStock: parsed.data.currentQuantity,
+      });
 
       if (item.currentQuantity > 0) {
         await InventoryLog.create({
@@ -1341,6 +1421,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           reason: `Manual adjustment by ${req.user!.username} (was ${before.currentQuantity}, now ${updates.currentQuantity})`,
           actor: req.user!.username,
         });
+        // A restock that pushes current ABOVE the previous starting stock
+        // counts as a fresh starting baseline — otherwise low/critical
+        // bands would never reset after admin refills the shelf.
+        if (delta > 0 && updates.currentQuantity > ((updated as any).startingStock || 0)) {
+          (updated as any).startingStock = updates.currentQuantity;
+          await updated.save();
+        }
+        // ROP alert when adjustment pushes stock at or below the reorder
+        // point for the first time.
+        if (delta < 0) await maybeFireROPAlert(updated, before.currentQuantity, updates.currentQuantity);
       }
 
       await logAction("ITEM_UPDATED", req.user!.username, updated.itemName, {
@@ -2071,8 +2161,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         customerName: { $regex: new RegExp(`^${customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") },
         fulfillmentStatus: { $nin: ["completed", "cancelled"] },
         "items.itemId": { $in: itemIds },
-      }).select("trackingNumber customerName items fulfillmentStatus _id").lean();
-      return ok(res, { duplicate: existing || null });
+      }).select("trackingNumber customerName items fulfillmentStatus paymentStatus totalAmount createdAt _id createdBy").lean();
+      // Also expose any pre-existing approved DUPLICATE_ORDER grant the
+      // caller already holds, so the client can skip the approval dialog.
+      const grant = await ItemRequest.findOne({
+        requestedBy: req.user!.username,
+        action: "DUPLICATE_ORDER",
+        status: "approved",
+      }).lean();
+      return ok(res, { duplicate: existing || null, approvedGrantId: grant?._id || null });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -2123,6 +2220,102 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ── Top customers by revenue, time-windowed ───────────────────────────
+  // Powers the dashboard "Top Customers" card. Window options:
+  //   24h | 7d | 1m | 6m. Returns top 5 by revenue with latest purchase.
+  app.get("/api/dashboard/top-customers", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const window = (req.query.window as string) || "7d";
+      const since = new Date();
+      if (window === "24h") since.setDate(since.getDate() - 1);
+      else if (window === "7d") since.setDate(since.getDate() - 7);
+      else if (window === "1m") since.setMonth(since.getMonth() - 1);
+      else if (window === "6m") since.setMonth(since.getMonth() - 6);
+      else since.setDate(since.getDate() - 7);
+
+      const rows = await Order.aggregate([
+        { $match: { createdAt: { $gte: since }, paymentStatus: { $in: ["paid", "partial"] }, fulfillmentStatus: { $ne: "cancelled" } } },
+        {
+          $group: {
+            _id: { $toLower: "$customerName" },
+            displayName: { $last: "$customerName" },
+            totalSpend: { $sum: "$totalAmount" },
+            orderCount: { $sum: 1 },
+            latestPurchase: { $max: "$createdAt" },
+          },
+        },
+        { $sort: { totalSpend: -1 } },
+        { $limit: 5 },
+      ]);
+
+      return ok(res, {
+        window,
+        rows: rows.map((r: any) => ({
+          name: r.displayName || "Walk-in",
+          totalSpend: r.totalSpend,
+          orderCount: r.orderCount,
+          latestPurchase: r.latestPurchase,
+        })),
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ── Employee progress (today) ─────────────────────────────────────────
+  // Powers the dashboard "Employee Progress" widget. For every employee +
+  // inventory manager + admin, count today's:
+  //   pending     = assignedTo me, fulfillment ∈ pending/processing/ready,
+  //                  not yet completedProcessingAt
+  //   completed   = createdBy me OR assignedTo me, completedProcessingAt today
+  //   reservations= createdBy me, orderType ∈ reservation, today
+  app.get("/api/dashboard/employees-progress", authMiddleware, async (_req: AuthRequest, res: Response) => {
+    try {
+      const dayStart = new Date();
+      dayStart.setHours(0, 0, 0, 0);
+      const users = await User.find({ isActive: true }).select("username role").lean();
+
+      const [pendingAgg, completedAgg, reservationAgg, profiles] = await Promise.all([
+        Order.aggregate([
+          { $match: { assignedTo: { $ne: "" }, fulfillmentStatus: { $in: ["pending", "processing", "ready"] }, completedProcessingAt: { $exists: false } } },
+          { $group: { _id: "$assignedTo", count: { $sum: 1 } } },
+        ]),
+        Order.aggregate([
+          { $match: { completedProcessingAt: { $gte: dayStart } } },
+          { $group: { _id: { $ifNull: ["$assignedTo", "$createdBy"] }, count: { $sum: 1 } } },
+        ]),
+        Order.aggregate([
+          { $match: { createdAt: { $gte: dayStart }, orderType: { $in: ["online_reservation", "walkin_reservation"] } } },
+          { $group: { _id: "$createdBy", count: { $sum: 1 } } },
+        ]),
+        EmployeeProfile.find({}).select("username profilePictureFilename").lean(),
+      ]);
+
+      const pendingByUser = new Map<string, number>(pendingAgg.map((a: any) => [a._id, a.count]));
+      const completedByUser = new Map<string, number>(completedAgg.map((a: any) => [a._id, a.count]));
+      const reservationsByUser = new Map<string, number>(reservationAgg.map((a: any) => [a._id, a.count]));
+      const photoByUser = new Map<string, string>(
+        (profiles as any[]).map((p) => [p.username, p.profilePictureFilename || ""])
+      );
+
+      const rows = users.map((u: any) => ({
+        username: u.username,
+        role: u.role,
+        photo: photoByUser.get(u.username) || "",
+        pending: pendingByUser.get(u.username) || 0,
+        completed: completedByUser.get(u.username) || 0,
+        reservations: reservationsByUser.get(u.username) || 0,
+      })).sort((a, b) =>
+        (b.pending + b.completed + b.reservations) - (a.pending + a.completed + a.reservations)
+        || a.username.localeCompare(b.username)
+      );
+
+      return ok(res, { rows });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   app.get("/api/orders/:id", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const order = await Order.findById(req.params.id);
@@ -2139,6 +2332,32 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const parsed = createOrderSchema.safeParse(req.body);
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
       if (!parsed.data.items || parsed.data.items.length === 0) return fail(res, 400, "At least one item is required");
+
+      // ── Duplicate-order admin approval (REQUEST.pdf round 7 section 9-10) ──
+      // If a non-cancelled order already exists for the same customer with
+      // overlapping items, the caller must consume an APPROVED DUPLICATE_ORDER
+      // grant. Admins and the original requester bypass when the grant is
+      // present (single-use, marked "used" on consumption).
+      const itemIds = parsed.data.items.map((i) => i.itemId);
+      const dup = await Order.findOne({
+        customerName: { $regex: new RegExp(`^${parsed.data.customerName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "i") },
+        fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+        "items.itemId": { $in: itemIds },
+      }).select("_id trackingNumber").lean();
+      if (dup) {
+        const grant = await ItemRequest.findOneAndUpdate(
+          { requestedBy: req.user!.username, action: "DUPLICATE_ORDER", status: "approved" },
+          { $set: { status: "used", usedAt: new Date() } },
+          { sort: { approvedAt: 1 }, new: true },
+        );
+        if (!grant) {
+          return fail(
+            res,
+            409,
+            `Possible duplicate of ${dup.trackingNumber} for ${parsed.data.customerName}. An admin must approve a DUPLICATE_ORDER request before this can proceed.`,
+          );
+        }
+      }
 
       const settings = await Settings.findOne();
       const autoApply = settings?.autoApplyOffers !== false;
@@ -2428,6 +2647,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const alreadyPaid = totalPaid[0]?.total || 0;
       const remaining = order.totalAmount - alreadyPaid;
 
+      // Partial payments must reach ≥50% of the order total before being
+      // accepted as "partial" — anything below is rejected with a clear
+      // explanation. (REQUEST.pdf round 7 + section 18.)
+      const projected = alreadyPaid + parsed.data.amount;
+      const halfThreshold = order.totalAmount * 0.5;
+      if (projected < order.totalAmount && projected < halfThreshold) {
+        return fail(
+          res,
+          400,
+          `Partial payment must be at least 50% of the total (₱${halfThreshold.toFixed(2)}). Currently received ₱${projected.toFixed(2)}.`,
+        );
+      }
+
       const payment = await BillingPayment.create({
         orderId: parsed.data.orderId,
         paymentMethod: parsed.data.paymentMethod,
@@ -2500,6 +2732,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
       if (!parsed.data.isFullPayment) {
         if (parsed.data.amountPaid <= 0) return fail(res, 400, "Amount paid must be greater than 0");
+        // Partial payments must reach ≥50% of the order total
+        const halfThreshold = order.totalAmount * 0.5;
+        if (parsed.data.amountPaid < halfThreshold) {
+          return fail(
+            res,
+            400,
+            `Partial payment must be at least 50% of the total (₱${halfThreshold.toFixed(2)}).`,
+          );
+        }
       } else {
         if (parsed.data.amountPaid < order.totalAmount) return fail(res, 400, `Full payment must be at least ₱${order.totalAmount.toFixed(2)}`);
       }
@@ -2607,8 +2848,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           continue;
         }
         const releaseNow = Math.min(have, pending);
+        const before = item.currentQuantity;
         item.currentQuantity = have - releaseNow;
         await item.save();
+        // Fire ROP alert if we just crossed the reorder point downward.
+        await maybeFireROPAlert(item, before, item.currentQuantity);
         oi.releasedQty = (oi.releasedQty ?? 0) + releaseNow;
         oi.pendingQty = pending - releaseNow;
         if (oi.pendingQty > 0) {
@@ -3219,8 +3463,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         payload?: Record<string, any>;
         notes?: string;
       };
-      if (!action || !["ADD_ITEM", "EDIT_STOCK", "DELETE_ITEM"].includes(action)) {
-        return fail(res, 400, "Invalid action — must be ADD_ITEM, EDIT_STOCK, or DELETE_ITEM");
+      if (!action || !["ADD_ITEM", "EDIT_STOCK", "DELETE_ITEM", "DUPLICATE_ORDER"].includes(action)) {
+        return fail(res, 400, "Invalid action — must be ADD_ITEM, EDIT_STOCK, DELETE_ITEM, or DUPLICATE_ORDER");
       }
       // Block duplicates: one pending request of the same action per user.
       const existing = await ItemRequest.findOne({
@@ -3479,23 +3723,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
-  app.post("/api/messages", authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const { subject, message } = req.body;
-      if (!subject || !message) return fail(res, 400, "Subject and message required");
-      await SystemLog.create({
-        action: "EMPLOYEE_MESSAGE",
-        actor: req.user!.username,
-        target: "admin",
-        metadata: { subject, message },
-      });
-      return ok(res, { message: "Message sent" });
-    } catch (err: any) {
-      return fail(res, 500, err.message);
-    }
-  });
+  // [REMOVED] Legacy POST /api/messages handler. It expected `{subject,
+  // message}` and was registered BEFORE the real /api/messages handler
+  // (which expects `{toUsername, body}`) — so Express was always routing to
+  // the old one and rejecting valid requests with "Subject and message
+  // required" even when the form had both fields. The real handler lives
+  // further down (~line 4307).
 
-  app.patch("/api/messages/:id/read", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+  app.patch("/api/messages/:id/read-legacy", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
       const log = await SystemLog.findByIdAndUpdate(req.params.id, { "metadata.read": true }, { new: true });
       if (!log) return fail(res, 404, "Message not found");

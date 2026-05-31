@@ -6,6 +6,10 @@ export interface IItemDoc extends Document {
   supplierName: string;
   unitPrice: number;
   currentQuantity: number;
+  /** Initial stock recorded at item creation (or last reset). Used by the
+   *  new threshold formula: Low = qty ≤ 25% of starting, Critical = qty
+   *  ≤ 12.5% of starting. */
+  startingStock: number;
   reorderLevel: number;
   avgDailyUsage: number;
   leadTimeDays: number;
@@ -26,6 +30,7 @@ const itemSchema = new Schema<IItemDoc>(
     supplierName: { type: String, default: "" },
     unitPrice: { type: Number, required: true, min: 0 },
     currentQuantity: { type: Number, required: true, default: 0 },
+    startingStock: { type: Number, default: 0, min: 0 },
     avgDailyUsage: { type: Number, default: 0, min: 0 },
     leadTimeDays: { type: Number, default: 0, min: 0 },
     safetyStock: { type: Number, default: 0, min: 0 },

@@ -93,14 +93,19 @@ function ReactivateDialog({ user, onClose, onConfirm }: {
   );
 }
 
+// Super-admin username — hardcoded everywhere in the system.
+const SUPER_ADMIN_USERNAME = "joapadmin20jk";
+
 export default function UsersPage() {
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [page, setPage] = useState(1);
   const perPage = 10;
+  // Promote-to-admin flow target (REQUEST.pdf §13).
+  const [promoteTarget, setPromoteTarget] = useState<IUser | null>(null);
 
   const [tempPassword, setTempPassword] = useState<string | null>(null);
   const [tempPasswordDialogOpen, setTempPasswordDialogOpen] = useState(false);
@@ -230,15 +235,21 @@ export default function UsersPage() {
 
   const handleRoleToggle = (u: IUser) => {
     if (u.role === "ADMIN") {
+      // Demote / revoke — super-admin only (server enforces too).
       if (adminCount <= 1) {
         toast({ title: "Cannot change role", description: "This is the last admin. Promote another user first.", variant: "destructive" });
+        return;
+      }
+      if (currentUser?.username !== SUPER_ADMIN_USERNAME) {
+        toast({ title: "Super admin only", description: "Only the super admin can revoke another admin.", variant: "destructive" });
         return;
       }
       openConfirm(`Revoke admin from "${u.username}"?`, () => {
         roleMutation.mutate({ id: u._id, role: "EMPLOYEE" });
       });
     } else {
-      roleMutation.mutate({ id: u._id, role: "ADMIN" });
+      // Promote — open the 4-step modal (confirm → password → load → success)
+      setPromoteTarget(u);
     }
   };
 
@@ -353,17 +364,20 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">{new Date(u.createdAt).toLocaleDateString("en-PH")}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1 flex-wrap">
-                        <Button variant="ghost" size="icon" onClick={() => handleDeactivate(u)} title="Deactivate" data-testid={`button-deactivate-${u._id}`}>
-                          <UserMinus className="h-4 w-4 text-orange-500" />
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => handleRoleToggle(u)} title={u.role === "ADMIN" ? "Revoke admin" : "Promote to admin"} data-testid={`button-role-${u._id}`}>
-                          {u.role === "ADMIN" ? <ShieldOff className="h-4 w-4" /> : <Shield className="h-4 w-4" />}
-                        </Button>
-                        <Button variant="ghost" size="icon" onClick={() => openConfirm(`Reset password for "${u.username}"?`, () => resetPasswordMutation.mutate(u._id))} title="Reset password" data-testid={`button-reset-${u._id}`}>
-                          <KeyRound className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      {/* Round 7 §14: super-admin (joapadmin20jk) row is
+                          untouchable. Regular admins can only reset
+                          passwords on other admins; only super-admin
+                          (the current logged-in user) can revoke /
+                          deactivate other admins. */}
+                      <UserActionButtons
+                        target={u}
+                        currentUsername={currentUser?.username || ""}
+                        adminCount={adminCount}
+                        onDeactivate={() => handleDeactivate(u)}
+                        onRoleToggle={() => handleRoleToggle(u)}
+                        onResetPassword={() => openConfirm(`Reset password for "${u.username}"?`, () => resetPasswordMutation.mutate(u._id))}
+                        onPromote={() => setPromoteTarget(u)}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
@@ -527,6 +541,193 @@ export default function UsersPage() {
           setReactivateUser(null);
         }}
       />
+
+      {/* Promote-to-admin 4-step modal (REQUEST.pdf §13) */}
+      <PromoteAdminDialog
+        target={promoteTarget}
+        promoterName={currentUser?.username || ""}
+        onClose={() => setPromoteTarget(null)}
+        onPromoted={() => {
+          if (promoteTarget) roleMutation.mutate({ id: promoteTarget._id, role: "ADMIN" });
+        }}
+      />
     </div>
+  );
+}
+
+// ─── Helper components ──────────────────────────────────────────────────
+
+/**
+ * Per-row action buttons. Enforces the super-admin gating rules (§14):
+ *   • Super-admin row → no action buttons rendered to anyone.
+ *   • Regular admin row → super-admin sees all 3; others only Reset Password.
+ *   • Employee/IM row → standard Promote / Deactivate / Reset.
+ */
+function UserActionButtons({
+  target, currentUsername, adminCount, onDeactivate, onRoleToggle, onResetPassword, onPromote,
+}: {
+  target: IUser;
+  currentUsername: string;
+  adminCount: number;
+  onDeactivate: () => void;
+  onRoleToggle: () => void;
+  onResetPassword: () => void;
+  onPromote: () => void;
+}) {
+  const isSuper = (u: string) => (u || "").toLowerCase() === SUPER_ADMIN_USERNAME;
+  const targetIsSuper = isSuper(target.username);
+  const meIsSuper = isSuper(currentUsername);
+
+  // Super-admin row is fully untouchable from the UI
+  if (targetIsSuper) {
+    return <span className="text-xs text-muted-foreground italic">Super admin — protected</span>;
+  }
+
+  if (target.role === "ADMIN") {
+    // Regular admin row
+    return (
+      <div className="flex items-center gap-1 flex-wrap">
+        {meIsSuper && (
+          <Button variant="ghost" size="icon" onClick={onDeactivate} title="Deactivate" data-testid={`button-deactivate-${target._id}`}>
+            <UserMinus className="h-4 w-4 text-orange-500" />
+          </Button>
+        )}
+        {meIsSuper && adminCount > 1 && (
+          <Button variant="ghost" size="icon" onClick={onRoleToggle} title="Revoke admin" data-testid={`button-role-${target._id}`}>
+            <ShieldOff className="h-4 w-4" />
+          </Button>
+        )}
+        <Button variant="ghost" size="icon" onClick={onResetPassword} title="Reset password" data-testid={`button-reset-${target._id}`}>
+          <KeyRound className="h-4 w-4" />
+        </Button>
+      </div>
+    );
+  }
+
+  // Employee / IM row — any admin can manage
+  return (
+    <div className="flex items-center gap-1 flex-wrap">
+      <Button variant="ghost" size="icon" onClick={onDeactivate} title="Deactivate" data-testid={`button-deactivate-${target._id}`}>
+        <UserMinus className="h-4 w-4 text-orange-500" />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={onPromote} title="Promote to admin" data-testid={`button-role-${target._id}`}>
+        <Shield className="h-4 w-4" />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={onResetPassword} title="Reset password" data-testid={`button-reset-${target._id}`}>
+        <KeyRound className="h-4 w-4" />
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * 4-step promote dialog (§13):
+ *   confirm → password → 3s loader → success card with timestamp.
+ */
+function PromoteAdminDialog({
+  target, promoterName, onClose, onPromoted,
+}: {
+  target: IUser | null;
+  promoterName: string;
+  onClose: () => void;
+  onPromoted: () => void;
+}) {
+  const { toast } = useToast();
+  const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
+  const [password, setPassword] = useState("");
+  const [promotedAt, setPromotedAt] = useState<Date | null>(null);
+
+  useEffect(() => {
+    if (target) {
+      setStep(0);
+      setPassword("");
+      setPromotedAt(null);
+    }
+  }, [target]);
+
+  if (!target) return null;
+
+  const verifyAndPromote = async () => {
+    try {
+      const r = await apiRequest("POST", "/api/auth/verify-password", { password });
+      const j = await r.json();
+      if (!j?.success) throw new Error(j?.error || "Incorrect password");
+      setStep(2);
+      await new Promise((res) => setTimeout(res, 3000)); // 3-second loading
+      onPromoted();
+      setPromotedAt(new Date());
+      setStep(3);
+    } catch (e: any) {
+      toast({ title: "Promotion blocked", description: e.message, variant: "destructive" });
+    }
+  };
+
+  return (
+    <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        {step === 0 && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Promote to Admin</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to promote <strong>{target.username}</strong> to Admin?
+                <br />This grants them full admin-level access.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="ghost" onClick={onClose}>No, Cancel</Button>
+              <Button onClick={() => setStep(1)} data-testid="button-promote-yes">Yes, Promote</Button>
+            </DialogFooter>
+          </>
+        )}
+        {step === 1 && (
+          <>
+            <DialogHeader>
+              <DialogTitle>Confirm with your password</DialogTitle>
+              <DialogDescription>Enter your admin password to confirm this action.</DialogDescription>
+            </DialogHeader>
+            <Input
+              type="password"
+              autoFocus
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Your admin password"
+              onKeyDown={(e) => { if (e.key === "Enter" && password) verifyAndPromote(); }}
+              data-testid="input-promote-password"
+            />
+            <DialogFooter>
+              <Button variant="ghost" onClick={onClose}>Cancel</Button>
+              <Button disabled={!password} onClick={verifyAndPromote} data-testid="button-promote-confirm">Confirm</Button>
+            </DialogFooter>
+          </>
+        )}
+        {step === 2 && (
+          <div className="py-10 text-center space-y-3">
+            <div className="inline-block animate-spin rounded-full h-10 w-10 border-4 border-primary border-t-transparent" />
+            <p className="text-sm text-muted-foreground">Granting admin access…</p>
+          </div>
+        )}
+        {step === 3 && promotedAt && (
+          <>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-emerald-600">
+                <UserCheck className="h-5 w-5" />
+                {target.username} is now an Admin
+              </DialogTitle>
+              <DialogDescription className="pt-2 leading-relaxed">
+                Promoted on: <strong>{promotedAt.toLocaleString("en-PH", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit", day: "2-digit", hour: "numeric", minute: "2-digit", hour12: true })}</strong>
+                <br />
+                Promoted by: <strong>{promoterName}</strong>
+                <br /><br />
+                <span className="text-xs text-muted-foreground">You can revoke this access anytime in the Users section.</span>
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button onClick={onClose} data-testid="button-promote-okay">Okay</Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

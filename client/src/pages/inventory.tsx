@@ -74,6 +74,7 @@ import {
 } from "@/components/ui/form";
 import { PageHeader } from "@/components/page-header";
 import { KPICard } from "@/components/kpi-card";
+import { NumberInput } from "@/components/number-input";
 import { cn } from "@/lib/utils";
 
 const peso = (n: number) =>
@@ -93,10 +94,21 @@ function skuOf(item: IItem): string {
   return `${cat}-${name}-${tail}`;
 }
 
-/** Stock status — used for bar color + status pill. */
+/**
+ * Stock status — new threshold formula (REQUEST.pdf round 7):
+ *   Low      = currentQuantity ≤ 25%  of startingStock
+ *   Critical = currentQuantity ≤ 12.5% of startingStock (inner band)
+ * If startingStock is 0 (legacy data), zero qty is Critical but otherwise
+ * we fall through to Normal so the row doesn't lie.
+ */
 function stockStatus(item: IItem): "Critical" | "Low" | "Normal" {
-  if (item.currentQuantity <= 0) return "Critical";
-  if (item.currentQuantity <= (item.reorderLevel || 0)) return "Low";
+  const start = (item as any).startingStock || 0;
+  const q = item.currentQuantity || 0;
+  if (q <= 0) return "Critical";
+  if (start > 0) {
+    if (q <= start * 0.125) return "Critical";
+    if (q <= start * 0.25) return "Low";
+  }
   return "Normal";
 }
 
@@ -892,12 +904,11 @@ export default function InventoryPage() {
                     <FormItem>
                       <FormLabel>Unit price (₱)</FormLabel>
                       <FormControl>
-                        <Input
-                          type="number"
+                        <NumberInput
                           min={0}
-                          step={0.01}
-                          {...field}
-                          onChange={(e) => field.onChange(Number(e.target.value))}
+                          placeholder="Enter price"
+                          value={field.value}
+                          onChange={field.onChange}
                         />
                       </FormControl>
                       <FormMessage />
@@ -911,11 +922,12 @@ export default function InventoryPage() {
                     <FormItem>
                       <FormLabel>Current stock</FormLabel>
                       <FormControl>
-                        <Input
-                          type="number"
+                        <NumberInput
                           min={0}
-                          {...field}
-                          onChange={(e) => field.onChange(Number(e.target.value))}
+                          allowDecimal={false}
+                          placeholder="Enter starting stock"
+                          value={field.value}
+                          onChange={field.onChange}
                         />
                       </FormControl>
                       <FormMessage />
@@ -931,11 +943,12 @@ export default function InventoryPage() {
                     <FormItem>
                       <FormLabel>Safety stock</FormLabel>
                       <FormControl>
-                        <Input
-                          type="number"
+                        <NumberInput
                           min={0}
-                          {...field}
-                          onChange={(e) => field.onChange(Number(e.target.value))}
+                          allowDecimal={false}
+                          placeholder="Enter safety buffer"
+                          value={field.value}
+                          onChange={field.onChange}
                         />
                       </FormControl>
                       <FormMessage />
@@ -1001,11 +1014,11 @@ export default function InventoryPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Unit price (₱)</label>
-                  <Input type="number" min={0} step="0.01" value={editPrice} onChange={(e) => setEditPrice(Number(e.target.value))} data-testid="input-edit-price" />
+                  <NumberInput min={0} placeholder="Enter price" value={editPrice} onChange={setEditPrice} data-testid="input-edit-price" />
                 </div>
                 <div>
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Current stock</label>
-                  <Input type="number" min={0} value={editQty} onChange={(e) => setEditQty(Number(e.target.value))} data-testid="input-edit-qty" />
+                  <NumberInput min={0} allowDecimal={false} placeholder="Enter qty" value={editQty} onChange={setEditQty} data-testid="input-edit-qty" />
                 </div>
               </div>
               <div className="flex items-center justify-between pt-3 border-t">

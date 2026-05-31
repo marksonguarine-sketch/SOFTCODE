@@ -19,7 +19,7 @@
  * The previous 1473-line dashboard is preserved as dashboard-legacy.tsx.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import {
@@ -363,6 +363,36 @@ export default function DashboardPage() {
     staleTime: 10_000,
   });
   const onShiftUsers = onlineRes?.data?.users || [];
+
+  // ── Midnight PHT reset (REQUEST.pdf §12) ────────────────────────────────
+  // At 00:00 Philippine time, invalidate every query that's date-bucketed
+  // (dashboard stats/advanced, top customers, activity feed, employees
+  // progress) so the new day starts from a clean state regardless of where
+  // the server clock thinks it is.
+  useEffect(() => {
+    // Compute ms until next PHT midnight (UTC+8).
+    const now = new Date();
+    const utcMs = now.getTime();
+    const phtNow = new Date(utcMs + 8 * 3600_000);
+    const phtMidnight = new Date(Date.UTC(
+      phtNow.getUTCFullYear(),
+      phtNow.getUTCMonth(),
+      phtNow.getUTCDate() + 1, // next day
+      0, 0, 5, // small buffer
+    ));
+    const delay = phtMidnight.getTime() - 8 * 3600_000 - utcMs;
+    const t = setTimeout(() => {
+      // Cascade refresh — every active query is invalidated.
+      // useQueryClient would be cleaner but the dashboard already imports
+      // queryClient at module scope via apiRequest, so just call refetchAll
+      // via the React Query global.
+      // Note: dynamic require avoids a circular import.
+      import("@/lib/queryClient").then(({ queryClient }) => {
+        queryClient.invalidateQueries();
+      });
+    }, Math.max(60_000, delay));
+    return () => clearTimeout(t);
+  }, []);
 
   // Greeting
   const greeting = useMemo(() => {
@@ -730,8 +760,8 @@ export default function DashboardPage() {
         </Card>
       </div>
 
-      {/* 05. Shift summary + Top items + Top customers */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+      {/* 05. Shift summary + Employees Progress + Top items + Top customers */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
         {/* Shift summary */}
         <Card>
           <CardHeader className="py-3.5 px-5 border-b">
@@ -800,6 +830,10 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
+        {/* Employee Progress — today's per-staff counters with 5/page
+            pagination + profile photo / initials avatar (REQUEST.pdf §8). */}
+        <EmployeeProgressCard />
+
         {/* Top items — paginated 6 per page with prev/next per REQUEST.pdf
             round 6 ("display 6 items only and there is a button below
             >next or <prev"). */}
@@ -828,29 +862,9 @@ export default function DashboardPage() {
           maxValue={(items) => Math.max(1, ...items.map((it: any) => it.totalQty || 0))}
         />
 
-        {/* Top customers — same pattern */}
-        <PaginatedListCard
-          title="Top customers"
-          subtitle="By revenue"
-          empty="No customer activity yet."
-          items={topCustomers}
-          renderRow={(c: any, i: number, _arr, absoluteIdx: number) => (
-            <div className="flex items-center gap-2.5 py-2.5">
-              <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold shrink-0">
-                {initialsOf(c.name)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-muted-foreground font-mono text-[11px] w-5 shrink-0 text-right">{absoluteIdx + 1}</span>
-                  <span className="text-[13px] font-semibold truncate">{c.name}</span>
-                  {absoluteIdx === 0 && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
-                </div>
-                <div className="text-[11px] text-muted-foreground">{c.count} order{c.count === 1 ? "" : "s"}</div>
-              </div>
-              <span className="font-mono text-[13px] font-semibold tabular-nums">{peso(c.spend)}</span>
-            </div>
-          )}
-        />
+        {/* Top customers with 24h/7d/1m/6m time-window toggle (REQUEST.pdf §11) */}
+        <TopCustomersCard />
+
       </div>
 
       {/* 06. Activity feed + Payment mix */}
@@ -966,6 +980,149 @@ export default function DashboardPage() {
           synthetic and the chart added clutter without insight. */}
 
     </div>
+  );
+}
+
+/** Top Customers card with 24h/7d/1m/6m time-window toggle. */
+function TopCustomersCard() {
+  const [window, setWindow] = useState<"24h" | "7d" | "1m" | "6m">("7d");
+  const { data } = useQuery<{ success: boolean; data: { window: string; rows: Array<{ name: string; totalSpend: number; orderCount: number; latestPurchase: string }> } }>({
+    queryKey: ["/api/dashboard/top-customers", window],
+    queryFn: () => apiRequest("GET", `/api/dashboard/top-customers?window=${window}`).then((r) => r.json()),
+    refetchInterval: 60_000,
+    staleTime: 15_000,
+  });
+  const rows = data?.data?.rows || [];
+  const peso = (n: number) => "₱" + Math.round(n).toLocaleString("en-PH");
+  return (
+    <Card>
+      <CardHeader className="py-3.5 px-5 border-b">
+        <CardTitle className="text-[13.5px] font-semibold tracking-tight">Top customers</CardTitle>
+        <div className="text-[12px] text-muted-foreground mt-0.5">By revenue</div>
+        <div className="mt-2 inline-flex bg-muted border border-border rounded-md p-0.5 gap-0.5">
+          {(["24h", "7d", "1m", "6m"] as const).map((w) => (
+            <button
+              key={w}
+              onClick={() => setWindow(w)}
+              className={cn(
+                "text-[11px] font-medium px-2 py-0.5 rounded transition",
+                window === w
+                  ? "bg-card text-foreground font-semibold shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              data-testid={`top-customers-${w}`}
+            >
+              {w === "24h" ? "24h" : w === "7d" ? "7 days" : w === "1m" ? "1 month" : "6 months"}
+            </button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent className="px-3 py-2">
+        {rows.length === 0 ? (
+          <div className="py-6 text-center text-muted-foreground text-sm">No customer activity in this window.</div>
+        ) : (
+          <div className="divide-y">
+            {rows.map((c, i) => (
+              <div key={c.name + i} className="flex items-center gap-2.5 py-2.5 px-1">
+                <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold shrink-0">
+                  {initialsOf(c.name)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-muted-foreground font-mono text-[11px] w-5 shrink-0 text-right">{i + 1}.</span>
+                    <span className="text-[13px] font-semibold truncate">{c.name}</span>
+                    {i === 0 && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {new Date(c.latestPurchase).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} · {c.orderCount} order{c.orderCount === 1 ? "" : "s"}
+                  </div>
+                </div>
+                <span className="font-mono text-[13px] font-semibold tabular-nums">{peso(c.totalSpend)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Employee Progress widget — today's per-staff counts (REQUEST.pdf §8).
+ * Pulls from /api/dashboard/employees-progress which aggregates pending /
+ * completed / reservations per username. 5 rows per page with Prev/Next.
+ * Avatar = profile photo when uploaded, otherwise initials chip.
+ */
+function EmployeeProgressCard() {
+  const { data, isLoading } = useQuery<{ success: boolean; data: { rows: Array<{ username: string; role: string; photo: string; pending: number; completed: number; reservations: number }> } }>({
+    queryKey: ["/api/dashboard/employees-progress"],
+    queryFn: () => apiRequest("GET", "/api/dashboard/employees-progress").then((r) => r.json()),
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  });
+  const rows = data?.data?.rows || [];
+  const [page, setPage] = useState(1);
+  const PAGE = 5;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = rows.slice((pageSafe - 1) * PAGE, pageSafe * PAGE);
+  return (
+    <Card>
+      <CardHeader className="py-3.5 px-5 border-b">
+        <CardTitle className="text-[13.5px] font-semibold tracking-tight">Employee Progress</CardTitle>
+        <div className="text-[12px] text-muted-foreground mt-0.5">Today's summary · {rows.length} staff</div>
+      </CardHeader>
+      <CardContent className="px-3 py-2">
+        {isLoading ? (
+          <div className="text-sm text-muted-foreground py-6 text-center">Loading…</div>
+        ) : rows.length === 0 ? (
+          <div className="text-sm text-muted-foreground py-6 text-center">No active employees yet.</div>
+        ) : (
+          <>
+            <div className="divide-y">
+              {paged.map((r) => {
+                const colors = ["bg-amber-100 text-amber-700", "bg-blue-100 text-blue-700", "bg-emerald-100 text-emerald-700", "bg-purple-100 text-purple-700", "bg-rose-100 text-rose-700"];
+                const color = colors[r.username.charCodeAt(0) % colors.length];
+                return (
+                  <div key={r.username} className="flex items-center gap-2.5 py-2.5 px-1" data-testid={`emp-progress-${r.username}`}>
+                    {r.photo ? (
+                      <img src={`/api/uploads/${r.photo}`} alt={r.username} className="w-9 h-9 rounded-full object-cover shrink-0 border" />
+                    ) : (
+                      <div className={cn("w-9 h-9 rounded-full grid place-items-center text-[12px] font-mono font-bold shrink-0", color)}>{initialsOf(r.username)}</div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[12.5px] font-semibold truncate">{r.username}</div>
+                      <div className="text-[10.5px] text-muted-foreground uppercase tracking-wider">{r.role.replace(/_/g, " ").toLowerCase()}</div>
+                    </div>
+                    <div className="flex gap-2 shrink-0 text-[11px]">
+                      <div className="text-center w-16">
+                        <div className="font-mono font-bold tabular-nums text-amber-700">{r.pending}</div>
+                        <div className="text-[9px] text-muted-foreground uppercase tracking-wider">pending</div>
+                      </div>
+                      <div className="text-center w-16">
+                        <div className="font-mono font-bold tabular-nums text-emerald-700">{r.completed}</div>
+                        <div className="text-[9px] text-muted-foreground uppercase tracking-wider">done</div>
+                      </div>
+                      <div className="text-center w-16">
+                        <div className="font-mono font-bold tabular-nums text-blue-700">{r.reservations}</div>
+                        <div className="text-[9px] text-muted-foreground uppercase tracking-wider">resv</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-2 mt-1 border-t">
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid="emp-progress-prev">‹ Prev</Button>
+                <span className="text-[11px] text-muted-foreground tabular-nums">Page {pageSafe} of {totalPages}</span>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} data-testid="emp-progress-next">Next ›</Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }
 

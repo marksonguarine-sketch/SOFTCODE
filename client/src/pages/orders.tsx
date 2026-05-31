@@ -33,6 +33,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { NumberInput } from "@/components/number-input";
+import { cn } from "@/lib/utils";
 
 type OrderItemLocal = { itemId: string; itemName: string; qty: number; originalUnitPrice: number; discountedUnitPrice: number; discountApplied: boolean; offerName: string; lineTotal: number };
 
@@ -437,13 +439,39 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
     setDuplicate(null);
   }
 
+  // Overflow / duplicate / approval state machine for the Items → Next step.
+  const [overflow, setOverflow] = useState<{ itemId: string; itemName: string; want: number; have: number } | null>(null);
+  const [duplicateInfo, setDuplicateInfo] = useState<any | null>(null);
+  const [waitingApproval, setWaitingApproval] = useState<{ requestId: string; startedAt: number } | null>(null);
+
   async function handleNext() {
     if (step === 0) {
       const fields = ["customerName", "orderType", "orderChannel"] as const;
       form.trigger(fields).then((ok) => { if (ok) setStep(1); });
     } else if (step === 1) {
       if (orderItems.length === 0) { toast({ title: "Add at least one item", variant: "destructive" }); return; }
-      await checkDuplicate();
+      // Overflow check: any line where qty > current stock fires the
+      // Partial Release / Notify Admin / Cancel dialog (REQUEST.pdf §3b).
+      for (const oi of orderItems) {
+        const stockItem = allItems.find((i) => i._id === oi.itemId);
+        const stock = stockItem?.currentQuantity ?? 0;
+        if (oi.qty > stock) {
+          setOverflow({ itemId: oi.itemId, itemName: oi.itemName, want: oi.qty, have: stock });
+          return; // block until user picks an option
+        }
+      }
+      // Duplicate check (REQUEST.pdf §9-10): same customer + overlapping item
+      try {
+        const res = await apiRequest("POST", "/api/orders/check-duplicate", {
+          customerName: form.getValues("customerName"),
+          itemIds: orderItems.map((i) => i.itemId),
+        });
+        const json = await res.json();
+        if (json?.data?.duplicate && !json?.data?.approvedGrantId) {
+          setDuplicateInfo(json.data.duplicate);
+          return; // dialog handles next move
+        }
+      } catch { /* network blip — allow through */ }
       setStep(2);
     } else if (step === 2) {
       const fields = ["paymentMethod", "paymentStatus"] as const;
@@ -452,6 +480,27 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       setStep(4);
     }
   }
+
+  // Poll for duplicate-order approval grant; once approved → flash success
+  // and advance the wizard to Payment step. (Round 7 spec §10.)
+  useQuery<{ success: boolean; data: { requests: any[] } }>({
+    queryKey: ["/api/item-requests", "duplicate-watch", waitingApproval?.requestId || ""],
+    queryFn: () => apiRequest("GET", `/api/item-requests?status=approved`).then((r) => r.json()),
+    enabled: !!waitingApproval,
+    refetchInterval: 3_000,
+    refetchIntervalInBackground: true,
+    structuralSharing: false,
+    select: (d) => {
+      // Side-effect on every poll
+      const grant = (d?.data?.requests || []).find((r: any) => r._id === waitingApproval?.requestId);
+      if (grant && grant.status === "approved") {
+        setWaitingApproval(null);
+        toast({ title: "An admin approved your order — proceeding to payment." });
+        setStep(2);
+      }
+      return d;
+    },
+  });
 
   function handleBack() {
     if (step > 0) setStep(step - 1);
@@ -470,6 +519,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   );
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(v) => { if (!v) requestClose(); }}>
       <DialogContent className="fixed inset-0 max-w-none !w-screen !h-screen !translate-x-0 !translate-y-0 !left-0 !top-0 !rounded-none m-0 flex flex-col overflow-hidden p-0 gap-0">
         <DialogHeader className="flex-shrink-0 px-6 py-4 border-b bg-background">
@@ -681,43 +731,70 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                       <TableHeader>
                         <TableRow>
                           <TableHead>Item</TableHead>
-                          <TableHead className="text-center w-16">Qty</TableHead>
+                          <TableHead className="text-center w-24">Current Stock</TableHead>
+                          <TableHead className="text-center w-[140px]">Qty</TableHead>
                           <TableHead className="text-right">Unit Price</TableHead>
                           <TableHead className="text-right">Subtotal</TableHead>
                           <TableHead className="w-8" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {orderItems.map((oi) => (
-                          <TableRow key={oi.itemId}>
-                            <TableCell className="text-sm">{oi.itemName}</TableCell>
-                            <TableCell className="text-center">
-                              <div className="flex items-center justify-center gap-1">
-                                <button type="button"
-                                  className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent text-base font-bold leading-none"
-                                  onClick={() => {
-                                    const newQty = Math.max(1, oi.qty - 1);
-                                    setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
-                                  }}>−</button>
-                                <span className="w-8 text-center text-sm font-medium select-none">{oi.qty}</span>
-                                <button type="button"
-                                  className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent text-base font-bold leading-none"
-                                  onClick={() => {
-                                    const stock = allItems.find((i) => i._id === oi.itemId)?.currentQuantity ?? 999;
-                                    const newQty = Math.min(stock, oi.qty + 1);
-                                    setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
-                                  }}>+</button>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-right text-sm">{formatCurrency(oi.originalUnitPrice)}</TableCell>
-                            <TableCell className="text-right text-sm font-medium">{formatCurrency(oi.lineTotal)}</TableCell>
-                            <TableCell>
-                              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeItem(oi.itemId)}>
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                        {orderItems.map((oi) => {
+                          const stockItem = allItems.find((i) => i._id === oi.itemId);
+                          const stock = stockItem?.currentQuantity ?? 0;
+                          const willPartial = oi.qty > stock;
+                          return (
+                            <TableRow key={oi.itemId} className={willPartial ? "bg-amber-50/40 dark:bg-amber-950/20" : undefined}>
+                              <TableCell className="text-sm">
+                                <div className="font-medium">{oi.itemName}</div>
+                                {willPartial && (
+                                  <div className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
+                                    Will partial release — {stock} now, {oi.qty - stock} backorder
+                                  </div>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <span className={cn("text-sm tabular-nums font-mono", stock <= 0 ? "text-red-600 font-semibold" : stock < oi.qty ? "text-amber-700 font-semibold" : "text-muted-foreground")}>{stock}</span>
+                              </TableCell>
+                              <TableCell className="text-center">
+                                <div className="flex items-center justify-center gap-1">
+                                  <button type="button"
+                                    className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent text-base font-bold leading-none"
+                                    onClick={() => {
+                                      const newQty = Math.max(1, oi.qty - 1);
+                                      setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
+                                    }}>−</button>
+                                  {/* Typeable qty (REQUEST.pdf round 7 section 3a) */}
+                                  <NumberInput
+                                    allowDecimal={false}
+                                    min={1}
+                                    value={oi.qty}
+                                    placeholder="0"
+                                    className="h-7 w-14 text-center text-sm font-medium tabular-nums px-1"
+                                    onChange={(n) => {
+                                      const newQty = Math.max(1, n);
+                                      setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
+                                    }}
+                                  />
+                                  <button type="button"
+                                    className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent text-base font-bold leading-none"
+                                    onClick={() => {
+                                      // Soft cap at stock; the overflow dialog at Next handles >stock
+                                      const newQty = oi.qty + 1;
+                                      setOrderItems((prev) => prev.map((item) => item.itemId === oi.itemId ? { ...item, qty: newQty, lineTotal: newQty * item.discountedUnitPrice } : item));
+                                    }}>+</button>
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right text-sm">{formatCurrency(oi.originalUnitPrice)}</TableCell>
+                              <TableCell className="text-right text-sm font-medium">{formatCurrency(oi.lineTotal)}</TableCell>
+                              <TableCell>
+                                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => removeItem(oi.itemId)}>
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                     <div className="flex justify-end text-sm font-medium pr-11">
@@ -895,6 +972,188 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* ── Overflow dialog (qty > current stock) ──────────────────────────
+        Round 7 §3b: Partial Release / Notify Admin / Cancel This Order. */}
+    <Dialog open={!!overflow} onOpenChange={(o) => !o && setOverflow(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <AlertCircle className="h-5 w-5" /> Order Exceeds Available Stock
+          </DialogTitle>
+          <DialogDescription className="text-foreground/80 pt-2 leading-relaxed">
+            The requested quantity (<strong>{overflow?.want}</strong>) for{" "}
+            <strong>"{overflow?.itemName}"</strong> exceeds the current stock of{" "}
+            <strong>{overflow?.have}</strong> units.
+            <br /><br />What would you like to do?
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            variant="destructive"
+            onClick={() => {
+              // Cancel this order — close the whole create-order dialog
+              setOverflow(null);
+              requestClose();
+            }}
+            data-testid="overflow-cancel"
+          >Cancel This Order</Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              if (!overflow) return;
+              try {
+                await apiRequest("POST", "/api/inventory/notify-restock", {
+                  itemId: overflow.itemId, itemName: overflow.itemName,
+                  needed: overflow.want, currentStock: overflow.have,
+                  customerName: form.getValues("customerName"),
+                });
+                toast({ title: "Admin & inventory manager notified" });
+              } catch (e: any) {
+                toast({ title: "Notify failed", description: e.message, variant: "destructive" });
+              }
+            }}
+            data-testid="overflow-notify"
+          >Notify Admin</Button>
+          <Button
+            onClick={() => {
+              // Partial release — keep the line at the requested qty so the
+              // server's release flow can release what's available now and
+              // leave the rest as pending. Toast explains.
+              if (!overflow) return;
+              toast({
+                title: `Partial release accepted`,
+                description: `${overflow.have} of ${overflow.itemName} will release now; ${overflow.want - overflow.have} stays as backorder.`,
+              });
+              setOverflow(null);
+            }}
+            data-testid="overflow-partial"
+          >Partial Release</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* ── Duplicate-order detection dialog (§9) ─────────────────────────── */}
+    <Dialog open={!!duplicateInfo} onOpenChange={(o) => !o && setDuplicateInfo(null)}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-amber-600">
+            <AlertCircle className="h-5 w-5" /> Possible Duplicate Order Detected
+          </DialogTitle>
+          <DialogDescription className="text-foreground/80 pt-2 leading-relaxed">
+            An order for <strong>{duplicateInfo?.customerName}</strong> with one
+            of the same items is already logged.
+            <br /><br />
+            <span className="text-xs font-mono">Order: {duplicateInfo?.trackingNumber}</span>
+            <br />
+            <span className="text-xs">Status: {duplicateInfo?.fulfillmentStatus}</span>
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setDuplicateInfo(null)} data-testid="dup-close">Close</Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (duplicateInfo?._id) {
+                setDuplicateInfo(null);
+                onClose();
+                navigate(`/orders/${duplicateInfo._id}`);
+              }
+            }}
+            data-testid="dup-check"
+          >Check the Order</Button>
+          <Button
+            variant="outline"
+            onClick={async () => {
+              try {
+                const res = await apiRequest("POST", "/api/item-requests", {
+                  action: "DUPLICATE_ORDER",
+                  payload: {
+                    customerName: form.getValues("customerName"),
+                    items: orderItems.map((i) => ({ itemId: i.itemId, itemName: i.itemName, qty: i.qty })),
+                    duplicateOf: duplicateInfo?._id,
+                    duplicateTracking: duplicateInfo?.trackingNumber,
+                  },
+                  notes: `Duplicate detected for ${duplicateInfo?.customerName}. Asking permission to log a 2nd order.`,
+                });
+                const json = await res.json();
+                if (json?.success) toast({ title: "Notified admin / inventory manager" });
+                setDuplicateInfo(null);
+              } catch (e: any) {
+                toast({ title: "Notify failed", description: e.message, variant: "destructive" });
+              }
+            }}
+            data-testid="dup-notify"
+          >Notify Admin</Button>
+          <Button
+            onClick={async () => {
+              try {
+                const res = await apiRequest("POST", "/api/item-requests", {
+                  action: "DUPLICATE_ORDER",
+                  payload: {
+                    customerName: form.getValues("customerName"),
+                    items: orderItems.map((i) => ({ itemId: i.itemId, itemName: i.itemName, qty: i.qty })),
+                    duplicateOf: duplicateInfo?._id,
+                    duplicateTracking: duplicateInfo?.trackingNumber,
+                  },
+                  notes: `Employee wants to proceed past a duplicate hit. Approve in the inbox to release.`,
+                });
+                const json = await res.json();
+                if (json?.success) {
+                  setWaitingApproval({ requestId: json.data.request._id, startedAt: Date.now() });
+                  toast({ title: "Request sent — waiting for admin approval" });
+                }
+                setDuplicateInfo(null);
+              } catch (e: any) {
+                toast({ title: "Could not send", description: e.message, variant: "destructive" });
+              }
+            }}
+            data-testid="dup-proceed"
+          >Proceed to Checkout</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    {/* ── Waiting-for-admin overlay with live elapsed counter (§9) ─────── */}
+    <Dialog open={!!waitingApproval} onOpenChange={(o) => !o && setWaitingApproval(null)}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Loader2 className="h-4 w-4 animate-spin" /> Waiting for Admin Approval…
+          </DialogTitle>
+          <DialogDescription>
+            The admin / inventory manager has been notified. You can close this dialog —
+            the page will auto-advance the moment approval lands.
+          </DialogDescription>
+        </DialogHeader>
+        <ElapsedTimer startedAt={waitingApproval?.startedAt ?? Date.now()} />
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={() => setWaitingApproval(null)}>Close</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
+  );
+}
+
+/** Live MM:SS elapsed counter for the waiting-for-admin overlay. */
+function ElapsedTimer({ startedAt }: { startedAt: number }) {
+  const [n, setN] = useState(0);
+  useMemo(() => setN(0), [startedAt]);
+  // tick every second
+  useState(() => {
+    const t = setInterval(() => setN((x) => x + 1), 1000);
+    return () => clearInterval(t);
+  });
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  void n;
+  const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+  const ss = String(seconds % 60).padStart(2, "0");
+  return (
+    <div className="text-center py-3">
+      <p className="text-3xl font-mono tabular-nums" data-testid="text-approval-elapsed">{mm}:{ss}</p>
+      <p className="text-xs text-muted-foreground mt-1">Elapsed</p>
+    </div>
   );
 }
 

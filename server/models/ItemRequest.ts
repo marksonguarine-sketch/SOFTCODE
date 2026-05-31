@@ -22,7 +22,7 @@ import mongoose, { Schema, Document } from "mongoose";
  * two admins can't both approve the same request.
  */
 
-export type ItemRequestAction = "ADD_ITEM" | "EDIT_STOCK" | "DELETE_ITEM";
+export type ItemRequestAction = "ADD_ITEM" | "EDIT_STOCK" | "DELETE_ITEM" | "DUPLICATE_ORDER";
 export type ItemRequestStatus = "pending" | "approved" | "rejected" | "used" | "cancelled";
 
 export interface IItemRequestDoc extends Document {
@@ -44,7 +44,7 @@ export interface IItemRequestDoc extends Document {
 const itemRequestSchema = new Schema<IItemRequestDoc>(
   {
     requestedBy: { type: String, required: true, index: true },
-    action: { type: String, enum: ["ADD_ITEM", "EDIT_STOCK", "DELETE_ITEM"], required: true },
+    action: { type: String, enum: ["ADD_ITEM", "EDIT_STOCK", "DELETE_ITEM", "DUPLICATE_ORDER"], required: true },
     payload: { type: Schema.Types.Mixed, default: {} },
     status: {
       type: String,
