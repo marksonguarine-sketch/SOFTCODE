@@ -2,6 +2,7 @@
 
 # JOAP Hardware Trading
 
+Create → Assign → Claim → Process → Complete → Dashboard Update → Accounting Update → Logs Update → Realtime Update
 **ERP system for a Antipolo, Philippines hardware store.**
 Inventory · Orders · Reservations · Billing · Accounting · Reports — in one place.
 
