@@ -98,16 +98,25 @@ function skuOf(item: IItem): string {
  * Stock status — new threshold formula (REQUEST.pdf round 7):
  *   Low      = currentQuantity ≤ 25%  of startingStock
  *   Critical = currentQuantity ≤ 12.5% of startingStock (inner band)
- * If startingStock is 0 (legacy data), zero qty is Critical but otherwise
- * we fall through to Normal so the row doesn't lie.
+ *
+ * Legacy fallback (items pre-startingStock field): use reorderLevel as
+ * the baseline so the page doesn't silently misreport. Low = qty ≤
+ * reorderLevel; Critical = qty ≤ reorderLevel / 2. Bands are mutually
+ * exclusive so Critical items aren't double-counted as Low.
  */
 function stockStatus(item: IItem): "Critical" | "Low" | "Normal" {
   const start = (item as any).startingStock || 0;
+  const reorder = (item as any).reorderLevel || 0;
   const q = item.currentQuantity || 0;
   if (q <= 0) return "Critical";
   if (start > 0) {
     if (q <= start * 0.125) return "Critical";
     if (q <= start * 0.25) return "Low";
+    return "Normal";
+  }
+  if (reorder > 0) {
+    if (q <= reorder * 0.5) return "Critical";
+    if (q <= reorder) return "Low";
   }
   return "Normal";
 }
@@ -193,45 +202,32 @@ export default function InventoryPage() {
   }, [allItems, category, search]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────
-  // Critical = currentQuantity ≤ reorderLevel (or zero outright).
-  // Low      = currentQuantity above reorderLevel but within +50% of it
-  //            (so it's still in the "watch this" band).
-  // Matches the dashboard-side computation so the two pages never disagree.
+  // CRITICAL FIX: counters now share the same `stockStatus()` predicate the
+  // row badges use. Previously the counter used a different reorderLevel-
+  // based formula, so an item flagged as "Low" on its row would still be
+  // counted in the "Critical: N" KPI tile. Now they always agree.
   const kpis = useMemo(() => {
     const totalSkus = allItems.length;
     const stockValue = allItems.reduce(
       (s, i) => s + (i.unitPrice || 0) * (i.currentQuantity || 0),
       0
     );
-    const criticalStock = allItems.filter((i) => {
-      const r = i.reorderLevel || 0;
-      return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
-    }).length;
-    const lowStock = allItems.filter((i) => {
-      const r = i.reorderLevel || 0;
-      if (r <= 0) return false;
-      return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
-    }).length;
+    const criticalStock = allItems.filter((i) => stockStatus(i) === "Critical").length;
+    const lowStock = allItems.filter((i) => stockStatus(i) === "Low").length;
     const deadStock = allItems.filter(
       (i) => ((i as any).avgDailyUsage || 0) === 0 && i.currentQuantity > 0
     ).length;
     return { totalSkus, stockValue, criticalStock, lowStock, deadStock };
   }, [allItems]);
 
-  // Item lists used by KPI maximize dialogs
+  // Item lists used by KPI maximize dialogs — same predicates as above.
   const criticalItems = useMemo(
-    () => allItems.filter((i) => {
-      const r = i.reorderLevel || 0;
-      return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
-    }).sort((a, b) => a.currentQuantity - b.currentQuantity),
+    () => allItems.filter((i) => stockStatus(i) === "Critical")
+      .sort((a, b) => a.currentQuantity - b.currentQuantity),
     [allItems]
   );
   const lowItems = useMemo(
-    () => allItems.filter((i) => {
-      const r = i.reorderLevel || 0;
-      if (r <= 0) return false;
-      return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
-    }),
+    () => allItems.filter((i) => stockStatus(i) === "Low"),
     [allItems]
   );
   const sortedByValue = useMemo(

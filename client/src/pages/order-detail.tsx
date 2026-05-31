@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
 function StatusBadge({ status }: { status: string }) {
   const colorMap: Record<string, string> = {
@@ -735,6 +736,19 @@ export default function OrderDetailPage() {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Auto-scroll to the Release panel when navigated with ?release=1
+  // (REQUEST.pdf §18a — "Release Item" button in Pending Payment table
+  // routes here and opens the panel automatically).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.location.search.includes("release=1")) return;
+    const t = setTimeout(() => {
+      const el = document.getElementById("release-panel");
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [orderId]);
+
   const { data: orderData, isLoading } = useQuery<{ success: boolean; data: { order: IOrder; payments: any[] } }>({
     queryKey: ["/api/orders", orderId],
     enabled: !!orderId,
@@ -1209,23 +1223,83 @@ export default function OrderDetailPage() {
           )}
 
           {order.currentStatus === "Pending Release" && (
-            <Card>
+            <Card id="release-panel" className={cn(window.location.search.includes("release=1") && "ring-2 ring-blue-500/50")}>
               <CardHeader>
                 <CardTitle className="text-base flex items-center gap-2">
-                  <Truck className="h-4 w-4" /> Release Items
+                  <Truck className="h-4 w-4" /> Order Release Details
                 </CardTitle>
-                <CardDescription>Payment confirmed. Release items from inventory to complete this order.</CardDescription>
+                <CardDescription>Payment confirmed. Review and release items from inventory to complete this order.</CardDescription>
               </CardHeader>
-              <CardContent>
-                <Button
-                  onClick={() => releaseMutation.mutate()}
-                  disabled={releaseMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  data-testid="button-release-items"
-                >
-                  {releaseMutation.isPending && <Loader2 className="animate-spin mr-1" />}
-                  <Truck className="mr-2 h-4 w-4" /> Release Items & Complete Order
-                </Button>
+              <CardContent className="space-y-4">
+                {/* REQUEST.pdf §18b — full detail panel */}
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                  <div className="text-muted-foreground">Order ID</div>
+                  <div className="font-mono font-semibold">{order.trackingNumber}</div>
+                  <div className="text-muted-foreground">Customer</div>
+                  <div className="font-medium">{order.customerName}</div>
+                  <div className="text-muted-foreground">Order Type</div>
+                  <div>{order.orderType.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</div>
+                  <div className="text-muted-foreground">Date Ordered</div>
+                  <div>{formatDate(order.createdAt)}</div>
+                  {order.assignedTo && (
+                    <>
+                      <div className="text-muted-foreground">Assigned Staff</div>
+                      <div className="font-medium">{order.assignedTo}</div>
+                    </>
+                  )}
+                </div>
+
+                <div className="border-t pt-3">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Items</div>
+                  <div className="space-y-1.5 text-sm">
+                    {order.items.map((it: any, i: number) => (
+                      <div key={i} className="flex justify-between items-center">
+                        <span className="truncate">{it.itemName} × {it.qty}</span>
+                        <span className="font-mono tabular-nums text-muted-foreground">₱{(it.discountedUnitPrice || it.originalUnitPrice).toFixed(2)} = <strong className="text-foreground">₱{it.lineTotal.toFixed(2)}</strong></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {(() => {
+                  const totalPaid = (orderData?.data?.payments || []).reduce((s: number, p: any) => s + (p.amountPaid || 0), 0);
+                  const balance = Math.max(0, order.totalAmount - totalPaid);
+                  const pct = order.totalAmount > 0 ? (totalPaid / order.totalAmount) * 100 : 0;
+                  const isPartial = totalPaid > 0 && totalPaid < order.totalAmount;
+                  return (
+                    <div className="border-t pt-3">
+                      <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2">Payment</div>
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+                        <div className="text-muted-foreground">Total Amount</div>
+                        <div className="font-mono tabular-nums">₱{order.totalAmount.toFixed(2)}</div>
+                        <div className="text-muted-foreground">Amount Paid</div>
+                        <div className="font-mono tabular-nums text-emerald-700">₱{totalPaid.toFixed(2)}</div>
+                        <div className="text-muted-foreground">Balance</div>
+                        <div className="font-mono tabular-nums text-amber-700">₱{balance.toFixed(2)}</div>
+                        <div className="text-muted-foreground">Payment Method</div>
+                        <div>{order.paymentMethod}</div>
+                        <div className="text-muted-foreground">Payment Status</div>
+                        <div>{order.paymentStatus === "paid" ? "Full" : isPartial ? `Partial ≥50% (${pct.toFixed(0)}%)` : order.paymentStatus}</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="border-t pt-3 flex items-center justify-between">
+                  <div className="text-sm">
+                    <span className="text-muted-foreground">Release Status: </span>
+                    <Badge className="bg-amber-500 text-white border-transparent">Pending Release</Badge>
+                  </div>
+                  <Button
+                    onClick={() => releaseMutation.mutate()}
+                    disabled={releaseMutation.isPending}
+                    className="bg-blue-600 hover:bg-blue-700 text-white"
+                    data-testid="button-release-items"
+                  >
+                    {releaseMutation.isPending && <Loader2 className="animate-spin mr-1 h-4 w-4" />}
+                    <Truck className="mr-2 h-4 w-4" /> Release Item
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}

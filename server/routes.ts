@@ -103,23 +103,38 @@ async function logAction(action: string, actor: string, target = "", metadata: R
  * Stock-health helpers. New thresholds (REQUEST.pdf round 7):
  *   Low      = currentQuantity ≤ startingStock × 0.25
  *   Critical = currentQuantity ≤ startingStock × 0.125
- * Fallback: if startingStock is 0 (legacy items pre-migration), fall back
- * to currentQuantity itself so they never look "OK" when they shouldn't.
+ *
+ * Legacy fallback: items created before the startingStock field existed
+ * have startingStock=0. For those, use the reorderLevel as a stand-in
+ * baseline so they don't silently report as "Normal" forever:
+ *   Low      = currentQuantity ≤ reorderLevel
+ *   Critical = currentQuantity ≤ reorderLevel / 2 (or 0)
+ * If both startingStock AND reorderLevel are 0, only outright zero counts
+ * as critical.
+ *
+ * Bands are mutually exclusive: Critical is the inner band so an item that
+ * is critical is NOT also counted as low.
  */
-function stockBands(item: { currentQuantity?: number; startingStock?: number }) {
+function stockBands(item: { currentQuantity?: number; startingStock?: number; reorderLevel?: number }) {
   const start = Math.max(0, item.startingStock || 0);
+  const reorder = Math.max(0, item.reorderLevel || 0);
   const q = Math.max(0, item.currentQuantity || 0);
-  if (start <= 0) {
+
+  let lowThreshold = 0;
+  let criticalThreshold = 0;
+  if (start > 0) {
+    lowThreshold = start * 0.25;
+    criticalThreshold = start * 0.125;
+  } else if (reorder > 0) {
+    // Legacy fallback — interpret reorderLevel as the boundary of "low".
+    lowThreshold = reorder;
+    criticalThreshold = reorder * 0.5;
+  } else {
     return { critical: q <= 0, low: false, lowThreshold: 0, criticalThreshold: 0 };
   }
-  const lowThreshold = start * 0.25;
-  const criticalThreshold = start * 0.125;
-  return {
-    critical: q <= criticalThreshold,
-    low: !item || q > criticalThreshold ? q <= lowThreshold : false,
-    lowThreshold,
-    criticalThreshold,
-  };
+  const critical = q <= criticalThreshold;
+  const low = !critical && q <= lowThreshold;
+  return { critical, low, lowThreshold, criticalThreshold };
 }
 
 /**

@@ -10,6 +10,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -126,7 +127,7 @@ export default function PendingPaymentPage() {
         />
       </div>
 
-      {/* Table */}
+      {/* Table — REQUEST.pdf §18a: STATUS column + Action [Release Item] */}
       <Card>
         <CardContent className="p-0">
           <Table>
@@ -138,13 +139,14 @@ export default function PendingPaymentPage() {
                 <TableHead>Payment Method</TableHead>
                 <TableHead className="text-right">Amount Due</TableHead>
                 <TableHead>Date</TableHead>
-                <TableHead className="w-8" />
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="p-0">
+                  <TableCell colSpan={8} className="p-0">
                     {allOrders.length === 0 ? (
                       <EmptyState
                         icon={CreditCard}
@@ -160,28 +162,56 @@ export default function PendingPaymentPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((order) => (
-                  <TableRow
-                    key={order._id}
-                    className="cursor-pointer hover:bg-muted/40"
-                    onClick={() => navigate(`/orders/${order._id}`)}
-                    data-testid={`row-pending-${order._id}`}
-                  >
-                    <TableCell className="font-mono text-sm font-semibold">{order.trackingNumber}</TableCell>
-                    <TableCell className="font-medium">{order.customerName}</TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {PAYMENT_METHOD_LABELS[order.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] || order.paymentMethod}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-semibold">{formatCurrency(order.totalAmount)}</TableCell>
-                    <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
-                    <TableCell>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </TableCell>
-                  </TableRow>
-                ))
+                filtered.map((order) => {
+                  // STATUS column logic (§18a):
+                  //   "Pending Release" — paid (full or ≥50%) but items not handed over yet
+                  //   "Item Released / Completed" — already handed over
+                  //   "Awaiting Payment" — still under 50% paid
+                  const released = order.fulfillmentStatus === "completed";
+                  const eligible = order.paymentStatus === "paid" || order.paymentStatus === "partial";
+                  const status = released
+                    ? { label: "Item Released / Completed", cls: "bg-emerald-500 text-white border-transparent" }
+                    : eligible
+                      ? { label: "Pending Release", cls: "bg-amber-500 text-white border-transparent" }
+                      : { label: "Awaiting Payment", cls: "bg-slate-400 text-white border-transparent" };
+                  return (
+                    <TableRow
+                      key={order._id}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => navigate(`/orders/${order._id}`)}
+                      data-testid={`row-pending-${order._id}`}
+                    >
+                      <TableCell className="font-mono text-sm font-semibold">{order.trackingNumber}</TableCell>
+                      <TableCell className="font-medium">{order.customerName}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{ORDER_TYPE_LABELS[order.orderType] || order.orderType}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="text-xs">
+                          {PAYMENT_METHOD_LABELS[order.paymentMethod as keyof typeof PAYMENT_METHOD_LABELS] || order.paymentMethod}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-semibold">{formatCurrency(order.totalAmount)}</TableCell>
+                      <TableCell className="text-muted-foreground text-sm">{formatDate(order.createdAt)}</TableCell>
+                      <TableCell>
+                        <Badge className={cn("text-[10.5px]", status.cls)}>{status.label}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {eligible && !released ? (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="h-7 text-[11px]"
+                            onClick={(e) => { e.stopPropagation(); navigate(`/orders/${order._id}?release=1`); }}
+                            data-testid={`button-release-${order._id}`}
+                          >
+                            Release Item
+                          </Button>
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground inline-block" />
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
