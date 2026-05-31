@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { ArrowUp, ArrowDown, Maximize2 } from "lucide-react";
+import { ArrowUp, ArrowDown, Maximize2, Printer } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
@@ -152,31 +152,74 @@ export function KPICard({
         >
           <DialogHeader className="border-b px-5 py-3 flex-row items-center justify-between gap-3 shrink-0">
             <DialogTitle className="text-base font-semibold">{label}</DialogTitle>
-            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>Close</Button>
-          </DialogHeader>
-          <div className="flex-1 min-h-0 overflow-auto p-6 space-y-5">
-            <div className={cn("font-mono text-[52px] sm:text-[64px] font-bold tracking-tight leading-none tabular-nums", t.accent)}>
-              {value}
+            <div className="flex items-center gap-2 pr-8">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1"
+                onClick={async () => {
+                  const node = document.getElementById("kpicard-fs-content");
+                  if (!node) return;
+                  try {
+                    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                      import("html2canvas"),
+                      import("jspdf"),
+                    ]);
+                    const canvas = await html2canvas(node, {
+                      backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff",
+                      scale: 2,
+                      useCORS: true,
+                      logging: false,
+                    });
+                    const img = canvas.toDataURL("image/png");
+                    const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+                    const pageW = pdf.internal.pageSize.getWidth();
+                    const pageH = pdf.internal.pageSize.getHeight();
+                    const ratio = Math.min(pageW / canvas.width, pageH / canvas.height);
+                    const w = canvas.width * ratio;
+                    const h = canvas.height * ratio;
+                    pdf.text(label, 24, 28);
+                    pdf.addImage(img, "PNG", (pageW - w) / 2, 48, w, h - 48);
+                    pdf.save(`${label.replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                  } catch (err) {
+                    console.error("Print failed", err);
+                  }
+                }}
+                title="Print this view"
+                data-testid="kpicard-print"
+              >
+                <Printer className="w-3.5 h-3.5" /> Print
+              </Button>
             </div>
-            {(delta || sub) && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground flex-wrap">
-                {delta && (
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-0.5 font-mono font-semibold px-2 py-1 rounded-full text-xs",
-                      deltaDir === "up"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : "bg-red-100 text-red-700"
-                    )}
-                  >
-                    {deltaDir === "up" ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />}
-                    {delta}
-                  </span>
-                )}
-                {sub}
+          </DialogHeader>
+          <div
+            id="kpicard-fs-content"
+            className="flex-1 min-h-0 overflow-auto p-6 space-y-5 bg-background"
+          >
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className={cn("font-mono text-[64px] sm:text-[88px] font-bold tracking-tight leading-none tabular-nums", t.accent)}>
+                {value}
               </div>
-            )}
-            <div className="w-full h-[60vh] min-h-[320px]">{expanded ?? spark}</div>
+              {(delta || sub) && (
+                <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground flex-wrap">
+                  {delta && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-0.5 font-mono font-semibold px-2 py-1 rounded-full text-xs",
+                        deltaDir === "up"
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-red-100 text-red-700"
+                      )}
+                    >
+                      {deltaDir === "up" ? <ArrowUp className="w-3.5 h-3.5" /> : <ArrowDown className="w-3.5 h-3.5" />}
+                      {delta}
+                    </span>
+                  )}
+                  {sub}
+                </div>
+              )}
+            </div>
+            <div className="w-full">{expanded ?? spark}</div>
           </div>
         </DialogContent>
       </Dialog>

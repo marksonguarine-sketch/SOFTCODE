@@ -17,7 +17,7 @@
  *   interactivity works as the user expects.
  */
 import { useState } from "react";
-import { Maximize2, X } from "lucide-react";
+import { Maximize2, Printer } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -165,14 +165,54 @@ export function ChartCard({
                 className="h-8 w-[150px] text-xs"
                 data-testid="chartcard-range-to"
               />
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setOpen(false)} title="Close">
-                <X className="w-4 h-4" />
+              {/* Print captures the dialog content as a PDF (chart + side
+                  panels) — the equivalent of "take a screenshot of the
+                  maximized graph" the owner asked for. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1"
+                onClick={async () => {
+                  const node = document.getElementById("chartcard-fs-content");
+                  if (!node) return;
+                  try {
+                    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                      import("html2canvas"),
+                      import("jspdf"),
+                    ]);
+                    const canvas = await html2canvas(node, {
+                      backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff",
+                      scale: 2,
+                      useCORS: true,
+                      logging: false,
+                    });
+                    const img = canvas.toDataURL("image/png");
+                    const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+                    const pageW = pdf.internal.pageSize.getWidth();
+                    const pageH = pdf.internal.pageSize.getHeight();
+                    const ratio = Math.min(pageW / canvas.width, pageH / canvas.height);
+                    const w = canvas.width * ratio;
+                    const h = canvas.height * ratio;
+                    pdf.text(title, 24, 28);
+                    pdf.addImage(img, "PNG", (pageW - w) / 2, 48, w, h - 48);
+                    pdf.save(`${title.replace(/\s+/g, "-").toLowerCase()}-${new Date().toISOString().slice(0, 10)}.pdf`);
+                  } catch (err) {
+                    console.error("Print failed", err);
+                  }
+                }}
+                title="Print this view"
+                data-testid="chartcard-print"
+              >
+                <Printer className="w-3.5 h-3.5" /> Print
               </Button>
+              {/* DialogContent renders its own X in the top-right; we no
+                  longer add a second one. */}
             </div>
           </div>
           {/* Chart area — fills the dialog. Wrapping in min-h-0 lets
-              ResponsiveContainer compute height correctly inside a flex col. */}
-          <div className="flex-1 min-h-0 overflow-auto p-5">
+              ResponsiveContainer compute height correctly inside a flex col.
+              The id is used by the Print button (html2canvas capture). */}
+          <div id="chartcard-fs-content" className="flex-1 min-h-0 overflow-auto p-5 bg-background">
             <div className="h-full w-full min-h-[420px]">
               {renderFullscreen ? renderFullscreen(range) : children}
             </div>

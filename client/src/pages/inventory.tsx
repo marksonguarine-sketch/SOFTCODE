@@ -181,21 +181,51 @@ export default function InventoryPage() {
   }, [allItems, category, search]);
 
   // ── KPIs ──────────────────────────────────────────────────────────────
+  // Critical = currentQuantity ≤ reorderLevel (or zero outright).
+  // Low      = currentQuantity above reorderLevel but within +50% of it
+  //            (so it's still in the "watch this" band).
+  // Matches the dashboard-side computation so the two pages never disagree.
   const kpis = useMemo(() => {
     const totalSkus = allItems.length;
     const stockValue = allItems.reduce(
       (s, i) => s + (i.unitPrice || 0) * (i.currentQuantity || 0),
       0
     );
-    const lowStock = allItems.filter(
-      (i) =>
-        i.currentQuantity > 0 && i.currentQuantity <= (i.reorderLevel || 0)
-    ).length;
+    const criticalStock = allItems.filter((i) => {
+      const r = i.reorderLevel || 0;
+      return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
+    }).length;
+    const lowStock = allItems.filter((i) => {
+      const r = i.reorderLevel || 0;
+      if (r <= 0) return false;
+      return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
+    }).length;
     const deadStock = allItems.filter(
       (i) => ((i as any).avgDailyUsage || 0) === 0 && i.currentQuantity > 0
     ).length;
-    return { totalSkus, stockValue, lowStock, deadStock };
+    return { totalSkus, stockValue, criticalStock, lowStock, deadStock };
   }, [allItems]);
+
+  // Item lists used by KPI maximize dialogs
+  const criticalItems = useMemo(
+    () => allItems.filter((i) => {
+      const r = i.reorderLevel || 0;
+      return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
+    }).sort((a, b) => a.currentQuantity - b.currentQuantity),
+    [allItems]
+  );
+  const lowItems = useMemo(
+    () => allItems.filter((i) => {
+      const r = i.reorderLevel || 0;
+      if (r <= 0) return false;
+      return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
+    }),
+    [allItems]
+  );
+  const sortedByValue = useMemo(
+    () => [...allItems].map((i) => ({ ...i, lineValue: (i.unitPrice || 0) * (i.currentQuantity || 0) })).sort((a, b) => b.lineValue - a.lineValue),
+    [allItems]
+  );
 
   // ── Add item ──────────────────────────────────────────────────────────
   const form = useForm<CreateItemInput>({
@@ -278,6 +308,10 @@ export default function InventoryPage() {
     setEditSupplier((item as any).supplierName || "");
   }
 
+  // Expose the edit-opener to InvKPIList's Restock button via the module-
+  // level bridge (it lives outside the component scope).
+  useEffect(() => { setEditItemGlobal = openEdit; return () => { setEditItemGlobal = () => {}; }; }, []);
+
   // Polished modal shown when the server (or client guard) refuses an Add
   // Item because the initial stock is 0. Explains why and offers a one-click
   // Close button so the user can correct the form.
@@ -317,7 +351,7 @@ export default function InventoryPage() {
   });
 
   return (
-    <div className="px-6 sm:px-8 py-6 pb-16 max-w-[1500px] mx-auto" data-testid="page-inventory">
+    <div id="inventory-printable-root" className="px-6 sm:px-8 py-6 pb-16 max-w-[1500px] mx-auto" data-testid="page-inventory">
       <PageHeader
         title="Inventory"
         subtitle={
@@ -376,7 +410,48 @@ export default function InventoryPage() {
               variant="outline"
               size="sm"
               data-testid="button-print-labels"
-              onClick={() => window.print()}
+              onClick={async () => {
+                // Full-page PDF via html2canvas + jspdf. Captures the entire
+                // inventory page (KPIs, filters, table/grid) and paginates
+                // tall canvases across as many PDF pages as needed.
+                try {
+                  const node = document.getElementById("inventory-printable-root");
+                  if (!node) return;
+                  const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                    import("html2canvas"),
+                    import("jspdf"),
+                  ]);
+                  const canvas = await html2canvas(node, {
+                    backgroundColor: getComputedStyle(document.body).backgroundColor || "#ffffff",
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    windowWidth: node.scrollWidth,
+                  });
+                  const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+                  const pageW = pdf.internal.pageSize.getWidth();
+                  const pageH = pdf.internal.pageSize.getHeight();
+                  const scale = pageW / canvas.width;
+                  const imgH = canvas.height * scale;
+                  let position = 0;
+                  while (position < imgH) {
+                    if (position > 0) pdf.addPage();
+                    pdf.addImage(
+                      canvas.toDataURL("image/png"),
+                      "PNG",
+                      0,
+                      -position,
+                      pageW,
+                      imgH,
+                    );
+                    position += pageH;
+                  }
+                  pdf.save(`joap-inventory-${new Date().toISOString().slice(0, 10)}.pdf`);
+                } catch (err) {
+                  console.error("Print labels failed", err);
+                  toast({ title: "Print failed", description: (err as Error).message, variant: "destructive" });
+                }
+              }}
             >
               <Printer className="w-3.5 h-3.5 mr-1.5" />
               Print labels
@@ -412,30 +487,42 @@ export default function InventoryPage() {
         }}
       />
 
-      {/* KPI strip */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+      {/* KPI strip — 5 cards: Total · Value · Low (amber) · Critical (red) · Dead.
+          Each opens a rich maximize dialog with the relevant item list. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 mb-4">
         <KPICard
           label="Total Stocks"
           value={kpis.totalSkus}
           icon={Layers}
           tone="slate"
           sub="across all categories"
+          expanded={<InvKPIList items={allItems} kind="all" />}
         />
         <KPICard
           label="Stock Value"
           value={peso(kpis.stockValue)}
           icon={Coins}
-          tone="amber"
-          delta="2.1%"
+          tone="green"
+          delta="live"
           deltaDir="up"
-          sub="vs last month"
+          sub="qty × unit price"
+          expanded={<InvKPIValue items={sortedByValue} total={kpis.stockValue} />}
         />
         <KPICard
           label="Low-stock Items"
           value={kpis.lowStock}
           icon={AlertTriangle}
+          tone="amber"
+          sub="within +50% of reorder lvl"
+          expanded={<InvKPIList items={lowItems} kind="low" />}
+        />
+        <KPICard
+          label="Critical"
+          value={kpis.criticalStock}
+          icon={AlertTriangle}
           tone="red"
-          sub="below reorder point"
+          sub="at or below reorder lvl"
+          expanded={<InvKPIList items={criticalItems} kind="critical" />}
         />
         <KPICard
           label="Dead Stock"
@@ -443,6 +530,7 @@ export default function InventoryPage() {
           icon={Archive}
           tone="slate"
           sub="no sales in 60d"
+          expanded={<InvKPIList items={allItems.filter((i) => ((i as any).avgDailyUsage || 0) === 0 && i.currentQuantity > 0)} kind="dead" />}
         />
       </div>
 
@@ -952,6 +1040,130 @@ export default function InventoryPage() {
 }
 
 /** Pill-shaped category filter. */
+/** Inventory KPI maximize: paginated list per kind (all/low/critical/dead).
+ *  Admin/IM see Restock button; plain employees see Notify Admin / IM. */
+function InvKPIList({ items, kind }: { items: IItem[]; kind: "all" | "low" | "critical" | "dead" }) {
+  const [page, setPage] = useState(1);
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const canRestock = user?.role === "ADMIN" || user?.role === "INVENTORY_MANAGER";
+  const PAGE = 8;
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = items.slice((pageSafe - 1) * PAGE, pageSafe * PAGE);
+
+  async function notify(it: IItem) {
+    try {
+      await apiRequest("POST", "/api/inventory/notify-restock", {
+        itemId: it._id,
+        itemName: it.itemName,
+        needed: Math.max(1, (it.reorderLevel || 0) * 2),
+        currentStock: it.currentQuantity,
+      });
+      toast({ title: "Restock requested", description: `Admin & IM notified about ${it.itemName}` });
+    } catch (e: any) {
+      toast({ title: "Could not notify", description: e.message, variant: "destructive" });
+    }
+  }
+
+  const header =
+    kind === "critical"
+      ? "Items at or below reorder level — restock urgently."
+      : kind === "low"
+        ? "Items within 50% above reorder level — keep an eye on these."
+        : kind === "dead"
+          ? "Items with zero daily usage but stock on hand."
+          : "Every SKU in the catalog.";
+
+  return (
+    <div className="space-y-3 text-left">
+      <p className="text-sm text-muted-foreground">
+        {header} <strong>{items.length}</strong> total.
+      </p>
+      <div className="border rounded-md divide-y">
+        {paged.length === 0 ? (
+          <div className="text-sm text-muted-foreground p-6 text-center">Nothing matches this filter right now.</div>
+        ) : (
+          paged.map((i, idx) => (
+            <div key={i._id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="font-mono text-xs text-muted-foreground w-5 text-right">{(pageSafe - 1) * PAGE + idx + 1}.</span>
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{i.itemName}</div>
+                  <div className="text-xs text-muted-foreground">
+                    stock {i.currentQuantity} · reorder lvl {i.reorderLevel || 0} · {peso(i.unitPrice || 0)}
+                  </div>
+                </div>
+              </div>
+              {kind !== "all" && (
+                <div className="shrink-0">
+                  {canRestock ? (
+                    <Button size="sm" className="h-7 text-xs" onClick={() => setEditItemGlobal(i)}>Restock</Button>
+                  ) : (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => notify(i)}>
+                      Notify Admin / IM
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        )}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <Button size="sm" variant="outline" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹ Prev</Button>
+          <span className="text-xs text-muted-foreground">Page {pageSafe} of {totalPages}</span>
+          <Button size="sm" variant="outline" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next ›</Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Bridge so InvKPIList can pop the inventory page's edit dialog by passing
+// the item out via a module-level setter. Set on first inventory mount.
+let setEditItemGlobal: (it: IItem) => void = () => {};
+
+function InvKPIValue({ items, total }: { items: Array<IItem & { lineValue: number }>; total: number }) {
+  const [page, setPage] = useState(1);
+  const PAGE = 12;
+  const totalPages = Math.max(1, Math.ceil(items.length / PAGE));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = items.slice((pageSafe - 1) * PAGE, pageSafe * PAGE);
+  return (
+    <div className="space-y-3 text-left">
+      <p className="text-sm text-muted-foreground">
+        Stock value = <strong>Σ (unit price × current quantity)</strong>. Sorted by highest value first.
+      </p>
+      <div className="border rounded-md divide-y">
+        {paged.map((i, idx) => (
+          <div key={i._id} className="flex items-center justify-between px-4 py-2 text-sm">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="font-mono text-xs text-muted-foreground w-5 text-right">{(pageSafe - 1) * PAGE + idx + 1}.</span>
+              <div className="min-w-0">
+                <div className="font-medium truncate">{i.itemName}</div>
+                <div className="text-xs text-muted-foreground">{i.currentQuantity} × {peso(i.unitPrice || 0)}</div>
+              </div>
+            </div>
+            <div className="font-mono font-semibold tabular-nums">{peso(i.lineValue)}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>‹ Prev</Button>
+          <Button size="sm" variant="outline" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>Next ›</Button>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Total</div>
+          <div className="font-mono text-lg font-bold">{peso(total)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CategoryPill({
   label,
   active,

@@ -531,11 +531,39 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }),
       ]);
 
-      const reorderThreshold = 10;
-      const lowStockThreshold = 20;
-
-      const criticalStock = items.filter((i) => i.currentQuantity <= reorderThreshold).length;
-      const lowStock = items.filter((i) => i.currentQuantity > reorderThreshold && i.currentQuantity <= lowStockThreshold).length;
+      // Critical = currentQuantity at or below per-item reorderLevel
+      //           (or zero stock outright).
+      // Low      = currentQuantity above reorderLevel but within +50% of it
+      //           (i.e. close to needing a reorder).
+      // This matches the inventory page's stockStatus() function so the
+      // dashboard counts stop disagreeing with the inventory page.
+      const criticalStock = items.filter((i) => {
+        const r = (i as any).reorderLevel || 0;
+        return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
+      }).length;
+      const lowStock = items.filter((i) => {
+        const r = (i as any).reorderLevel || 0;
+        if (r <= 0) return false;
+        return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
+      }).length;
+      // Critical items (full payload) for the dashboard "low-stock" KPI dialog
+      // — admin sees them, can restock; employee gets a notify-admin button.
+      const criticalItems = items
+        .filter((i) => {
+          const r = (i as any).reorderLevel || 0;
+          return i.currentQuantity <= 0 || (r > 0 && i.currentQuantity <= r);
+        })
+        .map((i) => ({ _id: i._id, itemName: i.itemName, currentQuantity: i.currentQuantity, reorderLevel: (i as any).reorderLevel || 0, unitPrice: i.unitPrice }))
+        .sort((a, b) => a.currentQuantity - b.currentQuantity)
+        .slice(0, 50);
+      const lowStockItems = items
+        .filter((i) => {
+          const r = (i as any).reorderLevel || 0;
+          if (r <= 0) return false;
+          return i.currentQuantity > r && i.currentQuantity <= Math.ceil(r * 1.5);
+        })
+        .map((i) => ({ _id: i._id, itemName: i.itemName, currentQuantity: i.currentQuantity, reorderLevel: (i as any).reorderLevel || 0, unitPrice: i.unitPrice }))
+        .slice(0, 50);
       const totalInventoryValue = items.reduce((sum, i) => sum + i.unitPrice * i.currentQuantity, 0);
 
       const paymentStatusCounts: Record<string, number> = {};
@@ -591,6 +619,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         totalItems,
         criticalStock,
         lowStock,
+        criticalItems, // [{itemName, currentQuantity, reorderLevel, unitPrice}] for the KPI dialog
+        lowStockItems,
         totalInventoryValue,
         paymentStatusCounts,
         orderTypeCounts,
@@ -664,28 +694,40 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { period = "monthly" } = req.query as Record<string, string>;
       const now = new Date();
 
+      // Rolling-window periods so the frontend's "7d / 14d / 30d / 90d"
+      // chips actually mean what they say. Previously this returned
+      // calendar buckets (this week, this month, this year) so clicking
+      // "30d" on day 1 of the month showed almost no data even when the
+      // prior 30 days had plenty.
+      const dayBucket = "%m-%d"; // MM-DD daily bucket
       const getPeriodRange = (p: string): { start: Date; prevStart: Date; groupFormat: string; labels: string[] } => {
-        const s = new Date(now);
-        const ps = new Date(now);
-        if (p === "daily") {
-          s.setHours(0, 0, 0, 0);
-          ps.setDate(ps.getDate() - 1); ps.setHours(0, 0, 0, 0);
-          return { start: s, prevStart: ps, groupFormat: "%H", labels: Array.from({ length: 24 }, (_, i) => `${i}:00`) };
-        } else if (p === "weekly") {
-          const day = s.getDay();
-          s.setDate(s.getDate() - day); s.setHours(0, 0, 0, 0);
-          ps.setDate(ps.getDate() - day - 7); ps.setHours(0, 0, 0, 0);
-          return { start: s, prevStart: ps, groupFormat: "%w", labels: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] };
-        } else if (p === "monthly") {
-          s.setDate(1); s.setHours(0, 0, 0, 0);
-          ps.setMonth(ps.getMonth() - 1); ps.setDate(1); ps.setHours(0, 0, 0, 0);
-          const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-          return { start: s, prevStart: ps, groupFormat: "%d", labels: Array.from({ length: daysInMonth }, (_, i) => `${i + 1}`) };
-        } else {
-          s.setMonth(0, 1); s.setHours(0, 0, 0, 0);
-          ps.setFullYear(ps.getFullYear() - 1); ps.setMonth(0, 1); ps.setHours(0, 0, 0, 0);
-          return { start: s, prevStart: ps, groupFormat: "%m", labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] };
-        }
+        const today = new Date(now);
+        today.setHours(0, 0, 0, 0);
+        const isoDay = (d: Date) => {
+          const m = String(d.getMonth() + 1).padStart(2, "0");
+          const day = String(d.getDate()).padStart(2, "0");
+          return `${m}-${day}`;
+        };
+        const buildLabels = (days: number) => {
+          const out: string[] = [];
+          for (let i = days - 1; i >= 0; i--) {
+            const d = new Date(today);
+            d.setDate(d.getDate() - i);
+            out.push(isoDay(d));
+          }
+          return out;
+        };
+        const rolling = (days: number) => {
+          const s = new Date(today);
+          s.setDate(s.getDate() - (days - 1)); // include today
+          const ps = new Date(s);
+          ps.setDate(ps.getDate() - days);
+          return { start: s, prevStart: ps, groupFormat: dayBucket, labels: buildLabels(days) };
+        };
+        if (p === "weekly") return rolling(7);   // 7d
+        if (p === "daily") return rolling(14);   // 14d (label is misleading but kept for back-compat with the FE chips)
+        if (p === "monthly") return rolling(30); // 30d
+        return rolling(90);                       // 90d (yearly chip)
       }
 
       const range = getPeriodRange(period);
@@ -782,19 +824,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const ordMap: Record<string, { orders: number; orderValue: number }> = {};
       ordersByPeriod.forEach((o: any) => { ordMap[o._id] = { orders: o.orders, orderValue: o.orderValue }; });
 
-      const periodKey = (i: number): string => {
-        if (period === "daily") return String(i).padStart(2, "0");
-        if (period === "weekly") return String(i);
-        if (period === "monthly") return String(i + 1).padStart(2, "0");
-        return String(i + 1).padStart(2, "0");
-      };
+      // Now that labels are MM-DD strings and groupFormat is the matching
+      // "%m-%d", we can use the label itself as the bucket key.
+      const periodKey = (_: any, i: number): string => range.labels[i];
 
-      const sparklineRevenue = range.labels.map((_, i) => revMap[periodKey(i)] || 0);
-      const sparklineOrders = range.labels.map((_, i) => ordMap[periodKey(i)]?.orders || 0);
-      const sparklineCustomers = range.labels.map((_, i) => custMap[periodKey(i)] || 0);
+      const sparklineRevenue = range.labels.map((l, i) => revMap[periodKey(l, i)] || 0);
+      const sparklineOrders = range.labels.map((l, i) => ordMap[periodKey(l, i)]?.orders || 0);
+      const sparklineCustomers = range.labels.map((l, i) => custMap[periodKey(l, i)] || 0);
 
       const revenueChartData = range.labels.map((label, i) => {
-        const key = periodKey(i);
+        const key = periodKey(label, i);
         return { label, revenue: revMap[key] || 0, orders: ordMap[key]?.orderValue || 0 };
       });
 

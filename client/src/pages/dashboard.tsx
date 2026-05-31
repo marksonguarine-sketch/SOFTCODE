@@ -54,7 +54,8 @@ import {
 } from "recharts";
 import { useAuth } from "@/lib/auth";
 import { apiRequest } from "@/lib/queryClient";
-import type { DashboardStats } from "@shared/schema";
+import type { DashboardStats, IItem } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -446,7 +447,10 @@ export default function DashboardPage() {
       )}
 
       {/* Inventory snapshot — moved to the very top per REQUEST.pdf so stock
-          health is the first thing you see when the dashboard opens. */}
+          health is the first thing you see when the dashboard opens.
+          Round 6: Low (amber) and Critical (red) split into their own KPI
+          cards with rich maximize dialogs (list of affected items + restock
+          / notify-admin buttons gated by role). */}
       <Card className="mb-4">
         <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
           <div>
@@ -459,25 +463,38 @@ export default function DashboardPage() {
         </CardHeader>
         <CardContent className="px-5 py-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="p-4 bg-muted/40 rounded-lg">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-medium">Total items</span>
-                <Package className="w-3.5 h-3.5 text-muted-foreground" />
-              </div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums">{stats?.totalItems ?? 0}</div>
-            </div>
-            <div className="p-4 bg-emerald-50 dark:bg-emerald-950/40 rounded-lg">
-              <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-medium mb-1">Stock value</div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400">{peso(stats?.totalInventoryValue ?? 0)}</div>
-            </div>
-            <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-lg">
-              <div className="text-[11px] uppercase tracking-wider text-amber-700 dark:text-amber-400 font-medium mb-1">Low stock</div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums text-amber-700 dark:text-amber-400">{stats?.lowStock ?? 0}</div>
-            </div>
-            <div className="p-4 bg-red-50 dark:bg-red-950/40 rounded-lg">
-              <div className="text-[11px] uppercase tracking-wider text-red-700 dark:text-red-400 font-medium mb-1">Critical</div>
-              <div className="font-mono text-[22px] font-semibold tabular-nums text-red-700 dark:text-red-400">{stats?.criticalStock ?? 0}</div>
-            </div>
+            <KPICard
+              label="Total items"
+              value={stats?.totalItems ?? 0}
+              icon={Package}
+              tone="slate"
+              sub="across all SKUs"
+              expanded={<InventoryListExpand kind="all" />}
+            />
+            <KPICard
+              label="Stock value"
+              value={peso(stats?.totalInventoryValue ?? 0)}
+              icon={Coins}
+              tone="green"
+              sub="qty × unit price across catalog"
+              expanded={<InventoryValueExpand />}
+            />
+            <KPICard
+              label="Low stock"
+              value={stats?.lowStock ?? 0}
+              icon={AlertTriangle}
+              tone="amber"
+              sub="within +50% of reorder level"
+              expanded={<InventoryListExpand kind="low" />}
+            />
+            <KPICard
+              label="Critical"
+              value={stats?.criticalStock ?? 0}
+              icon={AlertTriangle}
+              tone="red"
+              sub="at or below reorder level — restock now"
+              expanded={<InventoryListExpand kind="critical" />}
+            />
           </div>
         </CardContent>
       </Card>
@@ -497,6 +514,7 @@ export default function DashboardPage() {
               <Sparkline data={adv.earnings.sparkline} width={220} height={36} color="hsl(38 92% 50%)" />
             ) : null
           }
+          expanded={<RevenueTodayExpand adv={adv} />}
         />
         <KPICard
           label="Orders Today"
@@ -511,6 +529,7 @@ export default function DashboardPage() {
               <Sparkline data={adv.orders.sparkline} width={220} height={36} color="hsl(217 91% 55%)" />
             ) : null
           }
+          expanded={<OrdersTodayExpand recent={recentOrders} />}
         />
         <KPICard
           label="Gross Margin"
@@ -525,21 +544,23 @@ export default function DashboardPage() {
               ? <Sparkline data={[grossMargin * 0.95, grossMargin * 0.97, grossMargin * 0.99, grossMargin, grossMargin, grossMargin, grossMargin]} width={220} height={36} color="hsl(152 56% 41%)" />
               : null
           }
+          expanded={<GrossMarginExpand grossMargin={grossMargin} />}
         />
         <KPICard
           label="Low-stock Items"
           value={lowStock}
           icon={AlertTriangle}
-          tone="red"
+          tone="amber"
           delta={stats?.criticalStock ? `${stats.criticalStock} critical` : undefined}
           deltaDir="down"
           sub="needs reorder"
+          expanded={<InventoryListExpand kind="low" />}
           spark={
             <Sparkline
               data={[Math.max(0, lowStock - 4), Math.max(0, lowStock - 3), Math.max(0, lowStock - 2), Math.max(0, lowStock - 1), lowStock, lowStock, lowStock]}
               width={220}
               height={36}
-              color="hsl(0 72% 56%)"
+              color="hsl(38 92% 50%)"
             />
           }
         />
@@ -779,83 +800,68 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Top items */}
-        <Card>
-          <CardHeader className="py-3.5 px-5 border-b">
-            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Top items today</CardTitle>
-            <div className="text-[12px] text-muted-foreground mt-0.5">By units sold</div>
-          </CardHeader>
-          <CardContent className="px-5 py-3">
-            {(adv?.topItems || []).slice(0, 5).map((it, i, arr) => {
-              const maxQty = arr[0]?.totalQty || 1;
-              const pct = (it.totalQty / maxQty) * 100;
-              return (
-                <div key={i} className={cn("py-2.5", i < arr.length - 1 && "border-b border-border")}>
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-muted-foreground font-mono text-[11px] w-4 shrink-0">{i + 1}</span>
-                      <span className="text-[13px] font-medium truncate">{it.itemName}</span>
-                    </div>
-                    <span className="font-mono text-[12px] font-semibold tabular-nums">{it.totalQty}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${pct}%` }} />
-                    </div>
-                    <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{peso(it.totalRevenue)}</span>
-                  </div>
+        {/* Top items — paginated 6 per page with prev/next per REQUEST.pdf
+            round 6 ("display 6 items only and there is a button below
+            >next or <prev"). */}
+        <PaginatedListCard
+          title="Top items today"
+          subtitle="By units sold"
+          empty="No item sales yet this period."
+          items={adv?.topItems || []}
+          renderRow={(it: any, i: number, _arr, absoluteIdx: number, maxValue: number) => (
+            <div className="py-2.5">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-muted-foreground font-mono text-[11px] w-5 shrink-0 text-right">{absoluteIdx + 1}</span>
+                  <span className="text-[13px] font-medium truncate">{it.itemName}</span>
                 </div>
-              );
-            })}
-            {(!adv?.topItems || adv.topItems.length === 0) && (
-              <div className="py-6 text-center text-muted-foreground text-sm">
-                {advLoading ? "Loading…" : "No item sales yet this period."}
+                <span className="font-mono text-[12px] font-semibold tabular-nums">{it.totalQty}</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Top customers */}
-        <Card>
-          <CardHeader className="py-3.5 px-5 border-b">
-            <CardTitle className="text-[13.5px] font-semibold tracking-tight">Top customers</CardTitle>
-            <div className="text-[12px] text-muted-foreground mt-0.5">By revenue</div>
-          </CardHeader>
-          <CardContent className="px-5 py-3">
-            {topCustomers.length === 0 ? (
-              <div className="py-6 text-center text-muted-foreground text-sm">No customer activity yet.</div>
-            ) : (
-              topCustomers.map((c, i, arr) => (
-                <div key={c.name} className={cn("flex items-center gap-2.5 py-2.5", i < arr.length - 1 && "border-b border-border")}>
-                  <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold shrink-0">
-                    {initialsOf(c.name)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="text-[13px] font-semibold truncate">{c.name}</span>
-                      {i === 0 && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {c.count} order{c.count === 1 ? "" : "s"}
-                    </div>
-                  </div>
-                  <span className="font-mono text-[13px] font-semibold tabular-nums">{peso(c.spend)}</span>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${(it.totalQty / Math.max(1, maxValue)) * 100}%` }} />
                 </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{peso(it.totalRevenue)}</span>
+              </div>
+            </div>
+          )}
+          maxValue={(items) => Math.max(1, ...items.map((it: any) => it.totalQty || 0))}
+        />
+
+        {/* Top customers — same pattern */}
+        <PaginatedListCard
+          title="Top customers"
+          subtitle="By revenue"
+          empty="No customer activity yet."
+          items={topCustomers}
+          renderRow={(c: any, i: number, _arr, absoluteIdx: number) => (
+            <div className="flex items-center gap-2.5 py-2.5">
+              <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300 grid place-items-center text-[11px] font-mono font-bold shrink-0">
+                {initialsOf(c.name)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-muted-foreground font-mono text-[11px] w-5 shrink-0 text-right">{absoluteIdx + 1}</span>
+                  <span className="text-[13px] font-semibold truncate">{c.name}</span>
+                  {absoluteIdx === 0 && <Crown className="w-3 h-3 text-amber-500 shrink-0" />}
+                </div>
+                <div className="text-[11px] text-muted-foreground">{c.count} order{c.count === 1 ? "" : "s"}</div>
+              </div>
+              <span className="font-mono text-[13px] font-semibold tabular-nums">{peso(c.spend)}</span>
+            </div>
+          )}
+        />
       </div>
 
       {/* 06. Activity feed + Payment mix */}
       <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-4 mb-4">
-        {/* Activity feed */}
-        <Card>
-          <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="text-[13.5px] font-semibold tracking-tight">Activity feed</CardTitle>
-              <div className="text-[12px] text-muted-foreground mt-0.5">Real-time across the store</div>
-            </div>
+        {/* Activity feed — 6/page with prev/next (round 6 spec) */}
+        <PaginatedListCard
+          title="Activity feed"
+          subtitle="Real-time across the store"
+          empty={statsLoading ? "Loading…" : "No recent orders yet."}
+          items={recentOrders}
+          headerExtras={
             <Badge className="badge-success flex items-center gap-1.5">
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
@@ -863,59 +869,41 @@ export default function DashboardPage() {
               </span>
               Live
             </Badge>
-          </CardHeader>
-          <CardContent className="px-5 py-3 max-h-[380px] overflow-auto">
-            {recentOrders.slice(0, 8).map((o: any, i: number, arr: any[]) => {
-              const Ico = o.orderType?.includes("delivery")
-                ? Truck
-                : o.orderType?.includes("reservation")
-                  ? Calendar
-                  : o.paymentStatus === "paid"
-                    ? Check
-                    : ShoppingCart;
-              const tone =
-                o.paymentStatus === "paid"
-                  ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
-                  : o.paymentStatus === "pending_payment"
-                    ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
-                    : "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400";
-              const created = new Date(o.createdAt);
-              const ago = relativeTime(created);
-              return (
-                <div
-                  key={o._id || i}
-                  className={cn(
-                    "flex items-center gap-3 py-2.5 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded transition",
-                    i < Math.min(8, arr.length) - 1 && "border-b border-border"
-                  )}
-                  onClick={() => navigate(`/orders/${o._id}`)}
-                  data-testid={`activity-order-${o._id}`}
-                  role="button"
-                >
-                  <span className={cn("w-7 h-7 rounded-md grid place-items-center shrink-0", tone)}>
-                    <Ico className="w-3.5 h-3.5" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] truncate">
-                      <span className="font-semibold">{o.customerName || "Walk-in"}</span>{" "}
-                      <span className="text-muted-foreground">·</span>{" "}
-                      <span className="font-mono text-[12.5px]">{peso(o.totalAmount || 0)}</span>
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate">
-                      {o.orderNumber || (o._id || "").slice(-6)} · {o.paymentStatus?.replace("_", " ")}
-                    </div>
+          }
+          renderRow={(o: any, _i: number, _arr, _absoluteIdx: number) => {
+            const Ico = o.orderType?.includes("delivery") ? Truck : o.orderType?.includes("reservation") ? Calendar : o.paymentStatus === "paid" ? Check : ShoppingCart;
+            const tone =
+              o.paymentStatus === "paid"
+                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+                : o.paymentStatus === "pending_payment"
+                  ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                  : "bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-400";
+            const ago = relativeTime(new Date(o.createdAt));
+            return (
+              <div
+                className="flex items-center gap-3 py-2.5 cursor-pointer hover:bg-muted/40 -mx-2 px-2 rounded transition"
+                onClick={() => navigate(`/orders/${o._id}`)}
+                data-testid={`activity-order-${o._id}`}
+                role="button"
+              >
+                <span className={cn("w-7 h-7 rounded-md grid place-items-center shrink-0", tone)}>
+                  <Ico className="w-3.5 h-3.5" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] truncate">
+                    <span className="font-semibold">{o.customerName || "Walk-in"}</span>{" "}
+                    <span className="text-muted-foreground">·</span>{" "}
+                    <span className="font-mono text-[12.5px]">{peso(o.totalAmount || 0)}</span>
                   </div>
-                  <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{ago}</span>
+                  <div className="text-[11px] text-muted-foreground truncate">
+                    {(o._id || "").slice(-6)} · {o.paymentStatus?.replace("_", " ")}
+                  </div>
                 </div>
-              );
-            })}
-            {recentOrders.length === 0 && (
-              <div className="py-6 text-center text-muted-foreground text-sm">
-                {statsLoading ? "Loading…" : "No recent orders yet."}
+                <span className="font-mono text-[11px] text-muted-foreground tabular-nums">{ago}</span>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            );
+          }}
+        />
 
         {/* Payment mix donut */}
         <Card>
@@ -981,6 +969,72 @@ export default function DashboardPage() {
   );
 }
 
+/**
+ * Reusable list-card panel with built-in 6-per-page pagination.
+ * Used by Top Items / Top Customers / Activity feed on the dashboard so
+ * each shows at most 6 rows + prev/next controls (REQUEST.pdf round 6).
+ */
+function PaginatedListCard<T>({
+  title,
+  subtitle,
+  items,
+  renderRow,
+  headerExtras,
+  empty,
+  pageSize = 6,
+  maxValue,
+}: {
+  title: string;
+  subtitle?: string;
+  items: T[];
+  renderRow: (row: T, indexOnPage: number, pageRows: T[], absoluteIndex: number, maxValue: number) => React.ReactNode;
+  headerExtras?: React.ReactNode;
+  empty?: string;
+  pageSize?: number;
+  maxValue?: (items: T[]) => number;
+}) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = items.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+  const max = maxValue ? maxValue(items) : 1;
+  return (
+    <Card>
+      <CardHeader className="py-3.5 px-5 border-b flex flex-row items-center justify-between">
+        <div>
+          <CardTitle className="text-[13.5px] font-semibold tracking-tight">{title}</CardTitle>
+          {subtitle && <div className="text-[12px] text-muted-foreground mt-0.5">{subtitle}</div>}
+        </div>
+        {headerExtras}
+      </CardHeader>
+      <CardContent className="px-5 py-3">
+        {items.length === 0 ? (
+          <div className="py-6 text-center text-muted-foreground text-sm">{empty || "Nothing here yet."}</div>
+        ) : (
+          <>
+            <div className="divide-y">
+              {paged.map((row, i) => (
+                <div key={i}>{renderRow(row, i, paged, (pageSafe - 1) * pageSize + i, max)}</div>
+              ))}
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-3 mt-2 border-t">
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} data-testid={`${title.toLowerCase().replace(/\s+/g, "-")}-prev`}>
+                  ‹ Prev
+                </Button>
+                <span className="text-[11px] text-muted-foreground tabular-nums">Page {pageSafe} of {totalPages} · {items.length} total</span>
+                <Button size="sm" variant="outline" className="h-7 text-xs" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} data-testid={`${title.toLowerCase().replace(/\s+/g, "-")}-next`}>
+                  Next ›
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function relativeTime(d: Date): string {
   const diff = (Date.now() - d.getTime()) / 1000;
   if (diff < 60) return "just now";
@@ -988,4 +1042,269 @@ function relativeTime(d: Date): string {
   if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
   if (diff < 86400 * 2) return "yesterday";
   return `${Math.floor(diff / 86400)} days ago`;
+}
+
+/* ============================================================================
+ * KPI-card "expanded" panels — what shows up when a user clicks Maximize on
+ * one of the dashboard tiles. Each is intentionally informative and a little
+ * list-heavy: the goal per the owner is "explain all informations".
+ * ========================================================================= */
+
+function RevenueTodayExpand({ adv }: { adv: any }) {
+  const data = adv?.revenueChart || [];
+  const total = data.reduce((s: number, d: any) => s + (d.revenue || 0), 0);
+  const peak = data.reduce((m: any, d: any) => (d.revenue > (m?.revenue ?? 0) ? d : m), null);
+  return (
+    <div className="space-y-4 text-left">
+      <p className="text-sm text-muted-foreground">
+        Live tally of every payment booked today (₱). Period total: <strong>{"₱" + total.toLocaleString("en-PH")}</strong>.
+        {peak ? <> Peak point: <strong>{peak.label}</strong> at <strong>{"₱" + (peak.revenue || 0).toLocaleString("en-PH")}</strong>.</> : null}
+      </p>
+      <div className="w-full h-[55vh] min-h-[320px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <RechartsArea data={data} margin={{ top: 16, right: 24, left: 8, bottom: 24 }}>
+            <defs>
+              <linearGradient id="rev-today-fs" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="hsl(38 92% 50%)" stopOpacity={0.4} />
+                <stop offset="100%" stopColor="hsl(38 92% 50%)" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
+            <XAxis dataKey="label" stroke="hsl(var(--muted-foreground))" fontSize={12} />
+            <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} tickFormatter={(v) => "₱" + Math.round(v / 1000) + "k"} />
+            <RechartsTooltip
+              contentStyle={{ background: "hsl(var(--popover))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 13 }}
+              formatter={(v: number) => ["₱" + v.toLocaleString("en-PH"), "Revenue"]}
+            />
+            <Area type="monotone" dataKey="revenue" stroke="hsl(38 92% 50%)" strokeWidth={2.5} fill="url(#rev-today-fs)" activeDot={{ r: 5 }} />
+          </RechartsArea>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function OrdersTodayExpand({ recent }: { recent: any[] }) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todays = (recent || []).filter((o) => new Date(o.createdAt) >= today);
+  return (
+    <div className="space-y-3 text-left">
+      <p className="text-sm text-muted-foreground">
+        {todays.length} order{todays.length === 1 ? "" : "s"} created today. Newest first.
+      </p>
+      <div className="border rounded-md divide-y max-h-[55vh] overflow-auto">
+        {todays.length === 0 ? (
+          <div className="text-sm text-muted-foreground p-4 text-center">No orders booked today yet.</div>
+        ) : (
+          todays.map((o) => (
+            <div key={o._id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+              <div className="min-w-0">
+                <div className="font-mono font-semibold">{o.trackingNumber}</div>
+                <div className="text-xs text-muted-foreground truncate">{o.customerName} · {o.orderType?.replace("_", " ")}</div>
+              </div>
+              <div className="text-right shrink-0">
+                <div className="font-mono tabular-nums font-semibold">{"₱" + (o.totalAmount || 0).toLocaleString("en-PH")}</div>
+                <div className="text-xs text-muted-foreground">{o.paymentStatus}</div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GrossMarginExpand({ grossMargin }: { grossMargin: number }) {
+  return (
+    <div className="space-y-3 text-left">
+      <p className="text-sm text-muted-foreground leading-relaxed">
+        Gross margin = <strong>(revenue − cost of goods sold) ÷ revenue</strong>, computed live across every paid order.
+        Cost of goods is approximated as <strong>80% of the unit list price</strong> per line (matches the Cost column in Inventory).
+        Today's value is <strong>{grossMargin.toFixed(1)}%</strong>.
+      </p>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/40">
+          <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-semibold mb-1">Formula</div>
+          <div className="font-mono text-sm">( rev − cogs ) / rev</div>
+        </div>
+        <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/40">
+          <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-semibold mb-1">COGS basis</div>
+          <div className="font-mono text-sm">80% of list price</div>
+        </div>
+        <div className="p-4 rounded-lg bg-emerald-50 dark:bg-emerald-950/40">
+          <div className="text-[11px] uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-semibold mb-1">Scope</div>
+          <div className="font-mono text-sm">paymentStatus = paid</div>
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Margin will drop below 20% when discounts (offers) are applied because revenue shrinks while COGS stays the same.
+        It will rise above 20% only if a future cost-tracking feature replaces the 80%-of-list approximation with real cost data.
+      </p>
+    </div>
+  );
+}
+
+/** Inventory item list as KPI-card expand — kind controls what gets shown. */
+function InventoryListExpand({ kind }: { kind: "all" | "low" | "critical" }) {
+  // Pull fresh from the dedicated inventory endpoint so we always see real-
+  // time stock (the dashboard cache may be ≤5 s stale).
+  const { data: invRes } = useQuery<{ success: boolean; data: { items: IItem[]; total: number } }>({
+    queryKey: ["/api/items", "page=1&pageSize=500"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/items?page=1&pageSize=500");
+      return res.json();
+    },
+    staleTime: 5_000,
+  });
+  const { user } = useAuth();
+  const isAdmin = user?.role === "ADMIN";
+  const isIM = user?.role === "INVENTORY_MANAGER";
+  const canRestock = isAdmin || isIM;
+  const { toast } = useToast();
+  const allItems = invRes?.data?.items || [];
+  const filtered = allItems.filter((i) => {
+    const r = (i as any).reorderLevel || 0;
+    const q = i.currentQuantity || 0;
+    if (kind === "critical") return q <= 0 || (r > 0 && q <= r);
+    if (kind === "low") return r > 0 && q > r && q <= Math.ceil(r * 1.5);
+    return true;
+  });
+
+  const [page, setPage] = useState(1);
+  const PAGE = 8;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = filtered.slice((pageSafe - 1) * PAGE, pageSafe * PAGE);
+
+  async function notifyAdmin(item: any) {
+    try {
+      await apiRequest("POST", "/api/inventory/notify-restock", {
+        itemId: item._id,
+        itemName: item.itemName,
+        needed: Math.max(1, (item.reorderLevel || 0) * 2),
+        currentStock: item.currentQuantity,
+      });
+      toast({ title: "Notified admin & inventory manager", description: `Restock requested for ${item.itemName}` });
+    } catch (e: any) {
+      toast({ title: "Could not notify", description: e.message, variant: "destructive" });
+    }
+  }
+
+  return (
+    <div className="space-y-3 text-left">
+      <p className="text-sm text-muted-foreground">
+        {filtered.length === 0
+          ? kind === "critical"
+            ? "Nothing critical right now — every SKU is above its reorder level. 🎉"
+            : kind === "low"
+              ? "No SKUs are in the low-stock band right now."
+              : "No items in inventory yet."
+          : `${filtered.length} ${kind === "critical" ? "critical" : kind === "low" ? "low-stock" : ""} item${filtered.length === 1 ? "" : "s"} — page ${pageSafe} of ${totalPages}.`}
+      </p>
+      <div className="border rounded-md divide-y">
+        {paged.map((i, idx) => {
+          const r = (i as any).reorderLevel || 0;
+          const q = i.currentQuantity || 0;
+          const isCritical = q <= 0 || (r > 0 && q <= r);
+          const isLow = r > 0 && q > r && q <= Math.ceil(r * 1.5);
+          const status = isCritical ? { label: "CRITICAL", cls: "bg-red-100 text-red-700" } : isLow ? { label: "LOW", cls: "bg-amber-100 text-amber-700" } : { label: "OK", cls: "bg-emerald-100 text-emerald-700" };
+          return (
+            <div key={i._id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
+              <div className="min-w-0 flex items-center gap-3">
+                <span className="font-mono text-xs text-muted-foreground w-5 text-right">{(pageSafe - 1) * PAGE + idx + 1}.</span>
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{i.itemName}</div>
+                  <div className="text-xs text-muted-foreground">stock {q} · reorder lvl {r} · {"₱" + (i.unitPrice || 0).toLocaleString("en-PH")}</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={cn("text-[10px] font-semibold rounded-full px-2 py-0.5", status.cls)}>{status.label}</span>
+                {kind !== "all" && (
+                  canRestock ? (
+                    <Button size="sm" className="h-7 text-xs" onClick={() => {
+                      window.location.href = "/inventory";
+                    }}>Restock</Button>
+                  ) : (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => notifyAdmin(i)}>
+                      Notify Admin / IM
+                    </Button>
+                  )
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <Button size="sm" variant="outline" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+            ‹ Prev
+          </Button>
+          <span className="text-xs text-muted-foreground">Page {pageSafe} of {totalPages}</span>
+          <Button size="sm" variant="outline" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+            Next ›
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** "Stock value" KPI expand — totals + items list with their line totals. */
+function InventoryValueExpand() {
+  const { data: invRes } = useQuery<{ success: boolean; data: { items: IItem[]; total: number } }>({
+    queryKey: ["/api/items", "page=1&pageSize=500"],
+    queryFn: async () => {
+      const res = await apiRequest("GET", "/api/items?page=1&pageSize=500");
+      return res.json();
+    },
+    staleTime: 5_000,
+  });
+  const items = invRes?.data?.items || [];
+  const sorted = [...items].map((i) => ({ ...i, lineValue: (i.unitPrice || 0) * (i.currentQuantity || 0) })).sort((a, b) => b.lineValue - a.lineValue);
+  const total = sorted.reduce((s, i) => s + i.lineValue, 0);
+  const [page, setPage] = useState(1);
+  const PAGE = 12;
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE));
+  const pageSafe = Math.min(page, totalPages);
+  const paged = sorted.slice((pageSafe - 1) * PAGE, pageSafe * PAGE);
+  return (
+    <div className="space-y-3 text-left">
+      <p className="text-sm text-muted-foreground">
+        Stock value = <strong>Σ (unit price × current quantity)</strong> across the catalog.
+        Sorted highest-value first.
+      </p>
+      <div className="border rounded-md divide-y">
+        {paged.map((i, idx) => (
+          <div key={i._id} className="flex items-center justify-between px-4 py-2 text-sm">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="font-mono text-xs text-muted-foreground w-5 text-right">{(pageSafe - 1) * PAGE + idx + 1}.</span>
+              <div className="min-w-0">
+                <div className="font-medium truncate">{i.itemName}</div>
+                <div className="text-xs text-muted-foreground">
+                  {i.currentQuantity} × {"₱" + (i.unitPrice || 0).toLocaleString("en-PH")}
+                </div>
+              </div>
+            </div>
+            <div className="font-mono font-semibold tabular-nums">{"₱" + i.lineValue.toLocaleString("en-PH")}</div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between pt-1">
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" disabled={pageSafe <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+            ‹ Prev
+          </Button>
+          <Button size="sm" variant="outline" disabled={pageSafe >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+            Next ›
+          </Button>
+        </div>
+        <div className="text-right">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Total</div>
+          <div className="font-mono text-lg font-bold">{"₱" + total.toLocaleString("en-PH")}</div>
+        </div>
+      </div>
+    </div>
+  );
 }
