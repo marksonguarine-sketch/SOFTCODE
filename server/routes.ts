@@ -51,6 +51,7 @@ import EmployeeProfile from "./models/EmployeeProfile";
 import SiteVisitor from "./models/SiteVisitor";
 import Notification from "./models/Notification";
 import ItemRequest from "./models/ItemRequest";
+import PaymentAudit, { type PaymentAuditFlag } from "./models/PaymentAudit";
 import { arima, bucketByDay } from "./lib/arima";
 import { DEFAULT_ADMIN_USERNAME, DEFAULT_ADMIN_PASSWORD } from "./seed";
 
@@ -301,6 +302,72 @@ function generateTransactionCode() {
   const d = now.toISOString().slice(0, 10).replace(/-/g, "");
   const rand = Math.random().toString(36).substring(2, 7).toUpperCase();
   return `TXN-${d}-${rand}`;
+}
+
+// ─── GCASH REFERENCE VALIDATION ─────────────────────────────────────────────
+//
+// Real GCash transaction references are 8–15 character alphanumeric strings
+// (the mobile app generates 13-digit numerics, but channel partners and
+// merchant flows produce variations). We treat anything outside that band as
+// "format invalid" — the payment is STILL accepted (direct-save policy) but
+// an audit row is filed so the daily audit catches it.
+//
+// We also strip a single leading "Ref:" / "Reference No:" prefix that staff
+// sometimes paste in by accident, so a well-meaning typist isn't punished.
+const GCASH_REF_RE = /^[A-Z0-9]{8,15}$/i;
+function normalizeGcashRef(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .replace(/^(ref(?:erence)?\s*(?:no\.?|number|#)?\s*:?\s*)/i, "")
+    .replace(/\s+/g, "")
+    .toUpperCase();
+}
+function classifyGcashRef(raw: string): { ok: true; ref: string } | { ok: false; reason: string; ref: string } {
+  const ref = normalizeGcashRef(raw);
+  if (ref.length === 0) return { ok: false, reason: "GCash reference is required for GCash payments", ref };
+  if (ref.length < 8) return { ok: false, reason: `Reference too short (got ${ref.length}, need 8–15)`, ref };
+  if (ref.length > 15) return { ok: false, reason: `Reference too long (got ${ref.length}, need 8–15)`, ref };
+  if (!GCASH_REF_RE.test(ref)) return { ok: false, reason: "Reference must be alphanumeric (A–Z, 0–9)", ref };
+  return { ok: true, ref };
+}
+
+// ─── PAYMENT AUDIT — append-only anomaly log ────────────────────────────────
+async function fileAudit(row: {
+  flag: PaymentAuditFlag;
+  severity?: "info" | "warn" | "alert";
+  detail: string;
+  paymentId?: string;
+  orderId?: string;
+  trackingNumber?: string;
+  amount?: number;
+  paymentMethod?: string;
+  gcashReferenceNumber?: string;
+  loggedBy: string;
+}) {
+  try {
+    await PaymentAudit.create({
+      flag: row.flag,
+      severity: row.severity || "warn",
+      detail: row.detail,
+      paymentId: row.paymentId,
+      orderId: row.orderId,
+      trackingNumber: row.trackingNumber,
+      amount: row.amount,
+      paymentMethod: row.paymentMethod,
+      gcashReferenceNumber: row.gcashReferenceNumber,
+      loggedBy: row.loggedBy,
+    });
+  } catch (e) {
+    console.error("[PaymentAudit] failed to file audit row", e);
+  }
+}
+
+// PHT business-hours check (06:00–22:00). Outside this window we still take
+// the payment, but flag it for the next morning's audit.
+function isAfterHoursPHT(at: Date = new Date()): boolean {
+  // PHT is UTC+8 with no DST.
+  const phtHours = (at.getUTCHours() + 8) % 24;
+  return phtHours < 6 || phtHours >= 22;
 }
 
 async function createBackupData() {
@@ -2624,51 +2691,82 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ...(hasAddress ? { address: addressData } : {}),
       });
 
-      // Stock model: on creation we DO NOT subtract from `currentQuantity`. The
-      // physical stock is only debited when an order is released (so partial
-      // releases can leave a balance). Keeping inventory untouched here also
-      // means the "release stock" button can correctly say "have X, need Y".
-      // We still write an inventory log entry (type "reservation") so audit
-      // trails stay complete.
-      for (const oi of itemsWithRelease) {
-        await InventoryLog.create({
-          itemId: oi.itemId,
-          itemName: oi.itemName,
-          type: "adjustment",
-          quantity: 0,
-          reason: `Reserved by order ${trackingNumber} (qty ${oi.qty})`,
-          actor: req.user!.username,
-        });
-      }
+      // ─── Direct-save rollback wrapper ───────────────────────────────────
+      // Order.create succeeded. Everything below (inventory reservation logs,
+      // walk-in payment booking, ledger pair, offer counters) is "best-effort
+      // append" — but if anything throws, we'd be left with a phantom order
+      // that has no inventory reservation and no payment. To keep direct-save
+      // honest, we wrap the post-create work and on failure we hard-delete the
+      // Order plus any partial children we managed to create. The original
+      // error is re-thrown so the client sees the real reason.
+      const createdChildren: { type: "payment" | "ledger" | "log"; id: string }[] = [];
+      try {
+        // Stock model: on creation we DO NOT subtract from `currentQuantity`. The
+        // physical stock is only debited when an order is released (so partial
+        // releases can leave a balance). Keeping inventory untouched here also
+        // means the "release stock" button can correctly say "have X, need Y".
+        // We still write an inventory log entry (type "reservation") so audit
+        // trails stay complete.
+        for (const oi of itemsWithRelease) {
+          const log = await InventoryLog.create({
+            itemId: oi.itemId,
+            itemName: oi.itemName,
+            type: "adjustment",
+            quantity: 0,
+            reason: `Reserved by order ${trackingNumber} (qty ${oi.qty})`,
+            actor: req.user!.username,
+          });
+          createdChildren.push({ type: "log", id: log._id.toString() });
+        }
 
-      // Walk-in PAID: book the payment + ledger NOW so dashboard reflects it.
-      if (walkInPaid) {
-        const txn = generateTransactionCode();
-        const payment = await BillingPayment.create({
-          orderId: order._id.toString(),
-          paymentMethod: parsed.data.paymentMethod,
-          gcashNumber: "",
-          gcashReferenceNumber: txn,
-          amountPaid: order.totalAmount,
-          paymentDate: new Date(),
-          proofNote: "Auto-recorded at order creation (walk-in paid)",
-          loggedBy: req.user!.username,
-          transactionCode: txn,
-          isFullPayment: true,
-        });
-        const accountName = "Cash/GCash";
-        await GeneralLedgerEntry.create([
-          { date: new Date(), accountName, debit: order.totalAmount, credit: 0, description: `Payment for walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
-          { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: order.totalAmount, description: `Revenue from walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
-        ]);
-        await Promise.all([
-          bumpAccountBalance(accountName, order.totalAmount),
-          bumpAccountBalance("Sales Revenue", order.totalAmount),
-        ]);
-        order.statusHistory.push({ status: "Paid", timestamp: new Date(), actor: req.user!.username, note: `₱${order.totalAmount.toFixed(2)} received at counter · Txn: ${txn}` });
-        await order.save();
-        emitEvent("PAYMENT_LOGGED", { orderId: order._id, transactionCode: txn });
-        emitEvent("LEDGER_POSTED");
+        // Walk-in PAID: book the payment + ledger NOW so dashboard reflects it.
+        if (walkInPaid) {
+          const txn = generateTransactionCode();
+          const payment = await BillingPayment.create({
+            orderId: order._id.toString(),
+            paymentMethod: parsed.data.paymentMethod,
+            gcashNumber: "",
+            gcashReferenceNumber: txn,
+            amountPaid: order.totalAmount,
+            paymentDate: new Date(),
+            proofNote: "Auto-recorded at order creation (walk-in paid)",
+            loggedBy: req.user!.username,
+            transactionCode: txn,
+            isFullPayment: true,
+          });
+          createdChildren.push({ type: "payment", id: payment._id.toString() });
+          const accountName = "Cash/GCash";
+          const ledgerRows = await GeneralLedgerEntry.create([
+            { date: new Date(), accountName, debit: order.totalAmount, credit: 0, description: `Payment for walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+            { date: new Date(), accountName: "Sales Revenue", debit: 0, credit: order.totalAmount, description: `Revenue from walk-in order ${order.trackingNumber}`, referenceType: "payment", referenceId: payment._id.toString(), actor: req.user!.username },
+          ]);
+          for (const r of ledgerRows as any[]) createdChildren.push({ type: "ledger", id: r._id.toString() });
+          await Promise.all([
+            bumpAccountBalance(accountName, order.totalAmount),
+            bumpAccountBalance("Sales Revenue", order.totalAmount),
+          ]);
+          order.statusHistory.push({ status: "Paid", timestamp: new Date(), actor: req.user!.username, note: `₱${order.totalAmount.toFixed(2)} received at counter · Txn: ${txn}` });
+          await order.save();
+          emitEvent("PAYMENT_LOGGED", { orderId: order._id, transactionCode: txn });
+          emitEvent("LEDGER_POSTED");
+        }
+      } catch (childErr: any) {
+        // Compensating delete — undo everything we did so far.
+        try {
+          for (const c of createdChildren) {
+            if (c.type === "payment") await BillingPayment.findByIdAndDelete(c.id).catch(() => {});
+            else if (c.type === "ledger") await GeneralLedgerEntry.findByIdAndDelete(c.id).catch(() => {});
+            else if (c.type === "log") await InventoryLog.findByIdAndDelete(c.id).catch(() => {});
+          }
+          // If we already bumped balances, reverse them.
+          if (walkInPaid) {
+            await bumpAccountBalance("Cash/GCash", -order.totalAmount).catch(() => {});
+            await bumpAccountBalance("Sales Revenue", -order.totalAmount).catch(() => {});
+          }
+          await Order.findByIdAndDelete(order._id).catch(() => {});
+        } catch { /* swallow — surfacing the original error is more useful */ }
+        console.error("[ORDER_CREATE] rolled back due to:", childErr);
+        return fail(res, 500, `Order create failed mid-flight and was rolled back: ${childErr?.message || "unknown error"}`);
       }
 
       for (const [offerId, { totalSavings: savings }] of Array.from(offersUsed)) {
@@ -2783,7 +2881,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
 
       const order = await Order.findById(parsed.data.orderId);
-      if (!order) return fail(res, 404, "Order not found");
+      if (!order) {
+        await fileAudit({ flag: "order_missing", severity: "alert", detail: `quick-pay attempted on missing order ${parsed.data.orderId}`, orderId: parsed.data.orderId, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: parsed.data.gcashReferenceNumber, loggedBy: req.user!.username });
+        return fail(res, 404, "Order not found");
+      }
+
+      // ── Cross-check: order must still be open for payment ────────────────
+      if (order.paymentStatus === "paid") {
+        await fileAudit({ flag: "order_already_paid", severity: "alert", detail: `quick-pay against already-paid order ${order.trackingNumber}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, loggedBy: req.user!.username });
+        return fail(res, 400, `Order ${order.trackingNumber} is already fully paid — post a Reversing Entry first to refund.`);
+      }
+
+      // ── Cross-check: only the assignee or an admin may log this order's payment ──
+      const isAdmin = req.user!.role === "ADMIN";
+      if (!isAdmin && order.assignedTo && order.assignedTo !== req.user!.username) {
+        await fileAudit({ flag: "actor_not_assignee", severity: "alert", detail: `${req.user!.username} tried to log payment for ${order.trackingNumber} assigned to ${order.assignedTo}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, loggedBy: req.user!.username });
+        return fail(res, 403, `This order is assigned to ${order.assignedTo}. Only the assignee or an admin can log its payment.`);
+      }
 
       const totalPaid = await BillingPayment.aggregate([
         { $match: { orderId: order._id.toString() } },
@@ -2792,12 +2906,20 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const alreadyPaid = totalPaid[0]?.total || 0;
       const remaining = order.totalAmount - alreadyPaid;
 
+      // Cross-check: never accept more than the remaining balance.
+      const EPS = 0.005;
+      if (parsed.data.amount > remaining + EPS) {
+        await fileAudit({ flag: "amount_mismatch", severity: "alert", detail: `overpayment: ₱${parsed.data.amount.toFixed(2)} > remaining ₱${remaining.toFixed(2)} on ${order.trackingNumber}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: parsed.data.gcashReferenceNumber, loggedBy: req.user!.username });
+        return fail(res, 400, `Amount ₱${parsed.data.amount.toFixed(2)} exceeds remaining balance ₱${remaining.toFixed(2)}.`);
+      }
+
       // Partial payments must reach ≥50% of the order total before being
       // accepted as "partial" — anything below is rejected with a clear
       // explanation. (REQUEST.pdf round 7 + section 18.)
       const projected = alreadyPaid + parsed.data.amount;
       const halfThreshold = order.totalAmount * 0.5;
       if (projected < order.totalAmount && projected < halfThreshold) {
+        await fileAudit({ flag: "amount_below_min", severity: "warn", detail: `partial-pay below 50%: projected ₱${projected.toFixed(2)} / threshold ₱${halfThreshold.toFixed(2)} on ${order.trackingNumber}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, loggedBy: req.user!.username });
         return fail(
           res,
           400,
@@ -2805,16 +2927,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         );
       }
 
+      // ── GCash reference validation (direct-save: anomalies are filed not blocked) ──
+      const isGcash = parsed.data.paymentMethod === "gcash" || parsed.data.paymentMethod === "gcash_qr";
+      let cleanRef = parsed.data.gcashReferenceNumber || "";
+      const auditQueue: Array<{ flag: PaymentAuditFlag; severity?: "info" | "warn" | "alert"; detail: string }> = [];
+      if (isGcash) {
+        const cls = classifyGcashRef(parsed.data.gcashReferenceNumber || "");
+        if (!cls.ok) {
+          return fail(res, 400, cls.reason);
+        }
+        cleanRef = cls.ref;
+        const dup = await BillingPayment.findOne({ gcashReferenceNumber: cleanRef });
+        if (dup) {
+          await fileAudit({ flag: "gcash_ref_duplicate", severity: "alert", detail: `GCash ref ${cleanRef} already on payment ${dup._id}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: cleanRef, loggedBy: req.user!.username });
+          return fail(res, 409, "Duplicate GCash reference — that exact reference was already recorded.");
+        }
+      }
+      if (isAfterHoursPHT()) {
+        auditQueue.push({ flag: "after_hours", severity: "info", detail: "payment logged outside 06:00–22:00 PHT" });
+      }
+
       const payment = await BillingPayment.create({
         orderId: parsed.data.orderId,
         paymentMethod: parsed.data.paymentMethod,
         gcashNumber: "",
-        gcashReferenceNumber: parsed.data.gcashReferenceNumber || "",
+        gcashReferenceNumber: cleanRef,
         amountPaid: parsed.data.amount,
         paymentDate: new Date(),
         proofNote: parsed.data.note || "",
         loggedBy: req.user!.username,
       });
+
+      // Drain queued info-audits now that we have the paymentId.
+      for (const a of auditQueue) {
+        await fileAudit({ ...a, paymentId: payment._id.toString(), orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amount, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: cleanRef, loggedBy: req.user!.username });
+      }
 
       const newTotalPaid = alreadyPaid + parsed.data.amount;
       let newPaymentStatus = order.paymentStatus;
@@ -2872,14 +3019,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!parsed.success) return fail(res, 400, "Validation failed", Object.fromEntries(parsed.error.errors.map((e) => [e.path.join("."), e.message])));
 
       const order = await Order.findById(parsed.data.orderId);
-      if (!order) return fail(res, 404, "Order not found");
-      if (order.paymentStatus === "paid") return fail(res, 400, "Order has already been paid");
+      if (!order) {
+        await fileAudit({ flag: "order_missing", severity: "alert", detail: `pay attempted on missing order ${parsed.data.orderId}`, orderId: parsed.data.orderId, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: parsed.data.gcashReferenceNumber, loggedBy: req.user!.username });
+        return fail(res, 404, "Order not found");
+      }
+      if (order.paymentStatus === "paid") {
+        await fileAudit({ flag: "order_already_paid", severity: "alert", detail: `pay against already-paid order ${order.trackingNumber}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, loggedBy: req.user!.username });
+        return fail(res, 400, "Order has already been paid");
+      }
+
+      // Actor must be assignee or admin (mirrors quick-pay).
+      const isAdminAct = req.user!.role === "ADMIN";
+      if (!isAdminAct && order.assignedTo && order.assignedTo !== req.user!.username) {
+        await fileAudit({ flag: "actor_not_assignee", severity: "alert", detail: `${req.user!.username} tried to log payment for ${order.trackingNumber} assigned to ${order.assignedTo}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, loggedBy: req.user!.username });
+        return fail(res, 403, `This order is assigned to ${order.assignedTo}. Only the assignee or an admin can log its payment.`);
+      }
 
       if (!parsed.data.isFullPayment) {
         if (parsed.data.amountPaid <= 0) return fail(res, 400, "Amount paid must be greater than 0");
         // Partial payments must reach ≥50% of the order total
         const halfThreshold = order.totalAmount * 0.5;
         if (parsed.data.amountPaid < halfThreshold) {
+          await fileAudit({ flag: "amount_below_min", severity: "warn", detail: `partial-pay below 50%: ₱${parsed.data.amountPaid.toFixed(2)} / threshold ₱${halfThreshold.toFixed(2)} on ${order.trackingNumber}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, loggedBy: req.user!.username });
           return fail(
             res,
             400,
@@ -2888,13 +3049,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         }
       } else {
         if (parsed.data.amountPaid < order.totalAmount) return fail(res, 400, `Full payment must be at least ₱${order.totalAmount.toFixed(2)}`);
+        // Overpayment (full mode) — accept but file audit so the admin can post a partial Reversing Entry refund.
+        if (parsed.data.amountPaid > order.totalAmount + 0.005) {
+          await fileAudit({ flag: "amount_mismatch", severity: "warn", detail: `overpayment ₱${parsed.data.amountPaid.toFixed(2)} > total ₱${order.totalAmount.toFixed(2)} on ${order.trackingNumber}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: parsed.data.gcashReferenceNumber, loggedBy: req.user!.username });
+        }
       }
 
       const isGcash = parsed.data.paymentMethod === "gcash" || parsed.data.paymentMethod === "gcash_qr";
-
-      if (isGcash && parsed.data.gcashReferenceNumber) {
-        const existingRef = await BillingPayment.findOne({ gcashReferenceNumber: parsed.data.gcashReferenceNumber });
-        if (existingRef) return fail(res, 409, "Duplicate GCash reference number — already recorded");
+      let cleanGcashRef = parsed.data.gcashReferenceNumber || "";
+      if (isGcash) {
+        const cls = classifyGcashRef(parsed.data.gcashReferenceNumber || "");
+        if (!cls.ok) {
+          return fail(res, 400, cls.reason);
+        }
+        cleanGcashRef = cls.ref;
+        const existingRef = await BillingPayment.findOne({ gcashReferenceNumber: cleanGcashRef });
+        if (existingRef) {
+          await fileAudit({ flag: "gcash_ref_duplicate", severity: "alert", detail: `GCash ref ${cleanGcashRef} already on payment ${existingRef._id}`, orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: cleanGcashRef, loggedBy: req.user!.username });
+          return fail(res, 409, "Duplicate GCash reference number — already recorded");
+        }
+      }
+      if (isAfterHoursPHT()) {
+        await fileAudit({ flag: "after_hours", severity: "info", detail: "payment logged outside 06:00–22:00 PHT", orderId: order._id.toString(), trackingNumber: order.trackingNumber, amount: parsed.data.amountPaid, paymentMethod: parsed.data.paymentMethod, gcashReferenceNumber: cleanGcashRef, loggedBy: req.user!.username });
       }
 
       const transactionCode = parsed.data.transactionCode || generateTransactionCode();
@@ -2904,7 +3080,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         paymentMethod: parsed.data.paymentMethod,
         gcashNumber: parsed.data.gcashSenderNumber || "",
         gcashSenderName: parsed.data.gcashSenderName || "",
-        gcashReferenceNumber: isGcash ? parsed.data.gcashReferenceNumber : transactionCode,
+        gcashReferenceNumber: isGcash ? cleanGcashRef : transactionCode,
         amountPaid: parsed.data.amountPaid,
         amountTendered: parsed.data.amountTendered,
         transactionCode,
@@ -2926,7 +3102,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         loggedBy: req.user!.username,
       });
 
-      const methodLabel = isGcash ? `GCash (ref: ${parsed.data.gcashReferenceNumber})` : parsed.data.paymentMethod === "cod" ? "Cash on Delivery" : "Cash";
+      const methodLabel = isGcash ? `GCash (ref: ${cleanGcashRef})` : parsed.data.paymentMethod === "cod" ? "Cash on Delivery" : "Cash";
       order.currentStatus = "Pending Release";
       order.paymentStatus = "paid";
       order.statusHistory.push(
@@ -3193,6 +3369,263 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         summary[e.accountName].credit += e.credit;
       }
       return ok(res, Object.entries(summary).map(([name, vals]) => ({ accountName: name, ...vals, net: vals.debit - vals.credit })));
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── REVERSING ENTRIES ─────────────────────────────────────
+  //
+  // Append-only correction path. Posting a Reversing Entry for an existing
+  // ledger row appends a new row with swapped debit/credit, marks it as
+  // isReversing=true, links back to the original via referenceType="reversal",
+  // and decrements the corresponding AccountingAccount balance.
+  //
+  // Companion route: /api/orders/:id/reverse-payment reverses the BOTH legs
+  // of a payment pair in one shot and stamps the order as "Corrected".
+  //
+  // Per the proposal: an admin (not employee) initiates corrections; the
+  // original entry is NEVER mutated or deleted.
+  app.post("/api/accounting/ledger/:id/reverse", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const reason = String(req.body?.reason || "").trim();
+      if (reason.length < 3) return fail(res, 400, "Reversal reason is required (min 3 chars).");
+
+      const original = await GeneralLedgerEntry.findById(req.params.id);
+      if (!original) return fail(res, 404, "Ledger entry not found");
+      if (original.isReversing) return fail(res, 400, "Cannot reverse a reversing entry.");
+
+      const already = await GeneralLedgerEntry.findOne({
+        referenceType: "reversal",
+        referenceId: original._id.toString(),
+      });
+      if (already) return fail(res, 409, "This entry has already been reversed.");
+
+      const reversal = await GeneralLedgerEntry.create({
+        date: new Date(),
+        accountName: original.accountName,
+        debit: original.credit,
+        credit: original.debit,
+        description: `REVERSAL of ${original._id} — ${reason}`,
+        referenceType: "reversal",
+        referenceId: original._id.toString(),
+        isReversing: true,
+        actor: req.user!.username,
+      });
+
+      // Account balance: reverse direction of the original.
+      const account = await AccountingAccount.findOne({ accountName: original.accountName });
+      if (account) {
+        const isDebitNormal = ["Asset", "Expense"].includes(account.accountType);
+        const originalDelta = isDebitNormal ? original.debit - original.credit : original.credit - original.debit;
+        await AccountingAccount.findByIdAndUpdate(account._id, { $inc: { balance: -originalDelta } });
+      } else {
+        // Fall back to bumpAccountBalance for KNOWN_ACCOUNTS map.
+        const reverseDelta = original.credit - original.debit;
+        await bumpAccountBalance(original.accountName, reverseDelta);
+      }
+
+      await logAction("LEDGER_REVERSED", req.user!.username, original.accountName, {
+        originalId: original._id, reason, debit: original.debit, credit: original.credit,
+      });
+      emitEvent("LEDGER_POSTED");
+      return ok(res, { original, reversal });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Reverse BOTH legs of a payment in one shot, and stamp the order as
+  // "Corrected" so it stops showing up in revenue / pending-release tallies.
+  app.post("/api/orders/:id/reverse-payment", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
+    try {
+      const reason = String(req.body?.reason || "").trim();
+      if (reason.length < 3) return fail(res, 400, "Reason is required (min 3 chars).");
+
+      const order = await Order.findById(req.params.id);
+      if (!order) return fail(res, 404, "Order not found");
+
+      const payments = await BillingPayment.find({ orderId: order._id.toString() }).lean();
+      if (payments.length === 0) return fail(res, 400, "No payments to reverse on this order.");
+
+      const paymentIds = payments.map((p) => p._id.toString());
+      const entries = await GeneralLedgerEntry.find({
+        referenceType: "payment",
+        referenceId: { $in: paymentIds },
+        isReversing: { $ne: true },
+      });
+      if (entries.length === 0) return fail(res, 400, "Original ledger entries not found.");
+
+      // Already reversed? Refuse a second pass.
+      const reversed = await GeneralLedgerEntry.exists({
+        referenceType: "reversal",
+        referenceId: { $in: entries.map((e) => e._id.toString()) },
+      });
+      if (reversed) return fail(res, 409, "Payment has already been reversed.");
+
+      for (const original of entries) {
+        await GeneralLedgerEntry.create({
+          date: new Date(),
+          accountName: original.accountName,
+          debit: original.credit,
+          credit: original.debit,
+          description: `REVERSAL of payment for ${order.trackingNumber} — ${reason}`,
+          referenceType: "reversal",
+          referenceId: original._id.toString(),
+          isReversing: true,
+          actor: req.user!.username,
+        });
+        const account = await AccountingAccount.findOne({ accountName: original.accountName });
+        if (account) {
+          const isDebitNormal = ["Asset", "Expense"].includes(account.accountType);
+          const originalDelta = isDebitNormal ? original.debit - original.credit : original.credit - original.debit;
+          await AccountingAccount.findByIdAndUpdate(account._id, { $inc: { balance: -originalDelta } });
+        } else {
+          await bumpAccountBalance(original.accountName, original.credit - original.debit);
+        }
+      }
+
+      order.paymentStatus = "pending_payment";
+      order.currentStatus = "Corrected";
+      order.statusHistory.push({
+        status: "Corrected",
+        timestamp: new Date(),
+        actor: req.user!.username,
+        note: `Payment reversed — ${reason}`,
+      });
+      await order.save();
+
+      // File one audit row so the daily report shows it.
+      await fileAudit({
+        flag: "amount_mismatch",
+        severity: "alert",
+        detail: `payment reversed — ${reason}`,
+        orderId: order._id.toString(),
+        trackingNumber: order.trackingNumber,
+        amount: order.totalAmount,
+        loggedBy: req.user!.username,
+      });
+
+      await logAction("PAYMENT_REVERSED", req.user!.username, order.trackingNumber, { reason, paymentIds });
+      emitEvent("LEDGER_POSTED");
+      emitEvent("ORDER_STATUS_UPDATED", { orderId: order._id });
+      emitEvent("DASHBOARD_STATS_UPDATED");
+      return ok(res, { order, reversed: entries.length });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // ─── DAILY PAYMENT AUDIT REPORT ────────────────────────────
+  //
+  // One-shot fraud-detection dashboard. Surfaces, for a given PHT day:
+  //   • every payment logged (employee, order, method, amount, ref)
+  //   • every audit flag fired during the same window
+  //   • per-employee totals (count + amount)
+  //
+  // The client renders this as a Reports → "Daily Payment Audit" tab.
+  app.get("/api/reports/payment-audit", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const dateStr = String(req.query.date || "");
+      // Parse YYYY-MM-DD as a PHT calendar day, convert to UTC range.
+      let start: Date, end: Date;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        // PHT midnight = UTC of previous day 16:00.
+        start = new Date(`${dateStr}T00:00:00+08:00`);
+        end = new Date(`${dateStr}T23:59:59.999+08:00`);
+      } else {
+        const now = new Date();
+        const phtNow = new Date(now.getTime() + 8 * 3600 * 1000);
+        const ymd = phtNow.toISOString().slice(0, 10);
+        start = new Date(`${ymd}T00:00:00+08:00`);
+        end = new Date(`${ymd}T23:59:59.999+08:00`);
+      }
+
+      const [payments, audits, orders] = await Promise.all([
+        BillingPayment.find({ paymentDate: { $gte: start, $lte: end } }).sort({ paymentDate: -1 }).lean(),
+        PaymentAudit.find({ createdAt: { $gte: start, $lte: end } }).sort({ createdAt: -1 }).lean(),
+        Order.find({}).select("_id trackingNumber customerName totalAmount assignedTo").lean(),
+      ]);
+
+      const orderById: Record<string, any> = {};
+      for (const o of orders) orderById[o._id.toString()] = o;
+
+      // Build per-payment flag groups.
+      const flagsByPayment: Record<string, any[]> = {};
+      const flagsByOrder: Record<string, any[]> = {};
+      for (const a of audits) {
+        if (a.paymentId) {
+          (flagsByPayment[a.paymentId] ||= []).push(a);
+        }
+        if (a.orderId) {
+          (flagsByOrder[a.orderId] ||= []).push(a);
+        }
+      }
+
+      const enrichedPayments = payments.map((p) => {
+        const order = orderById[String(p.orderId)] || {};
+        const pid = String(p._id);
+        const oid = String(p.orderId);
+        const flags = [...(flagsByPayment[pid] || []), ...(flagsByOrder[oid] || [])];
+        return {
+          paymentId: pid,
+          orderId: oid,
+          trackingNumber: order.trackingNumber,
+          customerName: order.customerName,
+          orderTotal: order.totalAmount,
+          paymentMethod: p.paymentMethod,
+          amountPaid: p.amountPaid,
+          gcashReferenceNumber: p.gcashReferenceNumber,
+          transactionCode: p.transactionCode,
+          loggedBy: p.loggedBy,
+          paymentDate: p.paymentDate,
+          assignedTo: order.assignedTo,
+          flags: flags.map((f) => ({ flag: f.flag, severity: f.severity, detail: f.detail })),
+        };
+      });
+
+      // Per-employee summary.
+      const byEmployee: Record<string, { username: string; count: number; amount: number; flagged: number }> = {};
+      for (const p of enrichedPayments) {
+        const u = p.loggedBy || "(unknown)";
+        if (!byEmployee[u]) byEmployee[u] = { username: u, count: 0, amount: 0, flagged: 0 };
+        byEmployee[u].count += 1;
+        byEmployee[u].amount += Number(p.amountPaid || 0);
+        if (p.flags.length > 0) byEmployee[u].flagged += 1;
+      }
+
+      // Flag tally
+      const flagTally: Record<string, number> = {};
+      for (const a of audits) flagTally[a.flag] = (flagTally[a.flag] || 0) + 1;
+
+      const totalAmount = enrichedPayments.reduce((s, p) => s + Number(p.amountPaid || 0), 0);
+
+      return ok(res, {
+        date: start.toISOString().slice(0, 10),
+        rangeStart: start,
+        rangeEnd: end,
+        summary: {
+          paymentCount: enrichedPayments.length,
+          totalAmount,
+          auditCount: audits.length,
+          flaggedPayments: enrichedPayments.filter((p) => p.flags.length > 0).length,
+          flagTally,
+        },
+        payments: enrichedPayments,
+        employees: Object.values(byEmployee).sort((a, b) => b.amount - a.amount),
+        audits, // raw rows for the "All Flags" view
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // List historical audit rows for the Maintenance/Audit drawer.
+  app.get("/api/reports/payment-audit/feed", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const limit = Math.min(parseInt(String(req.query.limit || "50"), 10) || 50, 200);
+      const rows = await PaymentAudit.find().sort({ createdAt: -1 }).limit(limit).lean();
+      return ok(res, rows);
     } catch (err: any) {
       return fail(res, 500, err.message);
     }

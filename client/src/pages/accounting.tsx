@@ -967,38 +967,57 @@ export default function AccountingPage() {
                       <TableHead className="text-right">Credit</TableHead>
                       <TableHead>Description</TableHead>
                       <TableHead>Reference</TableHead>
+                      {isAdmin && <TableHead className="w-[110px] text-right">Correction</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredEntries.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                        <TableCell colSpan={isAdmin ? 7 : 6} className="text-center text-muted-foreground py-8">
                           No entries found
                         </TableCell>
                       </TableRow>
                     ) : (
-                      pagedEntries.map((entry) => (
-                        <TableRow key={entry._id} data-testid={`row-ledger-${entry._id}`}>
-                          <TableCell className="text-muted-foreground text-sm">
-                            {formatDate(entry.date)}
-                          </TableCell>
-                          <TableCell className="font-medium">{entry.accountName}</TableCell>
-                          <TableCell className="text-right text-blue-600 font-medium">
-                            {entry.debit > 0 ? formatCurrency(entry.debit) : <span className="text-muted-foreground">—</span>}
-                          </TableCell>
-                          <TableCell className="text-right text-emerald-600 font-medium">
-                            {entry.credit > 0 ? formatCurrency(entry.credit) : <span className="text-muted-foreground">—</span>}
-                          </TableCell>
-                          <TableCell className="text-muted-foreground text-sm">
-                            {entry.description || <span className="text-muted-foreground/50">—</span>}
-                          </TableCell>
-                          <TableCell className="font-mono text-xs text-muted-foreground">
-                            {entry.referenceType
-                              ? `${entry.referenceType}:${entry.referenceId}`
-                              : <span className="text-muted-foreground/50">—</span>}
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      pagedEntries.map((entry) => {
+                        const isReversal = !!(entry as any).isReversing || entry.referenceType === "reversal";
+                        const alreadyReversed = filteredEntries.some((e) => e.referenceType === "reversal" && e.referenceId === entry._id);
+                        return (
+                          <TableRow key={entry._id} data-testid={`row-ledger-${entry._id}`} className={isReversal ? "bg-rose-50/40 dark:bg-rose-950/15" : ""}>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {formatDate(entry.date)}
+                            </TableCell>
+                            <TableCell className="font-medium">
+                              {entry.accountName}
+                              {isReversal && <Badge className="ml-2 bg-rose-100 text-rose-700 border-rose-300 text-[10px]">Reversal</Badge>}
+                            </TableCell>
+                            <TableCell className="text-right text-blue-600 font-medium">
+                              {entry.debit > 0 ? formatCurrency(entry.debit) : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-right text-emerald-600 font-medium">
+                              {entry.credit > 0 ? formatCurrency(entry.credit) : <span className="text-muted-foreground">—</span>}
+                            </TableCell>
+                            <TableCell className="text-muted-foreground text-sm">
+                              {entry.description || <span className="text-muted-foreground/50">—</span>}
+                            </TableCell>
+                            <TableCell className="font-mono text-xs text-muted-foreground">
+                              {entry.referenceType
+                                ? `${entry.referenceType}:${entry.referenceId}`
+                                : <span className="text-muted-foreground/50">—</span>}
+                            </TableCell>
+                            {isAdmin && (
+                              <TableCell className="text-right">
+                                {isReversal ? (
+                                  <span className="text-[10px] text-muted-foreground italic">reversing</span>
+                                ) : alreadyReversed ? (
+                                  <span className="text-[10px] text-rose-700 italic">reversed</span>
+                                ) : (
+                                  <ReverseLedgerButton entryId={entry._id} accountName={entry.accountName} />
+                                )}
+                              </TableCell>
+                            )}
+                          </TableRow>
+                        );
+                      })
                     )}
                   </TableBody>
                 </Table>
@@ -1160,5 +1179,74 @@ export default function AccountingPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Per-row Reverse button. Opens a small dialog that demands a reason
+ * (min 3 chars) and POSTs to /api/accounting/ledger/:id/reverse. Result
+ * is an append-only inverse entry; the original row stays put.
+ */
+function ReverseLedgerButton({ entryId, accountName }: { entryId: string; accountName: string }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+
+  const mut = useMutation({
+    mutationFn: async (r: string) => {
+      const res = await apiRequest("POST", `/api/accounting/ledger/${entryId}/reverse`, { reason: r });
+      const j = await res.json();
+      if (!res.ok || j?.success === false) throw new Error(j?.error || j?.message || "Reversal failed");
+      return j;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/summary"] });
+      toast({ title: "Reversing entry posted", description: `A new inverse entry was appended for ${accountName}.` });
+      setOpen(false); setReason("");
+    },
+    onError: (err: Error) => toast({ title: "Reversal failed", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-6 text-[10px] px-2 border-rose-300 text-rose-700 hover:bg-rose-50"
+        onClick={() => setOpen(true)}
+        data-testid={`button-reverse-${entryId}`}
+      >
+        Reverse
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setReason(""); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reverse ledger entry?</DialogTitle>
+            <DialogDescription>
+              Appends an inverse entry referencing this one. The original entry stays — corrections are append-only per the proposal.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs uppercase tracking-wider text-muted-foreground block mb-1">Reason (required)</label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. wrong account / fraudulent payment" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => { setOpen(false); setReason(""); }}>Cancel</Button>
+              <Button
+                variant="destructive"
+                disabled={reason.trim().length < 3 || mut.isPending}
+                onClick={() => mut.mutate(reason.trim())}
+              >
+                {mut.isPending && <Loader2 className="animate-spin mr-1 h-4 w-4" />}
+                Post reversal
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

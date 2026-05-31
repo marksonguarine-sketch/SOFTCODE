@@ -1633,4 +1633,68 @@ Build: `tsc --noEmit` 0 errors after every round; `npm run build` clean (`dist/i
 
 ---
 
+## Session 18 / Round 12 — Money flow + correction-path hardening (proposal alignment)
+
+After reading the full 103-page academic proposal end-to-end, this round implements the missing append-only correction paths called out in Chapter 1 §Scope and Chapter 3 §Module Design: a formal **Reversing Entry** flow for the accounting ledger, a fraud-detection **Daily Payment Audit Report**, stricter **GCash reference validation + cross-checks** at payment time, and a **direct-save rollback** wrapper around the order-create chain.
+
+### 35.1 New model: `server/models/PaymentAudit.ts`
+Append-only anomaly log for the Billing & Payment module. Every payment posted runs through a battery of cheap checks; each anomaly fires one `PaymentAudit` row. Taxonomy:
+`gcash_format_invalid · gcash_ref_duplicate · amount_mismatch · amount_below_min · actor_not_assignee · after_hours · order_already_paid · order_missing`. Fields: `flag, severity (info|warn|alert), detail, paymentId?, orderId?, trackingNumber?, amount?, paymentMethod?, gcashReferenceNumber?, loggedBy, resolvedAt?, resolvedBy?, resolutionNote?`. Indexed on `flag`, `loggedBy`, and `createdAt`.
+
+### 35.2 GCash reference validator (server)
+`normalizeGcashRef(raw)` strips `Ref:`/`Reference No:` prefixes + whitespace + uppercases. `classifyGcashRef(raw)` rejects refs outside 8–15 alphanumerics. Used in both `/api/billing/quick-pay` and `/api/billing/pay`. Direct-save preserved: many anomalies still SUCCEED but file an audit row so the morning report catches them. Malformed refs do reject (you can't write garbage into a tracked field); off-hours / overpayment-in-full-mode are logged-then-allowed.
+
+### 35.3 Cross-check guards in quick-pay + pay
+- `order_missing` → 404 + audit (alert)
+- `order_already_paid` → 400 + audit (alert)
+- `actor_not_assignee` → 403 unless caller is the assignee or admin (audit alert)
+- `amount_mismatch` → reject if `amount > remainingBalance + ε`; warn (logged-then-allowed) on overpayment in full mode
+- `amount_below_min` → reject if projected < 50% of total (audit warn)
+- `gcash_ref_duplicate` → 409 + audit alert
+- `after_hours` → info-level audit when timestamp is outside 06:00–22:00 PHT (still accepted)
+
+### 35.4 `/api/orders/:id/reverse-payment` (admin-only)
+Walks the order's BillingPayment rows, finds the original payment ledger entries, and posts an inverse debit/credit pair (referenceType=`reversal`, isReversing=true, referenceId=originalId). Updates AccountingAccount balances by the inverse delta. Refuses if already reversed. Stamps `order.paymentStatus="pending_payment"`, `order.currentStatus="Corrected"`, appends a Corrected entry to statusHistory, fires an alert-level PaymentAudit row. Mandatory `reason` (min 3 chars).
+
+### 35.5 `/api/accounting/ledger/:id/reverse` (admin-only)
+Single-entry reversal endpoint used from the Accounting ledger per-row "Reverse" button. Refuses to reverse a reversal. Refuses if the entry has already been reversed (one-shot per original).
+
+### 35.6 `/api/reports/payment-audit?date=YYYY-MM-DD` — Daily Payment Audit Report
+Returns:
+- `summary` → `{ paymentCount, totalAmount, auditCount, flaggedPayments, flagTally }`
+- `payments` → every payment in the PHT day enriched with `trackingNumber, customerName, orderTotal, assignedTo, flags[]`
+- `employees` → per-loggedBy aggregate `{ count, amount, flagged }`
+- `audits` → raw PaymentAudit rows
+
+Date defaults to PHT today. Companion: `/api/reports/payment-audit/feed?limit=50` for live audit feed.
+
+### 35.7 Order-create direct-save rollback
+The order-create handler now wraps everything after `Order.create` (inventory reservation logs, walk-in `BillingPayment.create`, ledger pair, `bumpAccountBalance` calls) in a try/catch that tracks every child write. On failure: deletes each created child (payments, ledger entries, inventory logs), reverses any account-balance bumps, hard-deletes the parent Order, re-throws as a 500 with the rolled-back error message. No more phantom walk-in-paid orders if the second leg fails.
+
+### 35.8 New Order lifecycle state: `Corrected`
+`StatusBadge` in `order-detail.tsx` now renders rose-600 for `Corrected`. Posted by the reverse-payment route. Excluded from active-orders + pending-release tallies because `paymentStatus` resets to `pending_payment` on reversal.
+
+### 35.9 UI: Reports → "Payment Audit" tab
+New `PaymentAuditReport` component (`client/src/pages/reports.tsx`). Date picker capped at today (defaults to today). Four KPI tiles. Flag-tally chip strip. Payments table — flagged rows tinted rose, each flag rendered as a chip with a hover-detail tooltip. By-employee panel. PDF export. Added as the 6th `REPORT_TYPES` entry.
+
+### 35.10 UI: Order detail → "Correction zone (admin)" card
+New `ReversePaymentCard` visible to admins on paid / pending-release / corrected orders. Two-step confirmation with mandatory reason (min 3 chars). Posts to `/api/orders/:id/reverse-payment`. Explains append-only policy in plain English.
+
+### 35.11 UI: Accounting ledger → per-row Reverse button (admin)
+New `Correction` column for admins. `ReverseLedgerButton` opens a small dialog, demands a reason, POSTs to `/api/accounting/ledger/:id/reverse`. Reversal rows render with rose tint + `Reversal` badge. Originals already reversed show `reversed` instead of the button.
+
+### 35.12 Verification — live endpoint smoke
+- `npm run build` clean (`dist/index.cjs 1.3MB`, frontend ~2.34MB) · `tsc --noEmit` 0 errors
+- Server boots → `/api/public/stats` 200, `/api/reports/payment-audit` 200 (defaults to PHT today)
+- Bad GCash ref `"abc"` → 400 "Reference too short (got 3, need 8–15)"
+- Bad GCash ref `"abc-def-12345"` → 400 "Reference must be alphanumeric (A–Z, 0–9)"
+- Below-50% partial pay (`₱100` on ₱22,475 order) → rejected, audit row `amount_below_min` filed
+- Missing order id → 404, audit row `order_missing` filed (severity alert)
+- Single-entry reversal → 200, appends inverse entry; second attempt 409 "already been reversed"
+- Whole-order reverse-payment → 200, `order.currentStatus` flips to `"Corrected"`, audit row filed
+- `/api/reports/payment-audit/feed` returns appended rows newest-first
+
+### 35.13 Scope boundary check
+The proposal explicitly delimits payroll, public e-commerce, certified CPA accounting, refund management, and hardware/OS repair as out of scope. This round adds NONE of those — Reversing Entries are the proposal's own correction mechanism, not refund management.
+
 End of code.md.

@@ -9,7 +9,7 @@ import {
   UserX, Circle, Upload, X, Receipt, Banknote, Smartphone, Package,
   FileText, Hash, DollarSign, ImageIcon, Car, ClipboardCheck,
   Building2, Phone, UserRound, BadgeCheck, WalletCards, Camera,
-  ChevronRight, Scale, Wallet, CalendarClock, Clipboard,
+  ChevronRight, Scale, Wallet, CalendarClock, Clipboard, RotateCcw,
 } from "lucide-react";
 import { processPaymentSchema, type ProcessPaymentInput, type IOrder, PAYMENT_METHOD_LABELS } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -38,6 +38,7 @@ function StatusBadge({ status }: { status: string }) {
     "Released": "bg-indigo-500 text-white border-transparent",
     "In Transit": "bg-purple-500 text-white border-transparent",
     "Completed": "bg-green-600 text-white border-transparent",
+    "Corrected": "bg-rose-600 text-white border-transparent",
   };
   return <Badge className={colorMap[status] || ""}>{status}</Badge>;
 }
@@ -832,6 +833,26 @@ export default function OrderDetailPage() {
     onError: (err: Error) => toast({ title: "Delivery confirmation failed", description: err.message, variant: "destructive" }),
   });
 
+  // Admin-only: reverse the payment on this order. Posts an inverse
+  // ledger pair (referenceType="reversal") and marks the order "Corrected".
+  // Append-only — the original entries stay; we just add the reversal.
+  const reverseMutation = useMutation({
+    mutationFn: async (reason: string) => {
+      const res = await apiRequest("POST", `/api/orders/${orderId}/reverse-payment`, { reason });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || json?.message || "Reversal failed");
+      return json;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/orders", orderId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/orders"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/accounting/ledger"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
+      toast({ title: "Payment reversed", description: "A reversing entry has been posted and the order is now flagged Corrected." });
+    },
+    onError: (err: Error) => toast({ title: "Reversal failed", description: err.message, variant: "destructive" }),
+  });
+
   const takeoverMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", `/api/orders/${orderId}/takeover`);
@@ -1222,6 +1243,19 @@ export default function OrderDetailPage() {
             </Card>
           )}
 
+          {/* Admin-only: Reversing Entry. Shown for any paid OR corrected order
+              so the admin can append an inverse ledger pair without ever
+              mutating the original entries. Append-only correction path per
+              the proposal. */}
+          {isAdmin && (order.paymentStatus === "paid" || order.currentStatus === "Pending Release" || order.currentStatus === "Corrected") && (
+            <ReversePaymentCard
+              order={order}
+              alreadyCorrected={order.currentStatus === "Corrected"}
+              isPending={reverseMutation.isPending}
+              onReverse={(reason) => reverseMutation.mutate(reason)}
+            />
+          )}
+
           {order.currentStatus === "Pending Release" && (
             <Card id="release-panel" className={cn(window.location.search.includes("release=1") && "ring-2 ring-blue-500/50")}>
               <CardHeader>
@@ -1489,5 +1523,89 @@ export default function OrderDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Reversing Entry card — admin-only correction path per the proposal.
+ *
+ * Posting a reversal appends an inverse debit/credit pair to the ledger
+ * (referenceType="reversal", isReversing=true) and flips the order's
+ * lifecycle status to "Corrected". The original entries are NEVER mutated.
+ * A two-step confirm gate prevents accidental clicks.
+ */
+function ReversePaymentCard({
+  order, alreadyCorrected, isPending, onReverse,
+}: {
+  order: any;
+  alreadyCorrected: boolean;
+  isPending: boolean;
+  onReverse: (reason: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+
+  return (
+    <>
+      <Card className="border-rose-300/60 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20">
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <RotateCcw className="h-4 w-4 text-rose-700" />
+            Correction zone (admin)
+          </CardTitle>
+          <CardDescription>
+            {alreadyCorrected
+              ? <>This order has already been reversed. A new payment would need to be logged from scratch.</>
+              : <>If this payment was logged in error (wrong order, wrong amount, fraudulent GCash reference), post a Reversing Entry. It appends an inverse ledger pair and stamps the order as <strong>Corrected</strong>. The original entry is preserved.</>}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            variant="outline"
+            className="border-rose-400 text-rose-700 hover:bg-rose-100 dark:hover:bg-rose-950/40"
+            disabled={alreadyCorrected || isPending}
+            onClick={() => setOpen(true)}
+            data-testid="button-reverse-payment"
+          >
+            <RotateCcw className="h-4 w-4 mr-2" />
+            {alreadyCorrected ? "Already corrected" : "Post Reversing Entry"}
+          </Button>
+        </CardContent>
+      </Card>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setReason(""); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reverse payment for {order.trackingNumber}?</DialogTitle>
+            <DialogDescription>
+              Append an inverse ledger pair and flag the order as Corrected. This action is append-only and visible in the Daily Payment Audit Report. The original entries are kept intact.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs uppercase tracking-wider text-muted-foreground">Reason for reversal (required)</Label>
+              <Textarea
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="e.g. duplicate posting / fraudulent GCash ref / wrong customer"
+                rows={3}
+                data-testid="input-reverse-reason"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => { setOpen(false); setReason(""); }}>Cancel</Button>
+              <Button
+                variant="destructive"
+                disabled={reason.trim().length < 3 || isPending}
+                onClick={() => { onReverse(reason.trim()); setOpen(false); setReason(""); }}
+                data-testid="button-confirm-reverse"
+              >
+                {isPending && <Loader2 className="animate-spin mr-1 h-4 w-4" />}
+                Post Reversing Entry
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

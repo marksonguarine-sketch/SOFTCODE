@@ -967,7 +967,7 @@ function ReservationsReport({ reservations, startD, endD }: { reservations: any[
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
-type ReportType = "sales" | "inventory" | "orders" | "offers" | "reservations";
+type ReportType = "sales" | "inventory" | "orders" | "offers" | "reservations" | "payment-audit";
 
 const REPORT_TYPES: { id: ReportType; label: string; icon: any; description: string; color: string }[] = [
   { id: "sales", label: "Sales", icon: TrendingUp, description: "Revenue, top items, payment breakdown", color: "bg-blue-50 text-blue-700 border-blue-200" },
@@ -975,7 +975,195 @@ const REPORT_TYPES: { id: ReportType; label: string; icon: any; description: str
   { id: "orders", label: "Orders", icon: ShoppingBag, description: "Order types, fulfillment, top customers", color: "bg-purple-50 text-purple-700 border-purple-200" },
   { id: "offers", label: "Offers", icon: Tag, description: "Offer usage, savings generated, type breakdown", color: "bg-orange-50 text-orange-700 border-orange-200" },
   { id: "reservations", label: "Reservations", icon: CalendarCheck, description: "Scheduled, completed, payment status", color: "bg-teal-50 text-teal-700 border-teal-200" },
+  { id: "payment-audit", label: "Payment Audit", icon: AlertCircle, description: "Daily fraud-detection: bad GCash refs, mismatched amounts, off-hours posts", color: "bg-rose-50 text-rose-700 border-rose-200" },
 ];
+
+// ─── PAYMENT AUDIT REPORT ────────────────────────────────────────────────────
+//
+// Daily fraud-detection dashboard. Surfaces every payment posted on the chosen
+// PHT day plus every anomaly flag the server filed during the window.
+//
+// Flags currently emitted by the server:
+//   gcash_format_invalid · gcash_ref_duplicate · amount_mismatch
+//   amount_below_min · actor_not_assignee · after_hours · order_already_paid
+//
+// The owner uses this report to spot patterns (e.g. one employee logging
+// many off-hours payments, or repeated bad-ref attempts on the same order)
+// and then posts a Reversing Entry from the order's detail page if needed.
+const FLAG_LABELS: Record<string, { label: string; tone: string }> = {
+  gcash_format_invalid: { label: "Bad GCash format", tone: "bg-amber-100 text-amber-800" },
+  gcash_ref_duplicate:  { label: "Duplicate GCash ref", tone: "bg-rose-100 text-rose-800" },
+  amount_mismatch:      { label: "Amount mismatch", tone: "bg-rose-100 text-rose-800" },
+  amount_below_min:     { label: "Partial < 50%", tone: "bg-amber-100 text-amber-800" },
+  actor_not_assignee:   { label: "Wrong actor", tone: "bg-rose-100 text-rose-800" },
+  after_hours:          { label: "After hours", tone: "bg-slate-100 text-slate-700" },
+  order_already_paid:   { label: "Already paid", tone: "bg-rose-100 text-rose-800" },
+  order_missing:        { label: "Missing order", tone: "bg-rose-100 text-rose-800" },
+};
+
+function PaymentAuditReport() {
+  const today = format(new Date(), "yyyy-MM-dd");
+  const [dateStr, setDateStr] = useState(today);
+
+  const { data, isLoading, refetch } = useQuery<{ success: boolean; data: any }>({
+    queryKey: ["/api/reports/payment-audit", dateStr],
+    queryFn: () => apiRequest("GET", `/api/reports/payment-audit?date=${dateStr}`).then((r) => r.json()),
+  });
+
+  const report = data?.data;
+  const payments: any[] = report?.payments || [];
+  const employees: any[] = report?.employees || [];
+  const flagTally: Record<string, number> = report?.summary?.flagTally || {};
+  const summary = report?.summary || { paymentCount: 0, totalAmount: 0, auditCount: 0, flaggedPayments: 0 };
+
+  function exportPDF() {
+    const doc = new jsPDF();
+    let y = 18;
+    doc.setFontSize(15); doc.text("Daily Payment Audit Report", 14, y);
+    y += 7;
+    doc.setFontSize(10); doc.text(`Date: ${dateStr} (PHT)`, 14, y); y += 5;
+    doc.text(`Payments: ${summary.paymentCount}  ·  Total: ${formatPHP(summary.totalAmount)}  ·  Flagged: ${summary.flaggedPayments}  ·  Audit rows: ${summary.auditCount}`, 14, y);
+    y += 8;
+    autoTable(doc, {
+      startY: y,
+      head: [["Time", "Tracking", "Customer", "Amount", "Method", "Ref / Txn", "Logged by", "Flags"]],
+      body: payments.map((p) => [
+        format(new Date(p.paymentDate), "HH:mm"),
+        p.trackingNumber || "—",
+        p.customerName || "—",
+        formatPHP(p.amountPaid || 0),
+        p.paymentMethod || "—",
+        p.gcashReferenceNumber || p.transactionCode || "—",
+        p.loggedBy || "—",
+        (p.flags || []).map((f: any) => FLAG_LABELS[f.flag]?.label || f.flag).join(", ") || "—",
+      ]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [30, 58, 95] },
+    });
+    doc.save(`payment-audit-${dateStr}.pdf`);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-medium text-muted-foreground">Audit date (PHT):</span>
+        <Input type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} className="h-8 w-44 text-xs" max={today} />
+        <Button size="sm" variant="outline" onClick={() => refetch()}>Refresh</Button>
+        <div className="ml-auto flex gap-2">
+          <Button size="sm" variant="outline" onClick={exportPDF}><FileText className="h-4 w-4 mr-2" />PDF</Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: "Payments today", value: summary.paymentCount, color: "text-blue-700" },
+          { label: "Total collected", value: formatPHP(summary.totalAmount), color: "text-emerald-700" },
+          { label: "Flagged payments", value: summary.flaggedPayments, color: summary.flaggedPayments > 0 ? "text-rose-700" : "text-slate-700" },
+          { label: "Audit rows fired", value: summary.auditCount, color: summary.auditCount > 0 ? "text-amber-700" : "text-slate-700" },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="p-4">
+              <p className="text-xs text-muted-foreground mb-1">{s.label}</p>
+              <p className={`text-xl font-bold truncate ${s.color}`}>{s.value}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Flag tally chips */}
+      {Object.keys(flagTally).length > 0 && (
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><AlertCircle className="h-4 w-4 text-rose-600" />Flag breakdown</CardTitle></CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(flagTally).map(([flag, count]) => {
+                const meta = FLAG_LABELS[flag] || { label: flag, tone: "bg-slate-100 text-slate-700" };
+                return <span key={flag} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${meta.tone}`}>{meta.label}<span className="font-mono">×{count}</span></span>;
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2">
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">Payments today</CardTitle><CardDescription>Direct-save audit trail — every payment posted in this 24-hour window.</CardDescription></CardHeader>
+            <CardContent className="p-0">
+              {isLoading ? <Skeleton className="h-48 w-full" /> : payments.length === 0 ? (
+                <p className="text-sm text-muted-foreground p-6 text-center">No payments posted yet for {dateStr}.</p>
+              ) : (
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead className="w-16">Time</TableHead>
+                    <TableHead>Tracking</TableHead>
+                    <TableHead>Customer</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead>Method</TableHead>
+                    <TableHead>Ref</TableHead>
+                    <TableHead>Logged by</TableHead>
+                    <TableHead>Flags</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {payments.map((p) => (
+                      <TableRow key={p.paymentId} className={p.flags.length > 0 ? "bg-rose-50/40 dark:bg-rose-950/20" : ""}>
+                        <TableCell className="text-xs tabular-nums">{format(new Date(p.paymentDate), "HH:mm")}</TableCell>
+                        <TableCell className="font-mono text-xs">{p.trackingNumber || "—"}</TableCell>
+                        <TableCell className="text-xs">{p.customerName || "—"}</TableCell>
+                        <TableCell className="text-right text-xs tabular-nums font-semibold">{formatPHP(p.amountPaid || 0)}</TableCell>
+                        <TableCell className="text-xs uppercase">{p.paymentMethod}</TableCell>
+                        <TableCell className="font-mono text-[10px] max-w-[120px] truncate">{p.gcashReferenceNumber || p.transactionCode}</TableCell>
+                        <TableCell className="text-xs">{p.loggedBy}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap gap-1">
+                            {p.flags.map((f: any, i: number) => {
+                              const meta = FLAG_LABELS[f.flag] || { label: f.flag, tone: "bg-slate-100 text-slate-700" };
+                              return <span key={i} title={f.detail} className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${meta.tone}`}>{meta.label}</span>;
+                            })}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div>
+          <Card>
+            <CardHeader className="pb-2"><CardTitle className="text-sm">By employee</CardTitle></CardHeader>
+            <CardContent className="p-0">
+              {employees.length === 0 ? (
+                <p className="text-sm text-muted-foreground p-6 text-center">No activity.</p>
+              ) : (
+                <Table>
+                  <TableHeader><TableRow>
+                    <TableHead>Employee</TableHead>
+                    <TableHead className="text-right">Count</TableHead>
+                    <TableHead className="text-right">Amount</TableHead>
+                    <TableHead className="text-right">Flagged</TableHead>
+                  </TableRow></TableHeader>
+                  <TableBody>
+                    {employees.map((e) => (
+                      <TableRow key={e.username}>
+                        <TableCell className="text-xs">{e.username}</TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">{e.count}</TableCell>
+                        <TableCell className="text-right tabular-nums text-xs">{formatPHP(e.amount)}</TableCell>
+                        <TableCell className={`text-right tabular-nums text-xs font-semibold ${e.flagged > 0 ? "text-rose-700" : "text-slate-500"}`}>{e.flagged}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function ReportsPage() {
   const [reportType, setReportType] = useState<ReportType>("sales");
@@ -1081,6 +1269,7 @@ export default function ReportsPage() {
               {reportType === "orders" && <OrdersReport orders={orders} startD={startD} endD={endD} />}
               {reportType === "offers" && <OffersReport offers={offers} />}
               {reportType === "reservations" && <ReservationsReport reservations={reservations} startD={startD} endD={endD} />}
+              {reportType === "payment-audit" && <PaymentAuditReport />}
             </>
           )}
         </div>
