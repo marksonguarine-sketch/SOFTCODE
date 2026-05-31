@@ -1322,11 +1322,28 @@ function InventoryListExpand({ kind }: { kind: "all" | "low" | "critical" }) {
   const canRestock = isAdmin || isIM;
   const { toast } = useToast();
   const allItems = invRes?.data?.items || [];
-  const filtered = allItems.filter((i) => {
-    const r = (i as any).reorderLevel || 0;
+  // Use the same band predicate as the inventory page so the KPI counter
+  // and this list NEVER disagree (round 9 disagreement bug, follow-up).
+  // Inline the band computation here so this dialog stays self-contained.
+  function bandOf(i: any): "Critical" | "Low" | "Normal" {
+    const start = i.startingStock || 0;
+    const reorder = i.reorderLevel || 0;
     const q = i.currentQuantity || 0;
-    if (kind === "critical") return q <= 0 || (r > 0 && q <= r);
-    if (kind === "low") return r > 0 && q > r && q <= Math.ceil(r * 1.5);
+    if (q <= 0) return "Critical";
+    if (start > 0) {
+      if (q <= start * 0.125) return "Critical";
+      if (q <= start * 0.25) return "Low";
+      return "Normal";
+    }
+    if (reorder > 0) {
+      if (q <= reorder * 0.5) return "Critical";
+      if (q <= reorder) return "Low";
+    }
+    return "Normal";
+  }
+  const filtered = allItems.filter((i) => {
+    if (kind === "critical") return bandOf(i) === "Critical";
+    if (kind === "low") return bandOf(i) === "Low";
     return true;
   });
 

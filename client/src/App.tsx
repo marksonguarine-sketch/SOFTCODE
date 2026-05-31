@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Breadcrumbs } from "@/components/breadcrumbs";
 import { LiveClock } from "@/components/live-clock";
 import { NotificationBell } from "@/components/notification-bell";
+import { TOSDialog } from "@/TOS";
+import { PresenceToaster } from "@/components/presence-toaster";
 import { getTweaks, setDark, THEME_EVENT } from "@/lib/theme";
 import {
   AlertDialog,
@@ -225,6 +227,13 @@ function AuthenticatedLayout() {
 
       {/* Floating Calculator */}
       {calcUsername && <FloatingCalculator username={calcUsername} />}
+
+      {/* One-shot Terms-of-Service dialog (per-username, scroll-locked).
+          Self-contained — to remove, delete client/src/TOS/ + this line. */}
+      {user?.username && <TOSDialog username={user.username} />}
+
+      {/* Side login/logout toaster (admins) + audio routing for notifs. */}
+      {user?.username && <PresenceToaster currentUser={user} />}
 
 
       {/* TUTORIAL OVERHAUL: The Tutorial component needs to be overhauled.

@@ -448,6 +448,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       await UserSession.create({ userId: user._id, token, isActive: true });
 
       await logAction("USER_LOGIN", user.username, user.username, hadActiveSessions ? { previousSessionTerminated: true } : {});
+      // Broadcast presence so admin tabs can pop the right-side toast.
+      emitEvent("presence:login", { username: user.username, role: user.role });
 
       res.cookie("token", token, { httpOnly: true, sameSite: "lax", maxAge: 86400000 });
       return ok(res, {
@@ -468,8 +470,76 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         clearSessionCache(token);
       }
       await logAction("USER_LOGOUT", req.user!.username);
+      emitEvent("presence:logout", { username: req.user!.username, role: req.user!.role });
       res.clearCookie("token");
       return ok(res, { message: "Logged out" });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  /**
+   * Forgot password — unauthenticated request handler (REQUEST.pdf R11 §6).
+   * Employee or Inventory Manager submits their username; the system files
+   * a Request (type=PASSWORD_RESET) visible to admins + super-admin in
+   * Requests → Others. Admin "Reset Password" button is race-safe via
+   * findOneAndUpdate atomic claim — two admins simultaneously clicking
+   * Reset on the same request will produce exactly one success and one
+   * "already handled" response.
+   */
+  app.post("/api/auth/forgot-password", async (req: Request, res: Response) => {
+    try {
+      const { username } = req.body as { username?: string };
+      if (!username) return fail(res, 400, "Username is required");
+      // Always respond OK to avoid leaking which usernames exist.
+      const user = await User.findOne({ username: username.toLowerCase() }).lean();
+      if (!user) return ok(res, { filed: false });
+
+      // Block forgot-password for the super admin (must be reset manually).
+      if (user.username.toLowerCase() === DEFAULT_ADMIN_USERNAME.toLowerCase()) {
+        return fail(res, 403, "The super admin's password cannot be reset via the forgot-password flow.");
+      }
+
+      // Dedupe — one pending PASSWORD_RESET per user.
+      const existing = await RequestModel.findOne({
+        requester: user.username,
+        requestType: "PASSWORD_RESET",
+        status: "pending",
+      });
+      if (existing) {
+        return ok(res, { filed: true, alreadyPending: true });
+      }
+
+      const reqDoc = await RequestModel.create({
+        requestType: "PASSWORD_RESET",
+        requester: user.username,
+        requesterDisplay: user.username,
+        reason: `Forgot-password request from login screen at ${new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" })}`,
+        status: "pending",
+      });
+
+      await notify({
+        category: "REQUEST",
+        title: `Password reset requested by ${user.username}`,
+        body: `${user.username} (${user.role}) used the "Forgot password" link on the login page. Open Requests → Others to reset.`,
+        link: "/requests",
+        recipientRole: "ADMIN",
+        createdBy: "system",
+      });
+
+      await logAction("PASSWORD_RESET_REQUESTED", "system", user.username);
+      return ok(res, { filed: true, requestId: reqDoc._id });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  // Best-effort presence beacon from the browser on tab close.
+  app.post("/api/auth/presence-ping", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const kind = req.body?.kind === "login" ? "presence:login" : "presence:logout";
+      emitEvent(kind, { username: req.user!.username, role: req.user!.role });
+      return ok(res, { ok: true });
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
@@ -4397,9 +4467,23 @@ ${JSON.stringify(fullData, null, 0)}`;
   app.post("/api/requests/:id/accept", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
     try {
       const { note } = req.body;
-      const doc = await RequestModel.findById(req.params.id);
-      if (!doc) return fail(res, 404, "Request not found");
-      if (doc.status !== "pending") return fail(res, 400, "Request already decided");
+      // Race-safe claim (REQUEST.pdf R11 §6 spec): atomically reserve this
+      // pending request by stamping `approver` on the first admin to win
+      // the optimistic update. Second admin gets a 409 instead of
+      // double-handling. We don't flip status here — the existing business
+      // logic below still does the real "accepted" transition.
+      const claimed = await RequestModel.findOneAndUpdate(
+        { _id: req.params.id, status: "pending", $or: [{ approver: { $exists: false } }, { approver: "" }, { approver: null }] },
+        { $set: { approver: req.user!.username } },
+        { new: true },
+      );
+      if (!claimed) {
+        const probe = await RequestModel.findById(req.params.id);
+        if (!probe) return fail(res, 404, "Request not found");
+        if (probe.status !== "pending") return fail(res, 409, `This request was already ${probe.status} by ${probe.approver || "another admin"}.`);
+        return fail(res, 409, `This request is already being handled by ${probe.approver || "another admin"}.`);
+      }
+      const doc = claimed;
 
       // Perform the actual action depending on request type
       if (doc.requestType === "ADD_ITEM" && doc.itemPayload) {

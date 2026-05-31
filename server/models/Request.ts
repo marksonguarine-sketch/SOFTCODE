@@ -14,7 +14,7 @@ import mongoose, { Schema, Document } from "mongoose";
  * History tracks every status change for audit purposes.
  */
 
-export type RequestType = "ADD_ITEM" | "TRANSFER_ORDER" | "LEAVE";
+export type RequestType = "ADD_ITEM" | "TRANSFER_ORDER" | "LEAVE" | "PASSWORD_RESET";
 export type RequestStatus = "pending" | "accepted" | "declined" | "cancelled";
 
 export interface IRequestHistoryEntry {
@@ -70,7 +70,7 @@ const historySchema = new Schema<IRequestHistoryEntry>({
 
 const requestSchema = new Schema<IRequestDoc>(
   {
-    requestType: { type: String, required: true, enum: ["ADD_ITEM", "TRANSFER_ORDER", "LEAVE"] },
+    requestType: { type: String, required: true, enum: ["ADD_ITEM", "TRANSFER_ORDER", "LEAVE", "PASSWORD_RESET"] },
     requester: { type: String, required: true, index: true },
     requesterDisplay: { type: String },
     status: { type: String, default: "pending", enum: ["pending", "accepted", "declined", "cancelled"], index: true },

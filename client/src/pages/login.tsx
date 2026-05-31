@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 /**
  * Login page — split-screen layout matching the JOAP prototype.
@@ -31,6 +32,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [forgotOpen, setForgotOpen] = useState(false);
   const [liveStats, setLiveStats] = useState<{
     ordersToday: number;
     totalItems: number;
@@ -277,13 +279,113 @@ export default function LoginPage() {
                 )}
               </Button>
 
-              <div className="text-center text-[11.5px] text-muted-foreground pt-2">
-                Trouble signing in? Contact your administrator.
+              <div className="text-center text-[11.5px] text-muted-foreground pt-2 flex items-center justify-center gap-2">
+                <span>Trouble signing in?</span>
+                <button
+                  type="button"
+                  className="underline underline-offset-2 hover:text-foreground transition-colors"
+                  onClick={() => setForgotOpen(true)}
+                  data-testid="link-forgot-password"
+                >
+                  Forgot password?
+                </button>
               </div>
             </form>
           </Form>
         </div>
       </div>
+
+      {/* Forgot-password dialog (REQUEST.pdf R11 §6) */}
+      <ForgotPasswordDialog open={forgotOpen} onClose={() => setForgotOpen(false)} />
     </div>
+  );
+}
+
+/**
+ * Forgot-password dialog — files a PASSWORD_RESET Request that admins
+ * (including super-admin) see in Requests → Others. They click Reset
+ * Password from there and jump to the Users page to set a new password.
+ *
+ * Race-safe on the server: only the first admin to claim the request
+ * succeeds; concurrent admins get a 409 with the winner's name.
+ */
+function ForgotPasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [username, setUsername] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+
+  function reset() {
+    setUsername("");
+    setSubmitting(false);
+    setSubmitted(false);
+    setErrMsg("");
+  }
+
+  async function submit() {
+    setErrMsg("");
+    if (!username.trim()) { setErrMsg("Enter your username"); return; }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/auth/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: username.trim() }),
+      });
+      const j = await res.json();
+      if (!j?.success) {
+        setErrMsg(j?.error || "Could not file your request");
+      } else {
+        setSubmitted(true);
+      }
+    } catch (e: any) {
+      setErrMsg(e?.message || "Network error");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { onClose(); reset(); } }}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Forgot password</DialogTitle>
+          <DialogDescription>
+            Enter your username and we'll notify the administrators to reset it.
+            For your security, the system never reveals whether a username exists.
+          </DialogDescription>
+        </DialogHeader>
+        {submitted ? (
+          <div className="space-y-3">
+            <p className="text-sm">
+              ✓ If <strong>{username}</strong> exists, the admin team has been notified.
+              Watch for a temporary password from your administrator.
+            </p>
+            <div className="flex justify-end">
+              <Button onClick={() => { onClose(); reset(); }}>Close</Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <Input
+              placeholder="Your username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && username.trim()) submit(); }}
+              autoFocus
+              data-testid="input-forgot-username"
+            />
+            {errMsg && <p className="text-xs text-destructive">{errMsg}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => { onClose(); reset(); }}>Cancel</Button>
+              <Button onClick={submit} disabled={submitting || !username.trim()} data-testid="button-forgot-notify">
+                {submitting && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                Notify Admin
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
