@@ -1560,4 +1560,77 @@ Login as `JoapAdmin20Jk` / `AdminPriv23#Ds` succeeds against the live dev DB; le
 
 ---
 
+## 34. Session 16 — REQUEST.pdf round-6 (chart overhauls, paginated KPI dialogs, critical/low split, smoke 4×)
+
+Continues directly from session 15. The owner sent screenshots after running the previous build and listed every regression they could see; this session handles all of them and pushes through 4 cycles of smoke testing against the live Mongo.
+
+### 34.1 Two close-X buttons in maximize dialog
+The shadcn `DialogContent` renders its own X button in the top-right; my custom Close in `ChartCard` + `KPICard` was a second one. Dropped both customs; only the built-in remains.
+
+### 34.2 Real-fullscreen maximize (graph fills the dialog)
+`ChartCard` + `KPICard` dialogs went from `max-w-3xl` (small centered box) to **fixed inset 8px (mobile) / 24px (desktop)** so the chart actually fills the screen. Inner content uses `flex-1 min-h-0` so Recharts `ResponsiveContainer` computes correct height. Tooltip/hover stays alive in both modes — verified by hovering the line in the smoke test (showed `05-30 / Revenue: ₱16,790`).
+
+### 34.3 Date-range + 7d/14d/30d/90d quick chips on maximize
+`ChartCard` header now has 4 quick chips + from/to date inputs. `renderFullscreen({from, to})` pages can opt into refiltering with that range — implemented for the Revenue Trend card on dashboard. Quick chip click → sets the corresponding rolling window.
+
+### 34.4 Rolling-window dashboard periods (fixes 7d showing "this week")
+`/api/dashboard/advanced` previously returned **calendar buckets** (this week / this month / this year) for the period chips. So clicking 30d on day 1 of the month showed almost nothing. Rewrote `getPeriodRange()` to return **rolling windows**: 7d = last 7 days, 14d = last 14, 30d = last 30, 90d = last 90 — all with `%m-%d` daily buckets and labels matching what the chips claim. The `periodKey()` reducer now uses the label itself as the bucket key.
+
+### 34.5 Pending-payment banner total
+Banner used to sum `recentOrders[0..9]` only → "3 orders ₱73" while the Pending Payment page showed ₱773. `/api/dashboard/stats` now returns `pendingPaymentsTotal` + `pendingPaymentsCount` aggregated across ALL pending+partial orders. Banner reads those. Numbers match the dedicated page.
+
+### 34.6 Critical / Low-stock counts disagreed between dashboard and inventory
+Dashboard used hardcoded thresholds (≤10 critical, ≤20 low) while the inventory page used per-item `reorderLevel`. Aligned both:
+- **Critical** = `currentQuantity ≤ reorderLevel` (or 0).
+- **Low** = `currentQuantity > reorderLevel` and `≤ ceil(reorderLevel × 1.5)`.
+
+`/api/dashboard/stats` now also returns `criticalItems[]` and `lowStockItems[]` arrays for the KPI dialog lists.
+
+### 34.7 Critical / Low recolor + dedicated card
+Dashboard's "Inventory snapshot" 4 inline divs replaced with 4 real `KPICard`s — each clickable to maximize. Bottom KPI strip's "Low-stock Items" recolored from **red → amber** so it stops sharing the visual language of the new (red) Critical card.
+
+### 34.8 KPI cards now have rich, informative maximize dialogs
+Wired `expanded` props for every dashboard KPI:
+
+| Card | Maximize content |
+|---|---|
+| Total items | Paginated catalog list (`InventoryListExpand kind="all"`) |
+| Stock value | Items sorted by line value + **TOTAL** footer (`InventoryValueExpand`) |
+| Low stock | Paginated low-stock items with Restock (admin/IM) / Notify Admin (employee) buttons |
+| Critical | Same as Low but red list, urgency-first sort |
+| Revenue Today | Full-width revenue area chart + period total + peak point (`RevenueTodayExpand`) |
+| Orders Today | List of every order created today with status (`OrdersTodayExpand`) |
+| Gross Margin | Formula breakdown — (rev − COGS) / rev — with scope / COGS basis chips |
+| Low-stock Items | Reuses the same `InventoryListExpand kind="low"` |
+
+`Notify Admin / IM` POSTs `/api/inventory/notify-restock` which fires `[INVENTORY]` notifications to every admin + inventory manager.
+
+### 34.9 Top items / Top customers / Activity feed: 6/page pagination
+New reusable `PaginatedListCard` helper. Top items + Top customers + Activity feed all switched over — 6 rows visible, `‹ Prev` / `Next ›` buttons below, "Page X of Y · N total" counter. (Replaces the silent slice-to-5.)
+
+### 34.10 Inventory page KPI strip overhaul
+Was a 4-card row (Total · Value · Low [red] · Dead). Now a 5-card row: **Total · Value (green) · Low (amber) · Critical (red) · Dead** — matches dashboard exactly. Each card maximizable with the relevant item list. Admin/IM Restock button opens the row edit dialog via a module-level setter bridge (`setEditItemGlobal`); employees see Notify Admin / IM.
+
+### 34.11 Print labels = full-page screenshot
+`window.print()` replaced with `html2canvas` + `jspdf` capture of the entire `inventory-printable-root`. Tall canvases paginate across multiple A4 portrait pages. Saved as `joap-inventory-YYYY-MM-DD.pdf`.
+
+### 34.12 Print button in every maximize dialog
+Both `ChartCard` and `KPICard` dialogs got a Print button next to the close X — captures the dialog contents (chart + lists) as a landscape A4 PDF.
+
+### 34.13 Top items aggregation (already fixed in round 1 — re-verified)
+Server's `topItems` aggregation now reads `$items.qty` (was `$items.quantity` which doesn't exist on the sub-schema). Smoke test shows real qty: galvanized steel 36, nails 23, cement 4.
+
+### 34.14 Double-entry on quick-pay + bumpAccountBalance self-heal (re-verified)
+Final smoke test confirms accounts balanced: assets+expenses ₱17,136 = liabilities+equity+revenue ₱17,136.
+
+### 34.15 Verification — 4 smoke tests against live Mongo
+- **Test 1** — 2 paid walk-in orders (₱23, ₱300) + 1 reservation. Dashboard revenue 0 → 323, orders 0 → 3, upcoming reservations 1 → 2, 3 `[ORDER]` notifications fired.
+- **Test 2** — 3 new items (one configured to be critical: qty=2, reorderLevel=10), 1 edit (price + qty), 1 employee message. Critical count 0 → 3, items 7 → 10, edit persisted (price=99, qty=4), message retrievable by admin.
+- **Test 3** — Forecasting ARIMA(1,1,1) 10 items analyzed / 5 with history; billing has 13 payments; ledger 26 entries; accounts Cash/GCash + Sales Revenue balanced; `/api/reports/{sales,inventory,orders,offers,reservations}` all 200; dashboard advanced uses rolling 14d (labels 05-18 → 05-31), top items shows real qty.
+- **Test 4** — One more paid order added ₱23 to revenue (exactly the line total). Final accounts double-entry health: assets+expenses == liabilities+equity+revenue == ₱17,136. UI render verified via headless browser: 8 KPI cards present, all with maximize buttons; revenue trend dialog showed 1 close button (was 2), Print button, date-range from/to inputs, 7d quick chip; line tooltip alive (showed `05-30 / Revenue: ₱16,790`).
+
+Build: `tsc --noEmit` 0 errors after every round; `npm run build` clean (`dist/index.cjs 1.2MB`, frontend ~2.29MB).
+
+---
+
 End of code.md.
