@@ -92,12 +92,14 @@ const pesoCompact = (n: number) => {
 // ── Hardcoded settings ──────────────────────────────────────────────────────
 const DAILY_GOAL_FALLBACK = 100_000;
 
-// ── Trend-period selector ───────────────────────────────────────────────────
+// ── Trend-period selector — REQUEST.pdf §17 spec ────────────────────────────
+// Buttons: Today | 7 Days | 30 Days | 3 Months | 1 Year
 const TREND_PERIODS = [
+  { value: "today", label: "Today" },
   { value: "weekly", label: "7d" },
-  { value: "daily", label: "14d" },
   { value: "monthly", label: "30d" },
-  { value: "yearly", label: "90d" },
+  { value: "quarterly", label: "3m" },
+  { value: "yearly", label: "1y" },
 ] as const;
 type TrendPeriod = (typeof TREND_PERIODS)[number]["value"];
 
@@ -225,7 +227,7 @@ async function exportDashboardPDF(stats: any, advData: any) {
 export default function DashboardPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
-  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("daily");
+  const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("weekly");
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [exportingPDF, setExportingPDF] = useState(false);
 
@@ -600,7 +602,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-4 mb-4">
         <ChartCard
           title="Revenue trend"
-          subtitle={`${trendPeriod === "weekly" ? "Last 7 days" : trendPeriod === "daily" ? "Last 14 days" : trendPeriod === "monthly" ? "Last 30 days" : "Last 90 days"} · Philippine peso`}
+          subtitle={`${trendPeriod === "today" ? "Today (hourly)" : trendPeriod === "weekly" ? "Last 7 days" : trendPeriod === "monthly" ? "Last 30 days" : trendPeriod === "quarterly" ? "Last 3 months" : "Last 1 year"} · Philippine peso`}
           data-testid="card-revenue-trend"
           headerExtras={
             <div className="inline-flex bg-muted border border-border rounded-md p-0.5 gap-0.5">

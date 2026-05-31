@@ -20,6 +20,7 @@ import {
   UserCircle,
   Inbox,
   UserSquare2,
+  Truck,
 } from "lucide-react";
 import {
   Sidebar,
@@ -119,6 +120,7 @@ export function AppSidebar() {
     staleTime: 30_000,
   });
   const pendingPayments = statsData?.data?.pendingPayments ?? 0;
+  const pendingReleases = statsData?.data?.pendingReleases ?? 0;
 
   // Open orders count — for the "Orders" badge
   const openOrders = useMemoCount(statsData?.data);
@@ -226,6 +228,23 @@ export function AppSidebar() {
                       <Clock />
                       <span>Pending Payment</span>
                       <NavBadge count={pendingPayments} tone="warning" />
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+
+              {/* Pending Release — paid (full/≥50%) orders awaiting hand-off */}
+              {!isInventoryManager && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={isActive("/pending-release")}
+                    tooltip="Pending Release"
+                  >
+                    <Link href="/pending-release" data-testid="nav-pending-release">
+                      <Truck />
+                      <span>Pending Release</span>
+                      <NavBadge count={pendingReleases} tone="blue" />
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

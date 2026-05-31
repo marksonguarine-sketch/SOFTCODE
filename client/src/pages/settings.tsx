@@ -22,6 +22,7 @@ import { TWEAKS_DEFAULTS, THEME_EVENT, getTweaks, saveTweaks, applyTweaks, type 
 import { useEffect, useState } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { NumberInput } from "@/components/number-input";
 
 const FONT_OPTIONS = [
   "Inter", "Roboto", "Open Sans", "Lato", "Montserrat",
@@ -254,12 +255,11 @@ export default function SettingsPage() {
                   <FormItem>
                     <FormLabel>Daily Sales Goal (₱)</FormLabel>
                     <FormControl>
-                      <Input
-                        type="number"
+                      <NumberInput
                         min={0}
-                        step={1000}
-                        {...field}
-                        onChange={(e) => field.onChange(Number(e.target.value))}
+                        placeholder="Enter target revenue per day"
+                        value={field.value}
+                        onChange={field.onChange}
                         data-testid="input-daily-sales-goal"
                       />
                     </FormControl>

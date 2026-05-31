@@ -747,12 +747,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const { period = "monthly" } = req.query as Record<string, string>;
       const now = new Date();
 
-      // Rolling-window periods so the frontend's "7d / 14d / 30d / 90d"
-      // chips actually mean what they say. Previously this returned
-      // calendar buckets (this week, this month, this year) so clicking
-      // "30d" on day 1 of the month showed almost no data even when the
-      // prior 30 days had plenty.
+      // Rolling-window periods — Today | 7d | 30d | 3m | 1y (REQUEST.pdf §17).
       const dayBucket = "%m-%d"; // MM-DD daily bucket
+      const hourBucket = "%H";    // HH hourly bucket (for "today")
       const getPeriodRange = (p: string): { start: Date; prevStart: Date; groupFormat: string; labels: string[] } => {
         const today = new Date(now);
         today.setHours(0, 0, 0, 0);
@@ -761,7 +758,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
           const day = String(d.getDate()).padStart(2, "0");
           return `${m}-${day}`;
         };
-        const buildLabels = (days: number) => {
+        const buildDayLabels = (days: number) => {
           const out: string[] = [];
           for (let i = days - 1; i >= 0; i--) {
             const d = new Date(today);
@@ -772,15 +769,24 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         };
         const rolling = (days: number) => {
           const s = new Date(today);
-          s.setDate(s.getDate() - (days - 1)); // include today
+          s.setDate(s.getDate() - (days - 1));
           const ps = new Date(s);
           ps.setDate(ps.getDate() - days);
-          return { start: s, prevStart: ps, groupFormat: dayBucket, labels: buildLabels(days) };
+          return { start: s, prevStart: ps, groupFormat: dayBucket, labels: buildDayLabels(days) };
         };
-        if (p === "weekly") return rolling(7);   // 7d
-        if (p === "daily") return rolling(14);   // 14d (label is misleading but kept for back-compat with the FE chips)
-        if (p === "monthly") return rolling(30); // 30d
-        return rolling(90);                       // 90d (yearly chip)
+        if (p === "today") {
+          // 24 hourly buckets for today; compare against yesterday's totals.
+          const s = new Date(today);
+          const ps = new Date(today);
+          ps.setDate(ps.getDate() - 1);
+          const labels = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, "0"));
+          return { start: s, prevStart: ps, groupFormat: hourBucket, labels };
+        }
+        if (p === "weekly") return rolling(7);
+        if (p === "daily") return rolling(14);     // back-compat
+        if (p === "monthly") return rolling(30);
+        if (p === "quarterly") return rolling(90); // 3 months
+        return rolling(365);                       // 1 year
       }
 
       const range = getPeriodRange(period);
@@ -1813,6 +1819,60 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── ORDERS ─────────────────────────────────────────────
+  // ── Pending Release feed (REQUEST.pdf §18b) ────────────────────────────
+  // Orders eligible for release: paid in full OR partial ≥ 50%, AND
+  // fulfillment is not yet completed/cancelled. Returns each row with
+  // computed totalPaid/balance so the client doesn't need a per-row roundtrip.
+  app.get("/api/orders/pending-release", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const { search, page = "1", pageSize = "20" } = req.query as Record<string, string>;
+      const baseFilter: any = {
+        fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+        paymentStatus: { $in: ["paid", "partial"] },
+      };
+      if (search) baseFilter.$or = [
+        { trackingNumber: { $regex: search, $options: "i" } },
+        { customerName: { $regex: search, $options: "i" } },
+      ];
+      const skip = (parseInt(page) - 1) * parseInt(pageSize);
+      const [rawOrders, total] = await Promise.all([
+        Order.find(baseFilter).sort({ updatedAt: -1 }).skip(skip).limit(parseInt(pageSize)).lean(),
+        Order.countDocuments(baseFilter),
+      ]);
+
+      // Compute totalPaid per order in one aggregate so we can filter partials
+      // below the 50% threshold out of the result without N round-trips.
+      const orderIds = rawOrders.map((o: any) => String(o._id));
+      const paidAgg = orderIds.length === 0 ? [] : await BillingPayment.aggregate([
+        { $match: { orderId: { $in: orderIds } } },
+        { $group: { _id: "$orderId", paid: { $sum: "$amountPaid" } } },
+      ]);
+      const paidById = new Map<string, number>(paidAgg.map((x: any) => [x._id, x.paid]));
+
+      const filtered = rawOrders
+        .map((o: any) => {
+          const paid = paidById.get(String(o._id)) || 0;
+          const balance = Math.max(0, (o.totalAmount || 0) - paid);
+          // Walk-in PAID orders book a BillingPayment at creation but if any
+          // ever slip through with paymentStatus=paid + paid=0 (legacy), we
+          // still surface them because paymentStatus already says paid.
+          const eligible = o.paymentStatus === "paid" || paid >= (o.totalAmount || 0) * 0.5;
+          return { ...o, totalPaid: paid, balance, releaseEligible: eligible };
+        })
+        .filter((o: any) => o.releaseEligible);
+
+      return ok(res, {
+        orders: filtered,
+        total: filtered.length, // post-filter total for THIS page
+        rawTotal: total, // pre-filter total (for paging hint)
+        page: parseInt(page),
+        pageSize: parseInt(pageSize),
+      });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   app.get("/api/orders", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const {

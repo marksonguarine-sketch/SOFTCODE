@@ -522,31 +522,58 @@ function CalendarView({ reservations, isLoading }: { reservations: any[]; isLoad
       <div
         onClick={() => setSelectedDay(isSameDay(day, selectedDay!) ? null : day)}
         className={cn(
-          "min-h-[80px] p-1.5 border border-border rounded-md cursor-pointer transition-all hover:bg-accent/50",
-          today && "bg-primary/5 ring-1 ring-primary",
-          selected && "ring-2 ring-primary bg-primary/10",
+          "min-h-[90px] p-2 border border-border rounded-lg cursor-pointer transition-all duration-200 hover:bg-accent/50 hover:shadow-sm",
+          // Premium Today highlight (REQUEST.pdf §16): gradient ring +
+          // colored tint so it stands out without overwhelming neighbours.
+          today && "bg-gradient-to-br from-primary/10 via-primary/5 to-transparent ring-2 ring-primary shadow-md",
+          selected && "ring-2 ring-amber-500 bg-amber-50/50 dark:bg-amber-950/30",
         )}
       >
-        <p className={cn("text-xs mb-1 w-6 h-6 flex items-center justify-center rounded-full",
-          today ? "bg-primary text-primary-foreground font-bold" : dayRes.length > 0 ? "font-bold" : "text-muted-foreground"
-        )}>
-          {format(day, "d")}
-        </p>
+        <div className="flex items-center justify-between mb-1.5">
+          <p className={cn("text-xs w-7 h-7 flex items-center justify-center rounded-full transition-all",
+            today
+              ? "bg-primary text-primary-foreground font-bold shadow-sm"
+              : dayRes.length > 0
+                ? "font-bold text-foreground"
+                : "text-muted-foreground",
+          )}>
+            {format(day, "d")}
+          </p>
+          {dayRes.length > 0 && (
+            <span className="text-[9px] font-mono tabular-nums bg-primary/10 text-primary px-1 rounded">
+              {dayRes.length}
+            </span>
+          )}
+        </div>
         <div className="space-y-0.5">
-          {dayRes.slice(0, 3).map((r) => (
-            <div
-              key={r._id}
-              onClick={(e) => { e.stopPropagation(); setDetailRes(r); }}
-              className={cn(
-                "text-[9px] truncate px-1 py-0.5 rounded cursor-pointer hover:opacity-80",
-                r.orderType === "online_reservation" ? "bg-blue-100 text-blue-800" : "bg-teal-100 text-teal-800"
-              )}
-            >
-              {r.customerName}
-            </div>
-          ))}
+          {dayRes.slice(0, 3).map((r) => {
+            // Color-code by type + status (§16)
+            const isOnline = r.orderType === "online_reservation";
+            const isCancelled = r.fulfillmentStatus === "cancelled";
+            const isCompleted = r.fulfillmentStatus === "completed";
+            const colorCls = isCancelled
+              ? "bg-red-100 text-red-700 line-through"
+              : isCompleted
+                ? "bg-emerald-100 text-emerald-700"
+                : isOnline
+                  ? "bg-blue-100 text-blue-800"
+                  : "bg-teal-100 text-teal-800";
+            return (
+              <div
+                key={r._id}
+                onClick={(e) => { e.stopPropagation(); setDetailRes(r); }}
+                className={cn(
+                  "text-[9.5px] truncate px-1.5 py-0.5 rounded-sm cursor-pointer hover:opacity-80 transition-opacity font-medium",
+                  colorCls,
+                )}
+                title={`${r.customerName} · ${r.fulfillmentStatus}`}
+              >
+                {r.customerName}
+              </div>
+            );
+          })}
           {dayRes.length > 3 && (
-            <div className="text-[9px] text-muted-foreground px-1">+{dayRes.length - 3} more</div>
+            <div className="text-[9px] text-muted-foreground px-1 italic">+{dayRes.length - 3} more</div>
           )}
         </div>
       </div>
