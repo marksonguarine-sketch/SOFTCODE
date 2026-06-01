@@ -296,7 +296,15 @@ function AuthenticatedLayout() {
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-logout-cancel">Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => { setShowLogoutDialog(false); logout(); }}
+              onClick={() => {
+                setShowLogoutDialog(false);
+                // R13: dashboard alert dismissals reset on each session.
+                try {
+                  sessionStorage.removeItem("joap_dashboard_overdue_dismissed");
+                  sessionStorage.removeItem("joap_dashboard_pool_dismissed");
+                } catch { /* ignore */ }
+                logout();
+              }}
               data-testid="button-logout-confirm"
             >
               Sign Out
@@ -313,23 +321,18 @@ const TIMELOG_SEEN_KEY = "joap_seen_timelog";
 function AppContent() {
   const { user, isLoading } = useAuth();
 
-  // "Developers Time Log" — shown once per browser session right after the boot
-  // loader (the hammer) finishes, before the user reaches the system.
+  // "Developers Time Log" (hammer loader) — only shown to UNAUTHENTICATED
+  // visitors, and only once per browser session. Previously this gated
+  // EVERY app mount which meant the hammer screen could reappear on
+  // route changes if the session-storage flag was ever cleared. Now we
+  // also require `!user`, so once logged in the screen is never shown.
   const [showTimeLog, setShowTimeLog] = useState(() => {
     try { return sessionStorage.getItem(TIMELOG_SEEN_KEY) !== "true"; } catch { return true; }
   });
 
-  if (showTimeLog) {
-    return (
-      <DevTimeLog
-        onProceed={() => {
-          try { sessionStorage.setItem(TIMELOG_SEEN_KEY, "true"); } catch { /* ignore */ }
-          setShowTimeLog(false);
-        }}
-      />
-    );
-  }
-
+  // Until we know whether the user is signed in, render nothing — avoids a
+  // flash of the hammer screen for users who actually have a valid token
+  // (the auth-check resolves in <100ms typically).
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -341,7 +344,19 @@ function AppContent() {
     );
   }
 
+  // Auth check done — if not logged in, decide between the dev-time-log
+  // (first visit of the session) and the login page.
   if (!user) {
+    if (showTimeLog) {
+      return (
+        <DevTimeLog
+          onProceed={() => {
+            try { sessionStorage.setItem(TIMELOG_SEEN_KEY, "true"); } catch { /* ignore */ }
+            setShowTimeLog(false);
+          }}
+        />
+      );
+    }
     return <LoginPage />;
   }
 

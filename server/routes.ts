@@ -622,6 +622,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
   });
 
+  // ─── TOS acceptance (server-tracked, per account) ──────────
+  // Returns whether the caller has already accepted the current Terms of
+  // Service version. The client uses this to decide whether to show the
+  // one-shot agreement dialog. Server-side tracking means the prompt
+  // follows the account across browsers / devices — accepting on the
+  // shop tablet stops it from re-prompting on a manager's laptop.
+  app.get("/api/auth/tos-status", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const user = await User.findById(req.user!._id).select("tosAcceptedAt tosVersion");
+      const accepted = !!user?.tosAcceptedAt;
+      return ok(res, { accepted, acceptedAt: user?.tosAcceptedAt || null, version: user?.tosVersion || null });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
+  app.post("/api/auth/accept-tos", authMiddleware, async (req: AuthRequest, res: Response) => {
+    try {
+      const version = String(req.body?.version || "1.0");
+      await User.findByIdAndUpdate(req.user!._id, {
+        $set: { tosAcceptedAt: new Date(), tosVersion: version },
+      });
+      await logAction("TOS_ACCEPTED", req.user!.username, version, {});
+      return ok(res, { accepted: true, version });
+    } catch (err: any) {
+      return fail(res, 500, err.message);
+    }
+  });
+
   // Verify current admin's password (used for sensitive actions like reactivation)
   app.post("/api/auth/verify-password", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
@@ -795,8 +824,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const pendingPaymentsTotal = pendingAgg[0]?.total || 0;
       const pendingPaymentsCount = pendingAgg[0]?.count || 0;
 
+      // ── Pool tally (unassigned active orders) ──────────────────────────
+      // Sits next to the pending-payments banner so admins/employees see at
+      // a glance how many orders are sitting in the pool waiting for a
+      // claim. We treat both empty-string and missing assignedTo as "in
+      // pool" (legacy rows may not have the field at all).
+      const poolAgg = await Order.aggregate([
+        { $match: {
+          fulfillmentStatus: { $nin: ["completed", "cancelled"] },
+          $or: [{ assignedTo: "" }, { assignedTo: { $exists: false } }, { assignedTo: null }],
+        } },
+        { $group: { _id: null, total: { $sum: "$totalAmount" }, count: { $sum: 1 } } },
+      ]);
+      const poolOrdersCount = poolAgg[0]?.count || 0;
+      const poolOrdersTotal = poolAgg[0]?.total || 0;
+
       return ok(res, {
         totalOrdersToday,
+        poolOrdersCount, // unassigned active orders
+        poolOrdersTotal,
         completedOrders,
         pendingPayments,
         pendingPaymentsTotal, // true sum across ALL pending orders, not just recent

@@ -3,7 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import {
   Settings, Loader2, Save, Type, Palette, Layers, Store, Volume2,
-  Calculator, Lock, Sliders, AlignJustify,
+  Calculator, Lock, Sliders, AlignJustify, FileText,
 } from "lucide-react";
 import { settingsSchema, type SettingsInput, type ISettings } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -467,6 +467,38 @@ export default function SettingsPage() {
                     </FormItem>
                   )} />
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* ── TERMS OF SERVICE (admin/super-admin only) ───────────── */}
+          {isAdmin && (
+            <Card data-testid="card-tos-download">
+              <CardHeader>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <FileText className="h-4 w-4" /> Terms of Service
+                </CardTitle>
+                <CardDescription>
+                  Download the JOAP Hardware Trading ERP Terms of Service document for record-keeping or hand-out.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    const a = document.createElement("a");
+                    a.href = "/termsofservice/TOS.pdf";
+                    a.download = "JOAP-TOS.pdf";
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                  }}
+                  data-testid="button-download-tos"
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  Download TOS (PDF)
+                </Button>
               </CardContent>
             </Card>
           )}

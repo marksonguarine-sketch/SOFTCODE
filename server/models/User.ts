@@ -7,6 +7,12 @@ export interface IUserDoc extends Document {
   isActive: boolean;
   resetToken?: string;
   resetTokenExpiry?: Date;
+  // First time this user accepted the Terms of Service. Null/missing for new
+  // users — the client uses this to decide whether to show the TOS dialog.
+  // Server-tracked instead of localStorage so the prompt follows the account
+  // across browsers / devices.
+  tosAcceptedAt?: Date;
+  tosVersion?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -19,6 +25,8 @@ const userSchema = new Schema<IUserDoc>(
     isActive: { type: Boolean, default: true },
     resetToken: { type: String },
     resetTokenExpiry: { type: Date },
+    tosAcceptedAt: { type: Date },
+    tosVersion: { type: String },
   },
   { timestamps: true }
 );

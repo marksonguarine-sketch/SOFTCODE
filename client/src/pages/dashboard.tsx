@@ -228,7 +228,18 @@ export default function DashboardPage() {
   const [, navigate] = useLocation();
   const { user } = useAuth();
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>("weekly");
-  const [bannerDismissed, setBannerDismissed] = useState(false);
+
+  // Both warning banners (overdue + pool) remember their dismissed state
+  // for the current browser session — cleared on logout (App.tsx) so a
+  // fresh sign-in always shows them again. Avoids the "I just closed it
+  // and it came back on the next dashboard refetch" annoyance while
+  // still resurfacing them after any sign-out / sign-in.
+  const [bannerDismissed, setBannerDismissed] = useState<boolean>(() => {
+    try { return sessionStorage.getItem("joap_dashboard_overdue_dismissed") === "1"; } catch { return false; }
+  });
+  const [poolBannerDismissed, setPoolBannerDismissed] = useState<boolean>(() => {
+    try { return sessionStorage.getItem("joap_dashboard_pool_dismissed") === "1"; } catch { return false; }
+  });
   const [exportingPDF, setExportingPDF] = useState(false);
 
   // Daily sales goal sourced from system settings (set by admin in Settings)
@@ -292,6 +303,8 @@ export default function DashboardPage() {
   // banner said "₱73" while the Pending Payment page showed ₱773.
   const overdueCount = (stats as any)?.pendingPaymentsCount ?? stats?.pendingPayments ?? 0;
   const overdueAmount = (stats as any)?.pendingPaymentsTotal ?? 0;
+  const poolCount = (stats as any)?.poolOrdersCount ?? 0;
+  const poolAmount = (stats as any)?.poolOrdersTotal ?? 0;
 
   // Payment-mix donut from channelBreakdown (advanced) keyed by payment method
   const paymentPie = useMemo(() => {
@@ -472,7 +485,53 @@ export default function DashboardPage() {
           <Button size="sm" variant="secondary" onClick={() => navigate("/pending-payment")}>
             View pending
           </Button>
-          <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setBannerDismissed(true)}>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            onClick={() => {
+              setBannerDismissed(true);
+              try { sessionStorage.setItem("joap_dashboard_overdue_dismissed", "1"); } catch { /* ignore */ }
+            }}
+            data-testid="banner-overdue-dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      )}
+
+      {/* Pool warning — orders that haven't been claimed by any employee yet.
+          Dismiss is sessionStorage-backed so it stays gone for the current
+          browser session and only resurfaces after a sign-out / sign-in.
+          (Per R13 request: complements the unpaid-balance warning above.) */}
+      {!poolBannerDismissed && poolCount > 0 && (
+        <div
+          className="flex items-center gap-3 px-4 py-2.5 rounded-md mb-4 border bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/40 text-amber-800 dark:text-amber-200"
+          data-testid="banner-pool"
+        >
+          <AlertTriangle className="w-[18px] h-[18px] shrink-0" />
+          <div className="text-[13px] flex-1">
+            <strong className="font-semibold">{poolCount} order{poolCount === 1 ? "" : "s"}</strong>{" "}
+            in the pool {poolCount === 1 ? "is" : "are"} unclaimed
+            {poolAmount > 0 && (
+              <>
+                {" · "}total <span className="font-mono font-semibold">{peso(poolAmount)}</span>
+              </>
+            )}
+          </div>
+          <Button size="sm" variant="secondary" onClick={() => navigate("/orders?pool=true")}>
+            Open pool
+          </Button>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            onClick={() => {
+              setPoolBannerDismissed(true);
+              try { sessionStorage.setItem("joap_dashboard_pool_dismissed", "1"); } catch { /* ignore */ }
+            }}
+            data-testid="banner-pool-dismiss"
+          >
             <X className="w-3.5 h-3.5" />
           </Button>
         </div>

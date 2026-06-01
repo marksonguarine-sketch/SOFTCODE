@@ -1697,4 +1697,56 @@ New `Correction` column for admins. `ReverseLedgerButton` opens a small dialog, 
 ### 35.13 Scope boundary check
 The proposal explicitly delimits payroll, public e-commerce, certified CPA accounting, refund management, and hardware/OS repair as out of scope. This round adds NONE of those — Reversing Entries are the proposal's own correction mechanism, not refund management.
 
+---
+
+## Session 19 / Round 13 — TOS overhaul, hammer-loader gate, pool warning, settings download
+
+Targeted round driven by user feedback after R12.
+
+### 36.1 TOS dialog rewrite (`client/src/TOS/index.tsx`)
+- Footer now reads **"Cabilao Keane Andre B., Ebona John Marwin R., Mirasol Prince Marl Lizandrelle D."** — the old "© 2026 Marwin Maxino & Mark Songuarine" line is gone.
+- Body's "developed by …" clause updated to the same three authors.
+- Tracking moved from `localStorage` to **server-side per-user** (`tosAcceptedAt`/`tosVersion` on the `User` model). On mount the dialog calls `GET /api/auth/tos-status`; only opens when `accepted === false`. Acceptance posts to `POST /api/auth/accept-tos` and persists across browsers / devices.
+- **Print TOS** button added next to the "End of document reached" message — downloads `/termsofservice/TOS.pdf`.
+
+### 36.2 Static TOS PDF served (`client/public/termsofservice/TOS.pdf`)
+Copied the root `TOS.pdf` into `client/public/termsofservice/` so Vite serves it at `/termsofservice/TOS.pdf`. Same file is reachable from both the TOS dialog's Print button AND the new Settings "Download TOS" card.
+
+### 36.3 Settings → Download TOS card (admin / super-admin only)
+New `card-tos-download` in `client/src/pages/settings.tsx`. One-click `Download TOS (PDF)` button. Gated behind `isAdmin`.
+
+### 36.4 Hammer-loader gate (`client/src/App.tsx`)
+- The DevTimeLog ("hammer" screen) used to render on **every** AppContent mount where the session-storage flag wasn't set. That made it possible to see the hammer screen mid-app on a route change if anything cleared sessionStorage.
+- Now: render order is `isLoading → !user → showTimeLog → LoginPage` → `AuthenticatedLayout`. **DevTimeLog only shows when the user is NOT logged in** AND the per-session flag is unset. Once authenticated it can never appear.
+- Logout handler now clears `joap_dashboard_overdue_dismissed` and `joap_dashboard_pool_dismissed` so the banner alerts re-surface for the next session per the user's spec.
+
+### 36.5 Server: User model + TOS endpoints
+- `server/models/User.ts` gained `tosAcceptedAt?: Date; tosVersion?: string` fields.
+- `GET /api/auth/tos-status` returns `{accepted, acceptedAt, version}`.
+- `POST /api/auth/accept-tos` writes `tosAcceptedAt = now()` and logs `TOS_ACCEPTED`.
+
+### 36.6 Dashboard: pool warning banner
+- New server tally in `/api/dashboard/stats`: `poolOrdersCount` + `poolOrdersTotal` derived from orders with no `assignedTo` and `fulfillmentStatus ∉ {completed, cancelled}`.
+- Client: second amber banner below the red unpaid-balances banner, identical layout pattern. Reads `13 orders in the pool are unclaimed · total ₱11,113`, includes **Open pool** CTA and an X dismiss button.
+- Both banner dismiss states are now **`sessionStorage`-backed** (`joap_dashboard_overdue_dismissed`, `joap_dashboard_pool_dismissed`). Once dismissed they stay closed until the next sign-in (the logout handler clears them).
+
+### 36.7 Live verification — preview screenshots in-the-loop
+1. Cleared storage → reloaded `/` → **DevTimeLog hammer** rendered (logged-out state ✔).
+2. Clicked Proceed → login form → submitted `JoapAdmin20Jk` / `AdminPriv23#Ds`.
+3. Dashboard rendered with **both warning banners** visible:
+   - red: `5 orders have unpaid balances · total ₱23,548`
+   - amber: `13 orders in the pool are unclaimed · total ₱11,113`
+4. Clicked the pool banner's X — `sessionStorage.joap_dashboard_pool_dismissed === "1"` (confirmed via eval).
+5. Hard-navigated to `/inventory` via `location.pathname = "/inventory"` — inventory page rendered immediately, **no hammer screen** (R13.B fix confirmed).
+6. Navigated to `/settings` — Terms of Service card present with `Download TOS (PDF)` button.
+7. Navigated to `/reports` → clicked Payment Audit tab — KPI tiles + flag-breakdown (`Amount mismatch ×1`, `Partial < 50% ×2`, `Missing order ×2`) rendered correctly.
+8. Server REST smoke:
+   - `GET /api/auth/tos-status` → `{accepted:false}` initially → after `POST /api/auth/accept-tos` → `{accepted:true, acceptedAt, version:"1.0"}` ✔
+   - `GET /termsofservice/TOS.pdf` → `200 (103,203 bytes)` ✔
+   - `GET /api/dashboard/stats` includes `poolOrdersCount:13, poolOrdersTotal:11113` ✔
+
+Console: only Vite-HMR WebSocket noise (always present in the dev harness; no app runtime errors).
+
+Build: `npm run build` clean (`dist/index.cjs 1.3MB`, frontend ~2.34MB) · `tsc --noEmit` 0 errors.
+
 End of code.md.
