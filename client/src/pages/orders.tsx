@@ -34,6 +34,7 @@ import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { NumberInput } from "@/components/number-input";
+import { ReceiptDialog, ReceiptButton } from "@/components/order-receipt";
 import { cn } from "@/lib/utils";
 
 type OrderItemLocal = { itemId: string; itemName: string; qty: number; originalUnitPrice: number; discountedUnitPrice: number; discountApplied: boolean; offerName: string; lineTotal: number };
@@ -290,6 +291,9 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const [showAddress, setShowAddress] = useState(false);
   const [itemSearch, setItemSearch] = useState("");
   const [duplicate, setDuplicate] = useState<IOrder | null>(null);
+  // The freshly-created order, captured from the POST response so we can pop a
+  // receipt the instant the order is logged.
+  const [receiptOrder, setReceiptOrder] = useState<IOrder | null>(null);
 
   const form = useForm<CreateOrderInput>({
     resolver: zodResolver(createOrderSchema),
@@ -327,7 +331,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       const res = await apiRequest("POST", "/api/orders", data);
       return res.json();
     },
-    onSuccess: async () => {
+    onSuccess: async (resp: any) => {
       // Hard refetch (not just invalidate) so the new order shows up in the
       // pool table immediately. The 1-second global polling would also catch
       // it, but waiting up to a full second after pressing "Create" felt
@@ -353,7 +357,11 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       setOrderItems([]);
       setStep(0);
       setDuplicate(null);
+      setPartialAck(new Set());
       toast({ title: "Order created successfully" });
+      // Pop the receipt automatically the moment the order is done.
+      const created = resp?.data?.order as IOrder | undefined;
+      if (created) setReceiptOrder(created);
     },
     onError: (err: Error) => toast({ title: "Failed to create order", description: err.message, variant: "destructive" }),
   });
@@ -437,12 +445,46 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
     setOrderItems([]);
     form.reset();
     setDuplicate(null);
+    setPartialAck(new Set());
   }
 
   // Overflow / duplicate / approval state machine for the Items → Next step.
   const [overflow, setOverflow] = useState<{ itemId: string; itemName: string; want: number; have: number } | null>(null);
   const [duplicateInfo, setDuplicateInfo] = useState<any | null>(null);
   const [waitingApproval, setWaitingApproval] = useState<{ requestId: string; startedAt: number } | null>(null);
+  // Items whose over-stock quantity the user has already accepted as a partial
+  // release. Without this the overflow dialog re-fires on every "Next" click,
+  // so the order can never advance past the Items step (the partial-release bug).
+  const [partialAck, setPartialAck] = useState<Set<string>>(() => new Set());
+
+  // Shared "advance past the Items step" logic. Runs the over-stock check
+  // (skipping items already acknowledged for partial release), then the
+  // duplicate check, then moves to Payment. Reused by both the Next button and
+  // the Partial Release confirmation so accepting a partial release continues
+  // the wizard instead of looping back to the same dialog.
+  async function proceedFromItems(ack: Set<string>) {
+    for (const oi of orderItems) {
+      const stockItem = allItems.find((i) => i._id === oi.itemId);
+      const stock = stockItem?.currentQuantity ?? 0;
+      if (oi.qty > stock && !ack.has(oi.itemId)) {
+        setOverflow({ itemId: oi.itemId, itemName: oi.itemName, want: oi.qty, have: stock });
+        return; // block until the user picks an option for this item
+      }
+    }
+    // Duplicate check (REQUEST.pdf §9-10): same customer + overlapping item
+    try {
+      const res = await apiRequest("POST", "/api/orders/check-duplicate", {
+        customerName: form.getValues("customerName"),
+        itemIds: orderItems.map((i) => i.itemId),
+      });
+      const json = await res.json();
+      if (json?.data?.duplicate && !json?.data?.approvedGrantId) {
+        setDuplicateInfo(json.data.duplicate);
+        return; // dialog handles next move
+      }
+    } catch { /* network blip — allow through */ }
+    setStep(2);
+  }
 
   async function handleNext() {
     if (step === 0) {
@@ -450,29 +492,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       form.trigger(fields).then((ok) => { if (ok) setStep(1); });
     } else if (step === 1) {
       if (orderItems.length === 0) { toast({ title: "Add at least one item", variant: "destructive" }); return; }
-      // Overflow check: any line where qty > current stock fires the
-      // Partial Release / Notify Admin / Cancel dialog (REQUEST.pdf §3b).
-      for (const oi of orderItems) {
-        const stockItem = allItems.find((i) => i._id === oi.itemId);
-        const stock = stockItem?.currentQuantity ?? 0;
-        if (oi.qty > stock) {
-          setOverflow({ itemId: oi.itemId, itemName: oi.itemName, want: oi.qty, have: stock });
-          return; // block until user picks an option
-        }
-      }
-      // Duplicate check (REQUEST.pdf §9-10): same customer + overlapping item
-      try {
-        const res = await apiRequest("POST", "/api/orders/check-duplicate", {
-          customerName: form.getValues("customerName"),
-          itemIds: orderItems.map((i) => i.itemId),
-        });
-        const json = await res.json();
-        if (json?.data?.duplicate && !json?.data?.approvedGrantId) {
-          setDuplicateInfo(json.data.duplicate);
-          return; // dialog handles next move
-        }
-      } catch { /* network blip — allow through */ }
-      setStep(2);
+      await proceedFromItems(partialAck);
     } else if (step === 2) {
       const fields = ["paymentMethod", "paymentStatus"] as const;
       form.trigger(fields).then((ok) => { if (ok) setStep(3); });
@@ -1019,13 +1039,18 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
             onClick={() => {
               // Partial release — keep the line at the requested qty so the
               // server's release flow can release what's available now and
-              // leave the rest as pending. Toast explains.
+              // leave the rest as pending. Acknowledge this item so the
+              // overflow check won't re-fire, then continue the wizard.
               if (!overflow) return;
+              const acked = overflow;
               toast({
                 title: `Partial release accepted`,
-                description: `${overflow.have} of ${overflow.itemName} will release now; ${overflow.want - overflow.have} stays as backorder.`,
+                description: `${acked.have} of ${acked.itemName} will release now; ${acked.want - acked.have} stays as backorder.`,
               });
+              const nextAck = new Set(partialAck).add(acked.itemId);
+              setPartialAck(nextAck);
               setOverflow(null);
+              void proceedFromItems(nextAck);
             }}
             data-testid="overflow-partial"
           >Partial Release</Button>
@@ -1132,6 +1157,14 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* ── Auto-receipt — pops the moment an order is created ───────────── */}
+    <ReceiptDialog
+      order={receiptOrder}
+      open={!!receiptOrder}
+      onClose={() => setReceiptOrder(null)}
+      autoTitle="Order Created"
+    />
     </>
   );
 }
@@ -1469,7 +1502,10 @@ export default function OrdersPage() {
                         </div>
                         <p className="text-sm text-muted-foreground">{order.customerName} · {formatCurrency(order.totalAmount)}</p>
                       </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                        {order.paymentStatus === "paid" && <ReceiptButton order={order} />}
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      </div>
                     </div>
                   </CardContent>
                 </Card>
@@ -1669,7 +1705,9 @@ export default function OrdersPage() {
                                 )}
                               </TableCell>
                               <TableCell onClick={(e) => e.stopPropagation()}>
-                                {!order.completedProcessingAt && order.fulfillmentStatus !== "completed" && order.fulfillmentStatus !== "cancelled" && (
+                                {order.paymentStatus === "paid" ? (
+                                  <ReceiptButton order={order} variant="ghost" label="Receipt" />
+                                ) : (!order.completedProcessingAt && order.fulfillmentStatus !== "completed" && order.fulfillmentStatus !== "cancelled" && (
                                   <Button
                                     size="sm"
                                     variant="ghost"
@@ -1685,7 +1723,7 @@ export default function OrdersPage() {
                                   >
                                     Return to pool
                                   </Button>
-                                )}
+                                ))}
                               </TableCell>
                             </TableRow>
                           ))}

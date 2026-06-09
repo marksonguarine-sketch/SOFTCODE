@@ -8,7 +8,10 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "devlog:latest": "node script/devlog-from-git.mjs --latest",
+    "devlog:sync": "node script/devlog-from-git.mjs --sync 30"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

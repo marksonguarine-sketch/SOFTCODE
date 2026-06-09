@@ -1,0 +1,4 @@
+#!/bin/sh
+# Auto-save every commit into the Developers Time Log store (devlogs.json).
+# Best-effort: never block or fail a commit because of logging.
+node script/devlog-from-git.mjs --latest || true

@@ -1,0 +1,4 @@
+#!/bin/sh
+# After a pull/merge brings new commits in, log exactly those new commits
+# (ORIG_HEAD..HEAD) into the Developers Time Log store. Best-effort.
+node script/devlog-from-git.mjs --range ORIG_HEAD..HEAD || true

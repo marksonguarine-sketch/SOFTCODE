@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { NumberInput } from "@/components/number-input";
 import { speakTTS } from "@/lib/tts";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -67,12 +68,10 @@ const RES_ALLOWED_METHODS: Record<string, string[]> = {
   walkin_reservation: ["cash", "gcash_qr"],
   online_reservation: ["gcash_qr"],
 };
-// Reservations are scheduled, not transacted. Real-world: customer is either
-// going to pay later (pending_payment) or this is purely a hold with no money
-// changing hands (reservation_only). No Partial / Paid here — those happen
-// when the reservation is "Handled" and becomes a real order.
-const RES_PAYMENT_STATUSES = ["pending_payment", "reservation_only"] as const;
-const RES_FULFILLMENT_STATUSES = ["pending", "processing", "ready", "completed", "cancelled"] as const;
+// Reservations are scheduled, not transacted. The customer may pay later
+// (pending_payment), put down a partial payment up front, or this may be a
+// pure hold with no money changing hands yet (reservation_only).
+const RES_PAYMENT_STATUSES = ["pending_payment", "partial", "reservation_only"] as const;
 
 function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; onClose: () => void; allItems: IItem[] }) {
   const { toast } = useToast();
@@ -251,29 +250,15 @@ function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; o
                 <SelectContent>
                   {RES_PAYMENT_STATUSES.map((s) => (
                     <SelectItem key={s} value={s}>
-                      {s === "pending_payment" ? "Pending Payment" : "For Reservation Only"}
+                      {s === "pending_payment" ? "Pending Payment" : s === "partial" ? "Partial Payment" : "For Reservation Only"}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground">
-                Reservations only carry these two states — payment is finalised when the reservation is handled into an order.
+                Choose how this reservation is paid — pending, a partial down-payment, or a pure hold. Payment is finalised when the reservation is handled into an order.
               </p>
             </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Fulfillment Status</label>
-            <Select value={fulfillmentStatus} onValueChange={setFulfillmentStatus}>
-              <SelectTrigger data-testid="select-res-fulfillment"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {RES_FULFILLMENT_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ")}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           <div className="space-y-2">
@@ -301,6 +286,7 @@ function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; o
                   <thead>
                     <tr className="border-b bg-muted/50">
                       <th className="p-2 text-left font-medium">Item</th>
+                      <th className="p-2 text-center font-medium">Available Stock</th>
                       <th className="p-2 text-center font-medium">Qty</th>
                       <th className="p-2 text-right font-medium">Price</th>
                       <th className="p-2 text-right font-medium">Total</th>
@@ -308,9 +294,20 @@ function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; o
                     </tr>
                   </thead>
                   <tbody>
-                    {orderItems.map((oi) => (
-                      <tr key={oi.itemId} className="border-b">
-                        <td className="p-2">{oi.itemName}</td>
+                    {orderItems.map((oi) => {
+                      const stock = allItems.find((i) => i._id === oi.itemId)?.currentQuantity ?? 0;
+                      const over = oi.qty > stock;
+                      return (
+                      <tr key={oi.itemId} className={cn("border-b", over && "bg-amber-50/40 dark:bg-amber-950/20")}>
+                        <td className="p-2">
+                          <div className="font-medium">{oi.itemName}</div>
+                          {over && (
+                            <div className="text-[11px] text-amber-700 dark:text-amber-300">Exceeds stock — {stock} available now</div>
+                          )}
+                        </td>
+                        <td className="p-2 text-center">
+                          <span className={cn("text-sm font-mono tabular-nums", stock <= 0 ? "text-red-600 font-semibold" : over ? "text-amber-700 font-semibold" : "text-muted-foreground")}>{stock}</span>
+                        </td>
                         <td className="p-2">
                           <div className="flex items-center justify-center gap-1">
                             <button type="button"
@@ -319,12 +316,22 @@ function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; o
                                 const newQty = Math.max(1, oi.qty - 1);
                                 setOrderItems((prev) => prev.map((i) => i.itemId === oi.itemId ? { ...i, qty: newQty, lineTotal: newQty * i.discountedUnitPrice } : i));
                               }}>−</button>
-                            <span className="w-8 text-center font-medium">{oi.qty}</span>
+                            {/* Typeable qty box */}
+                            <NumberInput
+                              allowDecimal={false}
+                              min={1}
+                              value={oi.qty}
+                              placeholder="0"
+                              className="h-7 w-14 text-center text-sm font-medium tabular-nums px-1"
+                              onChange={(n) => {
+                                const newQty = Math.max(1, n);
+                                setOrderItems((prev) => prev.map((i) => i.itemId === oi.itemId ? { ...i, qty: newQty, lineTotal: newQty * i.discountedUnitPrice } : i));
+                              }}
+                            />
                             <button type="button"
                               className="h-7 w-7 rounded border flex items-center justify-center hover:bg-accent font-bold text-base leading-none"
                               onClick={() => {
-                                const stock = allItems.find((i) => i._id === oi.itemId)?.currentQuantity ?? 999;
-                                const newQty = Math.min(stock, oi.qty + 1);
+                                const newQty = oi.qty + 1;
                                 setOrderItems((prev) => prev.map((i) => i.itemId === oi.itemId ? { ...i, qty: newQty, lineTotal: newQty * i.discountedUnitPrice } : i));
                               }}>+</button>
                           </div>
@@ -338,7 +345,8 @@ function CreateReservationDialog({ open, onClose, allItems }: { open: boolean; o
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
                 <div className="p-2 text-right text-sm font-semibold">Subtotal: {formatPHP(subtotal)}</div>

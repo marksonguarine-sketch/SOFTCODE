@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { ReceiptButton } from "@/components/order-receipt";
 import { cn } from "@/lib/utils";
 
 function StatusBadge({ status }: { status: string }) {
@@ -1040,6 +1041,11 @@ export default function OrderDetailPage() {
             <span className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</span>
           </div>
         </div>
+        {order.paymentStatus === "paid" && (
+          <div className="ml-auto">
+            <ReceiptButton order={order} label="Print receipt" />
+          </div>
+        )}
       </div>
 
       <div className="grid gap-6 grid-cols-1 lg:grid-cols-3">
