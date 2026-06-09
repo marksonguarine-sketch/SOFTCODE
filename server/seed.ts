@@ -6,6 +6,7 @@ import Order from "./models/Order";
 import AccountingAccount from "./models/AccountingAccount";
 import Settings from "./models/Settings";
 import { log } from "./index";
+//fix to
 
 // Default admin credentials. Hardcoded for the school project (the prof needs
 // to be able to log in cold). Change only by deleting the admin and re-seeding.
