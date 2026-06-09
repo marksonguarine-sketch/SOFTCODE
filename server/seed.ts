@@ -9,8 +9,8 @@ import { log } from "./index";
 
 // Default admin credentials. Hardcoded for the school project (the prof needs
 // to be able to log in cold). Change only by deleting the admin and re-seeding.
-export const DEFAULT_ADMIN_USERNAME = "JoapAdmin20Jk";
-export const DEFAULT_ADMIN_PASSWORD = "AdminPriv23#Ds";
+export const DEFAULT_ADMIN_USERNAME = "JOAPadminTIP23#";
+export const DEFAULT_ADMIN_PASSWORD = "ADMINLOAJoap23#";
 
 export async function seedDatabase() {
   try {
