@@ -125,11 +125,7 @@ export default function LoginPage() {
             <br />
             order, item, and peso.
           </h2>
-          <p className="text-slate-400 text-[14px] leading-relaxed">
-            for testing purpose only: account: <strong>JoapAdmin20Jk</strong> password: <strong>AdminPriv23#Ds</strong>
-            <br></br>
-            account: <strong>john</strong> password: <strong>john123</strong>
-          </p>
+
 
           {/* Mini metrics — live from server */}
           <div className="grid grid-cols-3 gap-4 mt-8">
