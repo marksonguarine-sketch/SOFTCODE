@@ -1,299 +1,551 @@
-{
-  "author": "John Marwin",
+  {
+  "author": "Joap Developers",
   "logs": [
     {
-      "id": "l51",
-      "date": "2026-05-30T00:29:40+08:00",
+      "id": "l89",
+      "date": "2026-06-09T05:35:47Z",
       "label": "UI",
-      "title": "Polished the developer time log, defaulted the system to light mode, and locked down the source",
-      "body": "I rebuilt the developer time log so it always has its history available and gave it a cleaner, more professional look. I set the whole system to open in light mode by default and added a quick light/dark switch right next to the clock in the header. I tightened the Settings page into a two-column layout so there's far less scrolling, and I hardened the production build so the code can't easily be read from the browser."
+      "title": "Update login.tsx with latest authentication improvements",
+      "body": "I refreshed the login component with the latest authentication flow improvements and refined the user experience for first-time visitors."
     },
     {
-      "id": "l50",
-      "date": "2026-05-29T23:55:27+08:00",
+      "id": "l88",
+      "date": "2026-06-09T01:59:18Z",
+      "label": "SETUP",
+      "title": "Updated default admin credentials for seed file",
+      "body": "I updated the default admin credentials in the seed file to JoapAdmin20Jk / AdminPriv23#Ds for enhanced security during development."
+    },
+    {
+      "id": "l87",
+      "date": "2026-06-01T01:17:26Z",
       "label": "FEATURE",
-      "title": "Implemented the full requested feature set across the system",
-      "body": "For Orders I added a staff search inside the assign dropdown, filtering and pagination for the order pool, and proper rules so order type, channel, payment and fulfillment always make sense together — walk-ins are paid at the counter, the Next button stays disabled until there's data, and closing a half-filled order asks for confirmation. I removed the Refund option entirely. I added a Payment History section to Pending Payment with timestamps and CSV export, moved the inventory snapshot to the top of the dashboard, and let admins upload item images in both grid and table views with green/amber/red stock-status colors. I added pagination and date/account filters to the general ledger, created an Inventory Manager role that only sees inventory, and built the backup system to email a full JSON backup, wipe everything safely, and restore from an uploaded file behind a strong confirmation. I also made reservations convertible into live orders with their own history and export, and made forecasting cover every item."
+      "title": "R13: TOS rewrite with 3-author footer, server tracking, and pool warnings",
+      "body": "I completely rewrote the Terms of Service dialog with the 3-author footer showing Cabilao Keane Andre B., Ebona John Marwin R., and Mirasol Prince Marl Lizandrelle D. Added server-side TOS acceptance tracking per-user so the prompt follows the account across devices. Implemented Print TOS button that downloads the PDF, added admin/super-admin Download TOS card in Settings, fixed the hammer screen to only show when logged out, and added the new amber pool warning banner showing unclaimed orders with their total value."
     },
     {
-      "id": "l49",
-      "date": "2026-05-29T10:52:00+08:00",
+      "id": "l86",
+      "date": "2026-05-31T17:41:16Z",
+      "label": "FEATURE",
+      "title": "R12: Money-flow hardening and correction-path for payment auditing",
+      "body": "I added a comprehensive PaymentAudit model that logs every anomaly (invalid formats, duplicates, amount mismatches, after-hours payments, etc.). Built a full GCash reference validator with 8-15 alphanumeric checks, duplicate detection, actor verification, and amount validation. Implemented /api/orders/:id/reverse-payment for admins to safely reverse payments with ledger adjustments, added single-entry reversal for accounting, and created the Daily Payment Audit Report. Orders now enter a new 'Corrected' state with a rose badge when reversed."
+    },
+    {
+      "id": "l85",
+      "date": "2026-05-31T16:36:27Z",
+      "label": "DOCS",
+      "title": "Updated README with complete workflow overview",
+      "body": "I added a new workflow overview section to the README documenting the entire system flow from order creation through payment and release."
+    },
+    {
+      "id": "l84",
+      "date": "2026-05-31T12:17:45Z",
+      "label": "FEATURE",
+      "title": "R11: TOS dialog, presence toaster, notification audio, and forgot-password flow",
+      "body": "I implemented a one-shot TOS dialog with scroll-locking and 8 numbered clauses. Added a presence toaster that slides in from the right for admin sessions when users log in/out with proper audio routing. Built the forgot-password flow with server endpoint that safely notifies admins of password reset requests. Fixed the KPI inventory list so counters match badges using the new stockBands fallback logic."
+    },
+    {
+      "id": "l83",
+      "date": "2026-05-31T12:06:32Z",
+      "label": "FEATURE",
+      "title": "R10: Pending Release tab with revenue trend chips and calendar polish",
+      "body": "I created a new Pending Release page that shows all orders ready for fulfillment with proper status indicators. Extended revenue trends to show Today, 7d, 30d, 3m, and 1y periods with proper data aggregation. Enhanced the calendar with color-coded day chips for different statuses and added the premium Today highlight with gradient background."
+    },
+    {
+      "id": "l82",
+      "date": "2026-05-31T11:37:02Z",
+      "label": "FEATURE",
+      "title": "R9: Legacy stock band fallback and Pending Payment status improvements",
+      "body": "I fixed a critical bug where inventory KPI counters disagreed with row badges by implementing the new stockStatus() method everywhere. Added fallback logic for legacy items so the system calculates stock bands based on reorderLevel when startingStock is zero. Enhanced the Pending Payment table with a STATUS column showing release status and added a Release Item action button."
+    },
+    {
+      "id": "l81",
+      "date": "2026-05-30T15:30:06Z",
+      "label": "FEATURE",
+      "title": "Session 17 (R8): startingStock thresholds, ROP alerts, and super-admin protection",
+      "body": "I implemented Item.startingStock snapshots with intelligent stockBands() calculation (Low at 25%, Critical at 12.5%). Built maybeFireROPAlert() to notify admins when stock dips below safety thresholds. Enforced 50% minimum payment threshold for partial payments, made the super-admin account completely untouchable via API, created NumberInput component for cleaner numeric entry without leading zeros, and added duplicate-order detection with admin approval workflow."
+    },
+    {
+      "id": "l80",
+      "date": "2026-05-30T15:19:19Z",
+      "label": "FEATURE",
+      "title": "Session 16 (R6) final: Smoke test verification and code documentation",
+      "body": "I ran four comprehensive smoke test cycles and verified all systems worked end-to-end. Revenue calculations proved accurate (0→323, then 0→16,790), inventory management was solid (7→10 items), and double-entry accounting remained perfectly balanced at P17,136. All 19 nav routes rendered correctly without errors."
+    },
+    {
+      "id": "l79",
+      "date": "2026-05-30T15:14:28Z",
+      "label": "UI",
+      "title": "Session 16 round 2: KPI overhaul with maximize panels and print functionality",
+      "body": "I completely overhauled the KPI system with beautiful maximize dialogs that expand to near-fullscreen with Print buttons. Each KPI now renders at 64-88px when maximized and captures to landscape A4 PDF. Built new dashboard expand panels for revenue, orders, margin, and inventory with pagination. The Low-stock card is now amber while Critical stays red for better visual distinction. Inventory printing now uses html2canvas + jsPDF for multi-page PDF output."
+    },
+    {
+      "id": "l78",
+      "date": "2026-05-30T15:14:28Z",
+      "label": "UI",
+      "title": "Session 16 round 1: Fullscreen maximize, banner totals, and settings layout",
+      "body": "I fixed the dashboard pending payments banner to show correct totals by aggregating on the server side. Implemented real fullscreen maximize for charts and KPIs with proper state management. Added zero-stock guards to inventory creation and fixed Settings page CSS from masonry to a clean two-column grid layout."
+    },
+    {
+      "id": "l77",
+      "date": "2026-05-30T06:00:39Z",
+      "label": "FEATURE",
+      "title": "Session 15 round 3: Live smoke test and double-entry self-healing",
+      "body": "I created bumpAccountBalance() helper that auto-heals legacy AccountingAccount rows missing proper type metadata. Replaced all raw findOneAndUpdate calls with this new method so the database never crashes on fresh deploys. Ran live smoke test against MongoDB Atlas and verified cash/GCash flows were perfectly balanced."
+    },
+    {
+      "id": "l76",
+      "date": "2026-05-30T15:19:19Z",
+      "label": "UI",
+      "title": "Session 15 round 2: Chart overhauls and double-entry ledger fixes",
+      "body": "I redesigned the Debits vs Credits chart with gradient bars and a custom legend with percentages. Overhauled Account Type Distribution to show a side legend instead of cluttered pie labels. Fixed a critical bug where /api/billing/quick-pay wasn't writing ledger entries, so partial payments now properly update Sales Revenue balances."
+    },
+    {
+      "id": "l75",
+      "date": "2026-05-30T06:00:39Z",
+      "label": "FEATURE",
+      "title": "Session 15 round 1: Real operations fixes and inventory management",
+      "body": "I fixed PATCH /api/items/:id to accept all fields (name, category, supplier, price, quantity, reorder level), added DELETE endpoint for items, and removed the customerName requirement from create-order so users can proceed without it. Fixed the Assign-to dropdown to use Popover instead of absolute positioning so it never clips off-screen. Corrected Top Items aggregation to read actual quantity fields and filter cancelled orders. Shifted system shift windows from 06:00-close to 09:00-21:00 morning/evening splits. Added /api/users/online endpoint that returns all active users from the last 15 minutes."
+    },
+    {
+      "id": "l74",
+      "date": "2026-05-30T02:12:57Z",
+      "label": "FEATURE",
+      "title": "Session 14: Real operations with partial release and notification system",
+      "body": "I updated default admin to JoapAdmin20Jk with credentials stored in the database. Implemented walk-in paid orders that now book BillingPayment + ledger entries + update account balances immediately. Added a complete Notification model with socket events and a bell icon in the header. Built the employee item-request flow where staff can request inventory additions, admins approve them with password confirmation, and the approval is race-safe with findOneAndUpdate."
+    },
+    {
+      "id": "l73",
+      "date": "2026-05-29T16:36:36Z",
+      "label": "FEATURE",
+      "title": "Session 13: Sidebar polish, dashboard reorganization, and settings layout",
+      "body": "I removed the bottom user-profile card from the sidebar since the header already shows user info. Moved Inventory snapshot to the top of the dashboard for better visibility. Fixed Reservations to properly handle reservation-only bookings throughout the workflow. Enhanced inventory status pills with stronger colors (red-600, amber-500, emerald-600) and added them to grid view. Redesigned Settings from CSS masonry to a cleaner two-column layout."
+    },
+    {
+      "id": "l72",
+      "date": "2026-05-29T16:29:40Z",
+      "label": "SETUP",
+      "title": "Moved developer time log into self-contained devlogs folder",
+      "body": "I reorganized the developer time log into client/src/devlogs/ so the entire feature can be removed by deleting one folder and one import. Rewrote entries in first-person narrative and removed build-tooling noise from the history."
+    },
+    {
+      "id": "l71",
+      "date": "2026-05-29T15:55:27Z",
+      "label": "FEATURE",
+      "title": "Session 11: Live dev time log, light mode default, and source hardening",
+      "body": "I built a live developer time log that fetches commit history from GitHub API. Set the system to open in light mode by default with a sun/moon toggle in the header. Made Settings responsive with a two-column layout (max-w-5xl). Hardened the production build by removing source maps, dropping console statements, and minifying the code so the source can't be easily read."
+    },
+    {
+      "id": "l70",
+      "date": "2026-05-29T02:52:00Z",
+      "label": "FEATURE",
+      "title": "Session 10: REQUEST.pdf implementation with reservations and inventory roles",
+      "body": "I added staff search inside order assign dropdown with pool filtering and 10/page pagination. Built Payment History for Pending Payment with CSV export. Added admin image upload for inventory items in both grid and table with color-coded stock status. Created INVENTORY_MANAGER role for employees that only see inventory. Implemented full backup/restore system with email support and wipe capability. Added forecasting that covers every item with smart fallbacks for sparse data."
+    },
+    {
+      "id": "l69",
+      "date": "2026-05-28T07:31:43Z",
       "label": "FIX",
-      "title": "Fixed the production build so it runs on the latest tooling",
-      "body": "I pinned the deployment to Node 20 so the latest build tools work correctly when the system is deployed."
+      "title": "Fixed Railway/nixpacks build by pinning Node 20",
+      "body": "I pinned Node 20.19.0+ because Vite 7 requires crypto.hash which was added in Node 20. Updated package.json engines, .nvmrc, and nixpacks.toml so all deployment tools agree on the version."
     },
     {
-      "id": "l48",
+      "id": "l68",
       "date": "2026-05-28T07:20:21Z",
       "label": "SETUP",
-      "title": "Updated the build tooling",
-      "body": "I updated our build tooling to the latest version."
+      "title": "Updated build tooling to latest version",
+      "body": "I upgraded the build dependencies to ensure we're using the latest and most secure versions of all tools."
     },
     {
-      "id": "l47",
-      "date": "2026-05-26T12:20:41+08:00",
+      "id": "l67",
+      "date": "2026-05-26T04:20:41Z",
       "label": "DOCS",
-      "title": "Ran a full 141-point quality audit",
-      "body": "I went through a 141-point quality audit across the whole system and consolidated everything into the project documentation."
+      "title": "Ran full 141-point quality audit and consolidated findings",
+      "body": "I went through every single item on the 141-point checklist and verified it was implemented. Login/auth green, tutorial green, workflows green, presence dots green, performance green, all 19 routes rendering. Documented any honest gaps we'll handle later."
     },
     {
-      "id": "l46",
-      "date": "2026-05-26T12:18:06+08:00",
+      "id": "l66",
+      "date": "2026-05-26T04:18:06Z",
       "label": "FEATURE",
-      "title": "Added a Chart of Accounts table",
-      "body": "I added a Chart of Accounts table to accounting and let admins delete empty accounts."
+      "title": "Added Chart of Accounts table with admin delete",
+      "body": "I surfaced the chart of accounts directly in the Accounting page so admins can see live balances derived from the ledger. Added a Delete button that only works when an account has zero balance, preventing accidental deletion of accounts with history."
     },
     {
-      "id": "l45",
-      "date": "2026-05-26T12:12:46+08:00",
+      "id": "l65",
+      "date": "2026-05-26T04:12:46Z",
       "label": "DOCS",
-      "title": "Documented the latest audit pass",
-      "body": "I wrote up the latest audit pass in the project documentation."
+      "title": "Documented Session 8 audit pass with verification matrix",
+      "body": "I recorded the E2E verification matrix that walked 6 orders, 4 offer types, and a full reservation cycle through all 19 nav routes without errors."
     },
     {
-      "id": "l44",
-      "date": "2026-05-26T12:10:18+08:00",
+      "id": "l64",
+      "date": "2026-05-26T04:10:18Z",
       "label": "FEATURE",
       "title": "Wired up Inventory CSV import and Print Labels",
-      "body": "I connected the Inventory CSV import and Print Labels buttons so nothing is a dead end anymore."
+      "body": "I connected the Inventory CSV import button to parse CSV files with headers (itemName, category, supplierName, unitPrice, currentQuantity) and POST each row to the API. Wired Print Labels to trigger browser print so the inventory page becomes a print-friendly layout."
     },
     {
-      "id": "l43",
-      "date": "2026-05-26T12:04:23+08:00",
+      "id": "l63",
+      "date": "2026-05-26T04:04:23Z",
       "label": "FIX",
-      "title": "Fixed the release flow and live accounting balances",
-      "body": "I fixed the order release flow and made the accounting balances update in real time."
+      "title": "Fixed release flow and live accounting balance reactivity",
+      "body": "I fixed the release endpoint to set fulfillmentStatus='completed' and emit DASHBOARD_STATS_UPDATED so the UI updates immediately. Made /api/accounting/accounts derive live balance from ledger totals instead of stale zeros. Added DELETE endpoint for empty accounts and expanded the accountTypeMap to cover all common ledger types."
     },
     {
-      "id": "l42",
-      "date": "2026-05-26T11:41:55+08:00",
+      "id": "l62",
+      "date": "2026-05-26T03:41:55Z",
       "label": "UI",
-      "title": "Full-system polish pass — Antipolo rebrand and presence dots",
-      "body": "I did a full-system pass: rebranded everything to Antipolo, polished the Settings page, and added presence-aware status dots so you can see which employees are online."
+      "title": "Session 7: Full-system audit — Antipolo rebrand and presence dots",
+      "body": "I did a complete system pass: rebranded Tarlac to Antipolo everywhere, fixed Settings with better scroll containment and added Dark Mode toggle to the Tweaks panel, and made the green employee dot now show real presence (online less than 5 minutes based on lastLogin). Added 11 advanced FAQs to Help covering forecasting, settings, calculator lock, dark mode scope, and more."
     },
     {
-      "id": "l41",
+      "id": "l61",
       "date": "2026-05-26T02:07:28Z",
       "label": "UI",
-      "title": "Improved page scrolling inside tabs",
-      "body": "I improved the scrolling so content stays neatly contained within its tabs."
+      "title": "Improved page scrolling by restricting content within tabs",
+      "body": "I applied scroll containment to tabbed sections across forecasting, help, requests, and system logs so content stays neatly contained within each tab."
     },
     {
-      "id": "l40",
+      "id": "l60",
       "date": "2026-05-26T01:54:49Z",
       "label": "FIX",
-      "title": "Updated the Help page and fixed display issues",
-      "body": "I refreshed the Help page and cleaned up several display issues."
+      "title": "Updated Help page and fixed various display issues",
+      "body": "I refreshed the Help page content and cleaned up several display inconsistencies across the application."
     },
     {
-      "id": "l39",
+      "id": "l59",
       "date": "2026-05-26T01:37:17Z",
       "label": "FEATURE",
-      "title": "Enhanced features across multiple pages",
-      "body": "I enhanced features and fixed display issues across several pages of the system."
+      "title": "Enhanced features and fixed display issues across multiple pages",
+      "body": "I enhanced various features throughout the system and resolved display issues that were affecting the user experience."
     },
     {
-      "id": "l38",
+      "id": "l58",
       "date": "2026-05-26T01:10:16Z",
       "label": "FIX",
-      "title": "Fixed accounting errors and improved the PDF export",
-      "body": "I fixed errors on the accounting page and improved the PDF export."
+      "title": "Fixed accounting errors and improved PDF export",
+      "body": "I resolved JSX parse errors in the accounting module and improved the PDF export functionality with better field handling."
     },
     {
-      "id": "l37",
+      "id": "l57",
       "date": "2026-05-26T00:54:17Z",
       "label": "UI",
-      "title": "Improved the in-app tutorial",
-      "body": "I improved the in-app tutorial and fixed various page display issues."
+      "title": "Improved in-app tutorial system",
+      "body": "I enhanced the tutorial flow and fixed various page display issues to improve the onboarding experience."
     },
     {
-      "id": "l36",
+      "id": "l56",
       "date": "2026-05-26T00:32:36Z",
       "label": "FIX",
-      "title": "Fixed broken tutorial steps and polished the UI",
-      "body": "I repaired broken tutorial steps and polished a number of UI elements."
+      "title": "Fixed broken tutorial steps and polished UI elements",
+      "body": "I repaired broken tutorial steps and polished various UI elements throughout the interface."
     },
     {
-      "id": "l35",
+      "id": "l55",
       "date": "2026-05-25T23:59:31+08:00",
       "label": "FEATURE",
-      "title": "Fixed the order pool, locked the announcement voice, and built forecasting",
-      "body": "I fixed the order pool and the unassign flow, locked the announcement voice to a single voice system-wide, and built demand and revenue forecasting using an ARIMA model on real sales history."
+      "title": "Session 6: Fixed order pool, locked TTS voice, and built ARIMA forecasting",
+      "body": "I fixed the order pool unassign flow so fulfillmentStatus resets to 'pending', added an inline Return to pool button, and made pool updates immediate via refetchQueries. Locked the announcement voice system-wide to en-US-GuyNeural per specification. Built a pure-TypeScript ARIMA(1,1,1) forecasting module that analyzes sales history and generates 14-day demand forecasts with 95% confidence bands. Created the /api/forecast/items and /api/forecast/aggregate endpoints."
     },
     {
-      "id": "l34",
+      "id": "l54",
       "date": "2026-05-25T13:07:43Z",
       "label": "FIX",
-      "title": "Improved order-assignment notifications",
-      "body": "I improved the order-assignment notifications and fixed a batch of bugs."
+      "title": "Improved order-assignment notifications and fixed bugs",
+      "body": "I refactored the TTS queue, updated default voice settings, fixed Settings scroll issues, and enhanced order notification delivery."
     },
     {
-      "id": "l33",
+      "id": "l53",
       "date": "2026-05-25T12:48:02Z",
       "label": "FIX",
       "title": "Improved dark mode and voice compatibility",
-      "body": "I improved dark mode and the voice announcements so they behave consistently across different environments."
+      "body": "I improved dark mode handling and ensured voice announcements work consistently across different hosting environments."
     },
     {
-      "id": "l32",
+      "id": "l52",
       "date": "2026-05-25T12:43:01Z",
       "label": "FIX",
       "title": "Fixed text-to-speech for notifications",
-      "body": "I fixed the text-to-speech for spoken notifications."
+      "body": "I replaced the unreliable external TTS with msedge-tts Node.js package for reliable voice notifications."
     },
     {
-      "id": "l31",
+      "id": "l51",
       "date": "2026-05-25T19:08:48+08:00",
       "label": "DOCS",
-      "title": "Wrote a guide to keep the docs in sync",
-      "body": "I wrote a comprehensive internal guide so the documentation stays in sync with what's actually shipped."
+      "title": "Wrote comprehensive documentation guide for keeping docs in sync",
+      "body": "I wrote a detailed internal guide documenting exactly how to keep the project documentation synchronized with the shipped system."
     },
     {
-      "id": "l30",
+      "id": "l50",
       "date": "2026-05-25T18:59:16+08:00",
       "label": "FEATURE",
-      "title": "Built the animated boot loader, logo, and README",
-      "body": "I built the animated boot loader, designed the JOAP logo, and wrote the project README."
+      "title": "Built animated boot loader, JOAP logo, and README",
+      "body": "I built an animated boot loader with a hammer guy walking through J-O-A-P with sparks, designed the JOAP logo (crossed hammer and screwdriver on amber gradient), and wrote a comprehensive README with feature list, quick-start guide, and architecture overview."
     },
     {
-      "id": "l29",
+      "id": "l49",
       "date": "2026-05-25T08:44:54+08:00",
       "label": "UI",
-      "title": "Stability pass — error boundary, tutorial spotlight, empty states",
-      "body": "I did a stability pass: added an error boundary, overhauled the tutorial with a focused spotlight, and polished the empty states throughout the app."
+      "title": "Stability pass: ErrorBoundary, tutorial spotlight, and EmptyState polish",
+      "body": "I added an ErrorBoundary that catches page crashes and shows a recovery card with Try Again and Go Home buttons. Overhauled the tutorial with a 'lightning lock-on' focus effect featuring radial halos and expanding glow rings. Created EmptyState component with 4 tones and wired it to Requests and Pending Payment pages."
     },
     {
-      "id": "l28",
+      "id": "l48",
       "date": "2026-05-24T12:54:55Z",
       "label": "FEATURE",
       "title": "Enhanced order management with detailed logging",
-      "body": "I enhanced order management with comprehensive logging and richer payment details."
+      "body": "I added comprehensive logging to order detail pages with a detailed modal and richer payment history tracking."
     },
     {
-      "id": "l27",
+      "id": "l47",
       "date": "2026-05-24T12:38:24Z",
       "label": "FEATURE",
       "title": "Updated order processing and dashboard statistics",
-      "body": "I updated the order processing and the statistics shown on the dashboard."
+      "body": "I updated the order processing workflow and improved the dashboard statistics display for live data accuracy."
+    },
+    {
+      "id": "l46",
+      "date": "2026-05-24T12:25:18Z",
+      "label": "FEATURE",
+      "title": "Added comprehensive payment processing and real-time updates",
+      "body": "I built a detailed payment modal with cash/GCash options, receipt uploads, transaction code generation, and real-time socket events for order updates."
+    },
+    {
+      "id": "l45",
+      "date": "2026-05-24T12:11:40Z",
+      "label": "SETUP",
+      "title": "Moved database connection into secure storage",
+      "body": "I moved the database connection string from code into secure environment variable storage for production safety."
+    },
+    {
+      "id": "l44",
+      "date": "2026-05-24T20:07:52+08:00",
+      "label": "UI",
+      "title": "Session 4: UX polish with header cleanup and inventory editing",
+      "body": "I removed the global search and notification bell from the header, keeping only essential elements (SidebarTrigger, Breadcrumbs, LiveClock in 12-hour PH format, user pill, Logout). Added inventory edit dialog with support for price, quantity, category, and supplier changes. Built daily sales goal settings and peak hours export functionality. Added user-log target picker and SaaS-style employee profile modal with gradient hero and productivity charts."
+    },
+    {
+      "id": "l43",
+      "date": "2026-05-24T19:52:37+08:00",
+      "label": "FIX",
+      "title": "Fixed local server boot on Windows and offers query bug",
+      "body": "I wrapped the reusePort socket option in an isWindows check so the dev server starts on Windows. Fixed offers query to fallback to empty array instead of undefined."
+    },
+    {
+      "id": "l42",
+      "date": "2026-05-24T19:34:35+08:00",
+      "label": "UI",
+      "title": "Adopted the definitive UI design across the system",
+      "body": "I replaced all pages with the definitive UI design featuring new components (Sparkline, RingGauge, PaymentMixDonut, Heatmap, KpiCard, PageHeader). Overhauled dashboard, inventory, orders, reservations, billing, settings, and all other pages with consistent design language."
+    },
+    {
+      "id": "l41",
+      "date": "2026-05-24T18:53:48+08:00",
+      "label": "UI",
+      "title": "UI overhaul: Modern slate-and-amber theme with Manrope font",
+      "body": "I completely redesigned the theme with slate neutrals and amber primary colors. Added Manrope font for UI and JetBrains Mono for numerics. Built breadcrumb navigation, live PHT clock, and Tweaks panel for appearance customization. Header now has a 3-zone layout with ⌘K search shortcut."
+    },
+    {
+      "id": "l40",
+      "date": "2026-05-24T14:13:24+08:00",
+      "label": "FEATURE",
+      "title": "Shipped massive feature update with multiple improvements",
+      "body": "I shipped a large feature bundle: new About page showing 3 developers and tech stack, admin orders view grouped by employee, draggable floating calculator with memory, Pending Payment nav with badge count, calendar view for system logs, user deactivation with reactivation support, reservation deletion with password confirmation, offers duplicate checking, and various settings fixes."
+    },
+    {
+      "id": "l39",
+      "date": "2026-05-24T11:44:41+08:00",
+      "label": "FEATURE",
+      "title": "Built complete order assignment system with voice and task-lock",
+      "body": "I built the order assignment system with voice announcements for assignments, task-locking so employees hold only one active order at a time, and a 3-step processing lifecycle (claim → start-processing → complete-processing). Added /api/orders?pool=true for FIFO pool management and global Socket.io notifications."
+    },
+    {
+      "id": "l38",
+      "date": "2026-05-24T11:20:28+08:00",
+      "label": "FIX",
+      "title": "Fixed boot errors and added accounting PDF export with charts",
+      "body": "I fixed startup errors by creating server_mongo.ts with hardcoded Atlas URI and env-var overrides. Fixed TypeScript errors using Array.from() for MapIterator compatibility. Added accounting PDF export with bar charts, pie charts with legends, and complete ledger tables. Hardened MongoDB connection with idempotent connect() logic."
+    },
+    {
+      "id": "l37",
+      "date": "2026-05-24T02:49:40Z",
+      "label": "SETUP",
+      "title": "Cleaned up repository and removed local assets from tracking",
+      "body": "I cleaned up the repository by keeping local asset drops and runtime data out of version control."
+    },
+    {
+      "id": "l36",
+      "date": "2026-05-23T08:21:55Z",
+      "label": "FEATURE",
+      "title": "Enabled text-to-speech playback for order confirmations",
+      "body": "I enabled TTS audio playback for order confirmations so users can hear order updates."
+    },
+    {
+      "id": "l35",
+      "date": "2026-05-23T08:12:37Z",
+      "label": "FIX",
+      "title": "Improved loading speed by fixing server and HMR issues",
+      "body": "I fixed server crash on compilation errors and ensured Hot Module Replacement connects correctly for faster development iteration."
+    },
+    {
+      "id": "l34",
+      "date": "2026-05-23T08:04:45Z",
+      "label": "FIX",
+      "title": "Improved performance with authentication and database optimization",
+      "body": "I optimized authentication with in-memory session caching and added missing MongoDB indexes to the Order model for faster queries."
+    },
+    {
+      "id": "l33",
+      "date": "2026-05-23T07:52:58Z",
+      "label": "FEATURE",
+      "title": "Added voice announcements and enhanced reservation management",
+      "body": "I added text-to-speech functionality throughout the system and built comprehensive reservation management features."
+    },
+    {
+      "id": "l32",
+      "date": "2026-05-23T07:36:00Z",
+      "label": "FIX",
+      "title": "Fixed critical errors preventing application startup",
+      "body": "I resolved TypeScript errors and configuration issues that were blocking the application from running."
+    },
+    {
+      "id": "l31",
+      "date": "2026-05-23T07:24:53Z",
+      "label": "FIX",
+      "title": "Fixed dashboard loading errors",
+      "body": "I fixed import issues and configuration problems that prevented the dashboard from loading correctly."
+    },
+    {
+      "id": "l30",
+      "date": "2026-05-23T07:04:54Z",
+      "label": "DOCS",
+      "title": "Set up project documentation and initial system changes",
+      "body": "I established comprehensive project documentation covering initial system changes, feature decisions, and architectural foundations."
+    },
+    {
+      "id": "l29",
+      "date": "2026-05-22T15:30:15Z",
+      "label": "FEATURE",
+      "title": "Refactored application structure and fixed startup scripts",
+      "body": "I removed the MAIN-APP folder, fixed the npm dev script to use tsx binary explicitly, and updated core dependencies."
+    },
+    {
+      "id": "l28",
+      "date": "2026-05-22T15:55:25Z",
+      "label": "FEATURE",
+      "title": "Updated order schema with payment and fulfillment status",
+      "body": "I refactored the Order model to include orderType, orderChannel, paymentStatus, paymentMethod, and deliveryFee fields. Built a 3-step order creation panel and new offers engine."
+    },
+    {
+      "id": "l27",
+      "date": "2026-05-22T16:27:35Z",
+      "label": "FEATURE",
+      "title": "Enhanced reporting, settings, and dashboard features",
+      "body": "I built new API endpoints for offer management, improved order processing logic, and enhanced dashboard data aggregation."
     },
     {
       "id": "l26",
-      "date": "2026-05-24T12:25:18Z",
+      "date": "2026-05-23T05:22:22Z",
       "label": "FEATURE",
-      "title": "Added full payment processing and real-time order updates",
-      "body": "I added comprehensive payment processing and real-time updates to orders."
+      "title": "Added reservations page with calendar and list views",
+      "body": "I created a new Reservations page with calendar and list viewing modes, stock alerts, and full workflow support. Added upcoming reservations to the dashboard and installed xlsx for spreadsheet support."
     },
     {
       "id": "l25",
-      "date": "2026-05-24T12:11:40Z",
-      "label": "SETUP",
-      "title": "Moved the database connection into secure storage",
-      "body": "I moved the database connection string into secure secret storage."
+      "date": "2026-05-23T05:46:30Z",
+      "label": "DOCS",
+      "title": "Added detailed documentation for dashboard, orders, and inventory",
+      "body": "I documented the dashboard features, order management workflow, and inventory enhancements with live update descriptions."
     },
     {
       "id": "l24",
-      "date": "2026-05-24T20:07:52+08:00",
-      "label": "UI",
-      "title": "UX polish — header, inventory edit, daily sales goal, exports",
-      "body": "I did a UX polish pass: cleaned up the header, added inventory editing, a daily sales goal, a peak-hours export, a user-log target picker, and a cleaner employee modal."
+      "date": "2026-05-23T05:52:14Z",
+      "label": "DOCS",
+      "title": "Created replit.md with project overview and feature backlog",
+      "body": "I wrote comprehensive project documentation covering the tech stack and complete feature backlog."
     },
     {
       "id": "l23",
-      "date": "2026-05-24T19:52:37+08:00",
-      "label": "FIX",
-      "title": "Fixed the local server boot on Windows and an offers bug",
-      "body": "I fixed the local server boot on Windows and an offers query bug."
+      "date": "2026-05-23T06:56:16Z",
+      "label": "FEATURE",
+      "title": "Improved application features and fixed various bugs",
+      "body": "I enhanced PDF export formatting, enforced concurrent login rules, improved dashboard elements, and fixed fulfillment status handling."
     },
     {
       "id": "l22",
-      "date": "2026-05-24T19:34:35+08:00",
-      "label": "UI",
-      "title": "Adopted the definitive UI design",
-      "body": "I adopted the definitive UI design across the dashboard, inventory, charts, heatmap, KPI cards and page headers."
+      "date": "2026-05-23T07:04:54Z",
+      "label": "DOCS",
+      "title": "Updated documentation for system changes and feature updates",
+      "body": "I documented all system changes including concurrent login enforcement and various UI/backend improvements."
     },
     {
       "id": "l21",
-      "date": "2026-05-24T18:53:48+08:00",
-      "label": "UI",
-      "title": "Overhauled the UI with a modern theme",
-      "body": "I overhauled the UI with a modern slate-and-amber theme, a new font, breadcrumbs, a live clock, an appearance tweaks panel, and a quick command shortcut."
+      "date": "2026-05-15T07:44:57Z",
+      "label": "FEATURE",
+      "title": "Implemented reorder point formula for inventory management",
+      "body": "I replaced manual reorder input with formula-based calculation using average daily usage, lead time, and safety stock fields. The system now automatically computes optimal reorder levels."
     },
     {
       "id": "l20",
-      "date": "2026-05-24T14:13:24+08:00",
+      "date": "2026-05-15T07:53:46Z",
       "label": "FEATURE",
-      "title": "Shipped a large feature update",
-      "body": "I shipped a big feature update: a new About page, an admin orders view, a floating calculator, a Pending Payment nav, a calendar for the system logs, user deactivation, reservation deletion, duplicate-offer checks, and a set of settings fixes."
+      "title": "Enhanced backup and restore functionality for databases",
+      "body": "I increased JSON body limit to 50MB for large backups, included users in backup/restore operations, and added migration guides."
     },
     {
       "id": "l19",
-      "date": "2026-05-24T11:44:41+08:00",
+      "date": "2026-05-15T08:24:59Z",
       "label": "FEATURE",
-      "title": "Built the order assignment system",
-      "body": "I built the order assignment system with voice announcements, task locking, and a three-step processing lifecycle."
+      "title": "Added order locking and assignment features",
+      "body": "I implemented order locking with timestamps, takeover capabilities, and enhanced employee/admin order views for better workflow management."
     },
     {
       "id": "l18",
-      "date": "2026-05-24T11:20:28+08:00",
+      "date": "2026-05-22T15:13:46Z",
       "label": "FIX",
-      "title": "Fixed startup errors and added accounting PDF export",
-      "body": "I fixed startup errors, added an accounting PDF export with charts, and hardened the database connection."
+      "title": "Fixed interactive tutorial and improved stability",
+      "body": "I addressed audio looping issues, fixed mouse cursor sync, improved UI visibility, and resolved user management errors."
     },
     {
       "id": "l17",
-      "date": "2026-05-24T02:49:40Z",
-      "label": "SETUP",
-      "title": "Cleaned up the repository",
-      "body": "I cleaned up the repository by keeping local asset drops out of version control."
+      "date": "2026-05-11T10:29:07Z",
+      "label": "CHECKPOINT",
+      "title": "Saved progress checkpoint",
+      "body": "I saved the current state of all work as a checkpoint for version control."
     },
     {
       "id": "l16",
-      "date": "2026-05-23T08:21:55Z",
+      "date": "2026-05-11T10:24:57Z",
       "label": "FEATURE",
-      "title": "Enabled voice playback for order confirmations",
-      "body": "I enabled text-to-speech playback for order confirmations."
+      "title": "Added MongoDB Atlas IP access list documentation",
+      "body": "I documented the MongoDB Atlas configuration and added supporting images for setup reference."
     },
     {
       "id": "l15",
-      "date": "2026-05-23T08:12:37Z",
-      "label": "FIX",
-      "title": "Improved loading speed",
-      "body": "I improved the loading speed by fixing server errors and the live-reload connections."
+      "date": "2026-05-11T10:13:58Z",
+      "label": "CHECKPOINT",
+      "title": "Saved progress at loop end",
+      "body": "I saved all changes at the end of the development loop."
     },
     {
       "id": "l14",
-      "date": "2026-05-23T08:04:45Z",
-      "label": "FIX",
-      "title": "Improved performance",
-      "body": "I improved performance by optimizing authentication and the database queries."
+      "date": "2026-05-11T10:38:26Z",
+      "label": "DEPLOYMENT",
+      "title": "Published application to production",
+      "body": "I deployed the application to the production environment successfully."
     },
     {
       "id": "l13",
-      "date": "2026-05-23T07:52:58Z",
+      "date": "2026-05-11T10:03:55Z",
       "label": "FEATURE",
-      "title": "Added voice announcements and improved reservations",
-      "body": "I added text-to-speech and enhanced reservation management."
+      "title": "Added comprehensive UI components and page structure",
+      "body": "I initialized the UI component library with buttons, cards, dialogs, and set up the core application pages and routing infrastructure."
     },
     {
       "id": "l12",
-      "date": "2026-05-23T07:36:00Z",
-      "label": "FIX",
-      "title": "Fixed errors that stopped the app from running",
-      "body": "I fixed errors that were preventing the application from running correctly."
-    },
-    {
-      "id": "l11",
-      "date": "2026-05-23T07:24:53Z",
-      "label": "FIX",
-      "title": "Fixed the dashboard loading",
-      "body": "I fixed errors that stopped the dashboard from loading correctly."
-    },
-    {
-      "id": "l10",
-      "date": "2026-05-23T07:04:54Z",
-      "label": "DOCS",
-      "title": "Set up the project and its documentation",
-      "body": "I set up the project documentation for the initial system changes and feature decisions."
+      "date": "2026-05-11T09:53:48Z",
+      "label": "INITIAL",
+      "title": "Initial project setup and foundation",
+      "body": "I set up the complete project structure, installed dependencies, and established the foundation for the full-stack application."
     }
   ]
 }
