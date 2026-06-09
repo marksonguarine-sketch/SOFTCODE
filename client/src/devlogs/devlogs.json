@@ -1,6 +1,14 @@
-  {
+{
   "author": "Joap Developers",
   "logs": [
+    {
+      "id": "l90",
+      "date": "2026-06-09T17:01:12+08:00",
+      "label": "FEATURE",
+      "title": "order receipts, commit->devlog auto-logger, reservation + partial-release fixes",
+      "body": "Orders:\n- Fix partial-release dead-end: accepting Partial Release on an over-stock\n  item now acknowledges that item and advances the wizard to Payment instead\n  of re-firing the overflow dialog (could never click Next before).\n- Auto-pop a printable receipt the moment an order is created; add a\n  Print Receipt button (saves PNG via html2canvas) on paid orders in the\n  order list, admin table, and order detail.\n\nReservations (Create Reservation dialog):\n- Remove the Fulfillment Status field (not relevant to reservations).\n- Add 'Partial Payment' to Payment Status.\n- Make the item quantity a typeable text box.\n- Show an 'Available Stock' column per item with over-stock highlighting.\n\nTooling:\n- Add git post-commit/post-merge hooks + script/devlog-from-git.mjs that\n  auto-append commits to client/src/devlogs/devlogs.json.\n- Add JOAP_User_Manual.docx (detailed user manual with TOC).\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>",
+      "commit": "7c33bcf39"
+    },
     {
       "id": "l89",
       "date": "2026-06-09T05:35:47Z",
