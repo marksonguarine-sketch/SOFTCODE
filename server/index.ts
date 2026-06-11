@@ -3,7 +3,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { connectDB } from "./db";
-import { seedDatabase } from "./seed";
+import { seedDatabase, ensureSuperAdmins } from "./seed";
 import SiteVisitor from "./models/SiteVisitor";
 import { sendTelegramNotification, parseDeviceName } from "./lib/telegram";
 
@@ -107,6 +107,7 @@ function visitorTrackingMiddleware(req: Request, res: Response, next: NextFuncti
 (async () => {
   await connectDB();
   await seedDatabase();
+  await ensureSuperAdmins();
 
   await registerRoutes(httpServer, app);
 

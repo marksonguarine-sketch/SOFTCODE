@@ -44,7 +44,8 @@ export default function LoginPage() {
     totalStaff: 0,
   });
   useEffect(() => {
-    if (localStorage.getItem("session_expired") === "1") {
+    const expiredFlag = localStorage.getItem("session_expired");
+    if (expiredFlag === "1" || expiredFlag === "idle") {
       setSessionExpired(true);
       localStorage.removeItem("session_expired");
     }

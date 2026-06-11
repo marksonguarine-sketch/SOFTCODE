@@ -1,12 +1,13 @@
 import { z } from "zod";
 
-export const UserRole = { ADMIN: "ADMIN", EMPLOYEE: "EMPLOYEE", INVENTORY_MANAGER: "INVENTORY_MANAGER" } as const;
+export const UserRole = { ADMIN: "ADMIN", EMPLOYEE: "EMPLOYEE", INVENTORY_MANAGER: "INVENTORY_MANAGER", SUPERADMIN: "SUPERADMIN" } as const;
 export type UserRoleType = (typeof UserRole)[keyof typeof UserRole];
 
 export const USER_ROLE_LABELS: Record<UserRoleType, string> = {
   ADMIN: "Admin",
   EMPLOYEE: "Employee",
   INVENTORY_MANAGER: "Inventory Manager",
+  SUPERADMIN: "Super Admin",
 };
 
 export const OrderStatus = {

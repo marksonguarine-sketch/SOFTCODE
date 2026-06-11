@@ -23,6 +23,36 @@ export const DEFAULT_SUPERADMIN_PASSWORD = "RootAccess@7kM2Qn9p#Xvw";
 export const SECONDARY_ADMIN_USERNAME = "AdminSecure#4Jx";
 export const SECONDARY_ADMIN_PASSWORD = "SecureAccess@3nP8Ky#Lmx9";
 
+// ─── 3 Super Admin accounts (always ensured on startup) ─────────────────────
+export const SUPER_ADMINS: Array<{ username: string; password: string }> = [
+  { username: "superadmin_joap1",  password: "JoapSA@Kx9#mP2Lv" },
+  { username: "superadmin_joap2",  password: "JoapSA@Rn4#qW7Tz" },
+  { username: "superadmin_joap3",  password: "JoapSA@Yb6#dH3Fc" },
+];
+
+/**
+ * Ensures all 3 super admin accounts exist and are active.
+ * Runs on every startup — safe to call even if accounts already exist.
+ */
+export async function ensureSuperAdmins() {
+  for (const sa of SUPER_ADMINS) {
+    const existing = await User.findOne({ username: sa.username.toLowerCase() });
+    if (!existing) {
+      const hashed = await bcrypt.hash(sa.password, 10);
+      await User.create({ username: sa.username.toLowerCase(), password: hashed, role: "SUPERADMIN", isActive: true });
+      log(`Super admin created: ${sa.username}`, "seed");
+    } else if (!existing.isActive) {
+      existing.isActive = true;
+      await existing.save();
+      log(`Super admin re-activated: ${sa.username}`, "seed");
+    }
+  }
+  log("Super admin accounts verified ✓", "seed");
+  for (const sa of SUPER_ADMINS) {
+    log(`  username=${sa.username}  password=${sa.password}`, "seed");
+  }
+}
+
 export async function seedDatabase() {
   try {
     // Migrate legacy admin/admin123 → JoapAdmin20Jk/AdminPriv23#Ds. We just
