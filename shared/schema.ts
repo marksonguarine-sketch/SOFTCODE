@@ -94,14 +94,14 @@ export const ALLOWED_ORDER_CHANNELS: Record<OrderType, OrderChannel[]> = {
 };
 
 // Which payment statuses make sense for each order type.
-//  • Walk-in pickup is paid on the spot → "Paid" only.
+//  • Walk-in orders are paid at the counter → "Paid" or "Partial" only (no pending).
 //  • Reservations are not yet transacted → pending or "For Reservation Only".
-//  • Everything else may be unpaid, partial, or paid (no refunds in this flow).
+//  • Online orders may be unpaid, partial, or paid.
 export const ALLOWED_PAYMENT_STATUSES: Record<OrderType, PaymentStatus[]> = {
   online_delivery: ["pending_payment", "partial", "paid"],
   online_pickup: ["pending_payment", "partial", "paid"],
-  walkin_delivery: ["pending_payment", "partial", "paid"],
-  walkin_pickup: ["paid"],
+  walkin_delivery: ["paid", "partial"],
+  walkin_pickup: ["paid", "partial"],
   online_reservation: ["pending_payment", "reservation_only"],
   walkin_reservation: ["pending_payment", "reservation_only"],
 };

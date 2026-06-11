@@ -302,7 +302,7 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
       customerName: "",
       orderType: "walkin_pickup",
       orderChannel: "walkin",
-      paymentStatus: "pending_payment",
+      paymentStatus: "paid",
       paymentMethod: "cash",
       fulfillmentStatus: "pending",
       deliveryFee: 0,
@@ -318,11 +318,10 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
   const allowedChannels = ALLOWED_ORDER_CHANNELS[orderType] || [];
   const allowedFulfillment = ALLOWED_FULFILLMENT_STATUSES[orderType] || [];
   const isReservation = orderType.includes("reservation");
-  // Walk-in channel (non-reservation) must always be Paid — money changes hands
-  // at the counter, so there's no "pending payment" case for it.
+  // Walk-in orders (non-reservation) are paid at the counter — only Paid or Partial allowed.
   const allowedPaymentStatuses = (() => {
     const base = ALLOWED_PAYMENT_STATUSES[orderType] || [];
-    if (orderChannel === "walkin" && !isReservation) return base.filter((s) => s === "paid");
+    if (orderChannel === "walkin" && !isReservation) return base.filter((s) => s === "paid" || s === "partial");
     return base;
   })();
 
@@ -604,10 +603,10 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                             const curC = form.getValues("orderChannel") as OrderChannel;
                             const nextC = allowedC.includes(curC) ? curC : allowedC[0];
                             if (nextC !== curC) form.setValue("orderChannel", nextC);
-                            // Reset payment status — respect the walk-in→Paid rule
+                            // Reset payment status — walk-in only allows paid or partial
                             const resv = type.includes("reservation");
                             let allowedS = ALLOWED_PAYMENT_STATUSES[type];
-                            if (nextC === "walkin" && !resv) allowedS = allowedS.filter((s) => s === "paid");
+                            if (nextC === "walkin" && !resv) allowedS = allowedS.filter((s) => s === "paid" || s === "partial");
                             const curS = form.getValues("paymentStatus") as PaymentStatus;
                             if (!allowedS.includes(curS)) form.setValue("paymentStatus", allowedS[0]);
                             // Reset fulfillment status
@@ -631,9 +630,9 @@ function CreateOrderDialog({ open, onClose, allItems }: { open: boolean; onClose
                     <Select
                       onValueChange={(val) => {
                         field.onChange(val);
-                        // Walk-in channel forces Paid (non-reservation); keep status valid
+                        // Walk-in channel: only paid or partial allowed
                         let allowedS = ALLOWED_PAYMENT_STATUSES[orderType];
-                        if (val === "walkin" && !isReservation) allowedS = allowedS.filter((s) => s === "paid");
+                        if (val === "walkin" && !isReservation) allowedS = allowedS.filter((s) => s === "paid" || s === "partial");
                         const curS = form.getValues("paymentStatus") as PaymentStatus;
                         if (!allowedS.includes(curS)) form.setValue("paymentStatus", allowedS[0]);
                       }}

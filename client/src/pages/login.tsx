@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, AlertTriangle, ArrowRight } from "lucide-react";
+import { Loader2, AlertTriangle, ArrowRight, MonitorSmartphone } from "lucide-react";
 import { JoapLogo } from "@/components/joap-logo";
 import { loginSchema, type LoginInput } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
@@ -32,6 +32,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+  const [activeSessionBlocked, setActiveSessionBlocked] = useState(false);
   const [forgotOpen, setForgotOpen] = useState(false);
   const [liveStats, setLiveStats] = useState<{
     ordersToday: number;
@@ -76,11 +77,16 @@ export default function LoginPage() {
 
   const onSubmit = async (values: LoginInput) => {
     setError("");
+    setActiveSessionBlocked(false);
     setIsLoading(true);
     try {
       await login(values.username, values.password);
     } catch (err: any) {
-      setError(err.message || "Invalid credentials");
+      if (err.message === "ALREADY_ACTIVE_SESSION") {
+        setActiveSessionBlocked(true);
+      } else {
+        setError(err.message || "Invalid credentials");
+      }
     } finally {
       setIsLoading(false);
     }
@@ -196,6 +202,19 @@ export default function LoginPage() {
               <span>
                 Your session was ended because the account was logged in
                 elsewhere. Please log in again.
+              </span>
+            </div>
+          )}
+
+          {activeSessionBlocked && (
+            <div
+              className="mb-5 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800/60 dark:bg-blue-950/40 px-3 py-2.5 text-[12.5px] text-blue-900 dark:text-blue-200"
+              data-testid="alert-active-session"
+            >
+              <MonitorSmartphone className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+              <span>
+                You are currently logged in on another device. Please log out
+                from that device before signing in here.
               </span>
             </div>
           )}

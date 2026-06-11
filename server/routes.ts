@@ -507,14 +507,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         lastActivity: { $gte: new Date(Date.now() - 300000) },
       });
 
-      const hadActiveSessions = activeSessions.length > 0;
-      await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
-      clearAllSessionsForUser(user._id.toString());
+      if (activeSessions.length > 0) {
+        // Warn the active device that someone is trying to sign in with their credentials.
+        emitEvent("auth:login_attempt", { username: user.username });
+        return res.status(409).json({ success: false, error: "ALREADY_ACTIVE_SESSION" });
+      }
 
       const token = generateToken({ _id: user._id.toString(), username: user.username, role: user.role });
       await UserSession.create({ userId: user._id, token, isActive: true });
 
-      await logAction("USER_LOGIN", user.username, user.username, hadActiveSessions ? { previousSessionTerminated: true } : {});
+      await logAction("USER_LOGIN", user.username, user.username, {});
       // Broadcast presence so admin tabs can pop the right-side toast.
       emitEvent("presence:login", { username: user.username, role: user.role });
 
@@ -522,7 +524,6 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return ok(res, {
         token,
         user: { _id: user._id, username: user.username, role: user.role, isActive: user.isActive },
-        previousSessionTerminated: hadActiveSessions,
       });
     } catch (err: any) {
       return fail(res, 500, err.message);
