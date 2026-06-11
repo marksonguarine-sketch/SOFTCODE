@@ -82,6 +82,18 @@ export function PresenceToaster({ currentUser }: { currentUser: { username: stri
       }
     });
 
+    // ── Force-kick (admin/superadmin accounts) ───────────────────────────
+    // Server emits auth:session_kicked when an admin logs in from a new
+    // device, displacing any existing session. The displaced session must
+    // log itself out immediately.
+    socket.on("auth:session_kicked", (data: { username: string }) => {
+      if (data?.username === currentUser.username) {
+        localStorage.setItem("session_expired", "kicked");
+        localStorage.removeItem("token");
+        window.location.href = "/";
+      }
+    });
+
     // ── Notification audio routing ──────────────────────────────────────
     // Server emits NOTIFICATION_NEW with { _id, category, title, recipientUsername, recipientRole }
     // We peek the title to decide whether this is a chat message or a general

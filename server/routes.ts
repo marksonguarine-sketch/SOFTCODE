@@ -526,16 +526,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
         ],
       }).lean();
 
-      if (activeSessions.length > 0) {
-        // Alert the active device via socket AND store a server-side flag so
-        // the presence-toaster polling fallback can also pick it up.
-        emitEvent("auth:login_attempt", { username: user.username });
-        loginAttemptStore.set(user.username, Date.now());
-        return res.status(409).json({ success: false, error: "ALREADY_ACTIVE_SESSION" });
-      }
+      const isPrivilegedRole = user.role === "ADMIN" || user.role === "SUPERADMIN";
 
-      // No live active sessions — mark any lingering stale ones as inactive.
-      await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
+      if (activeSessions.length > 0) {
+        if (isPrivilegedRole) {
+          // ADMIN / SUPERADMIN: force-kick the existing session so the new login wins.
+          // Invalidate all active sessions in the DB and in the in-memory cache.
+          const sessionTokens = activeSessions.map((s) => s.token);
+          await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
+          sessionTokens.forEach((t) => clearSessionCache(t));
+          // Notify the displaced session so it can auto-logout on the client.
+          emitEvent("auth:session_kicked", { username: user.username });
+        } else {
+          // Non-privileged accounts: alert the active device and block the new login.
+          emitEvent("auth:login_attempt", { username: user.username });
+          loginAttemptStore.set(user.username, Date.now());
+          return res.status(409).json({ success: false, error: "ALREADY_ACTIVE_SESSION" });
+        }
+      } else {
+        // No live active sessions — mark any lingering stale ones as inactive.
+        await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
+      }
 
       const token = generateToken({ _id: user._id.toString(), username: user.username, role: user.role });
       await UserSession.create({ userId: user._id, token, isActive: true });

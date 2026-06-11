@@ -23,32 +23,37 @@ export const DEFAULT_SUPERADMIN_PASSWORD = "RootAccess@7kM2Qn9p#Xvw";
 export const SECONDARY_ADMIN_USERNAME = "AdminSecure#4Jx";
 export const SECONDARY_ADMIN_PASSWORD = "SecureAccess@3nP8Ky#Lmx9";
 
-// ─── 3 Super Admin accounts (always ensured on startup) ─────────────────────
-export const SUPER_ADMINS: Array<{ username: string; password: string }> = [
+// ─── 6 Admin-level accounts ensured on every startup ────────────────────────
+// All have role ADMIN — same privilege as DEFAULT_ADMIN_USERNAME.
+export const EXTRA_ADMINS: Array<{ username: string; password: string }> = [
   { username: "superadmin_joap1",  password: "JoapSA@Kx9#mP2Lv" },
   { username: "superadmin_joap2",  password: "JoapSA@Rn4#qW7Tz" },
   { username: "superadmin_joap3",  password: "JoapSA@Yb6#dH3Fc" },
+  { username: "joadmin_alpha1",    password: "JoapAdm@Nx8#pY3Wr" },
+  { username: "joadmin_bravo2",    password: "JoapAdm@Qt5#rZ6Ks" },
+  { username: "joadmin_delta3",    password: "JoapAdm@Mv2#wC4Jp" },
 ];
 
 /**
- * Ensures all 3 super admin accounts exist and are active.
+ * Ensures all extra admin accounts exist, are active, and have role ADMIN.
  * Runs on every startup — safe to call even if accounts already exist.
  */
 export async function ensureSuperAdmins() {
-  for (const sa of SUPER_ADMINS) {
+  for (const sa of EXTRA_ADMINS) {
     const existing = await User.findOne({ username: sa.username.toLowerCase() });
     if (!existing) {
       const hashed = await bcrypt.hash(sa.password, 10);
-      await User.create({ username: sa.username.toLowerCase(), password: hashed, role: "SUPERADMIN", isActive: true });
-      log(`Super admin created: ${sa.username}`, "seed");
-    } else if (!existing.isActive) {
-      existing.isActive = true;
-      await existing.save();
-      log(`Super admin re-activated: ${sa.username}`, "seed");
+      await User.create({ username: sa.username.toLowerCase(), password: hashed, role: "ADMIN", isActive: true });
+      log(`Admin account created: ${sa.username}`, "seed");
+    } else {
+      let changed = false;
+      if (existing.role !== "ADMIN") { existing.role = "ADMIN"; changed = true; }
+      if (!existing.isActive) { existing.isActive = true; changed = true; }
+      if (changed) await existing.save();
     }
   }
-  log("Super admin accounts verified ✓", "seed");
-  for (const sa of SUPER_ADMINS) {
+  log("Extra admin accounts verified ✓", "seed");
+  for (const sa of EXTRA_ADMINS) {
     log(`  username=${sa.username}  password=${sa.password}`, "seed");
   }
 }
