@@ -72,10 +72,9 @@ export function PresenceToaster({ currentUser }: { currentUser: { username: stri
       });
     }
 
-    // ── Login-attempt security alert ────────────────────────────────────
+    // ── Login-attempt security alert (socket — primary path) ────────────
     // Server emits auth:login_attempt when someone tries to log in with this
-    // user's credentials while this session is still active. Show a persistent
-    // banner so the user knows their account is being targeted.
+    // user's credentials while this session is still active.
     socket.on("auth:login_attempt", (data: { username: string }) => {
       if (data?.username === currentUser.username) {
         setLoginAttemptWarning(true);
@@ -112,6 +111,27 @@ export function PresenceToaster({ currentUser }: { currentUser: { username: stri
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser.username, currentUser.role]);
+
+  // ── Polling fallback for login-attempt alert ─────────────────────────
+  // Fires every 20 s so the banner appears even if the socket missed the
+  // real-time event (e.g. brief reconnect window). The server stores a
+  // 2-minute window for each blocked attempt and clears it on first read.
+  useEffect(() => {
+    if (!currentUser.username) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await apiRequest("GET", "/api/auth/security-alert");
+        const json = await res.json();
+        if (json?.data?.alert) {
+          setLoginAttemptWarning(true);
+          play(PRESENCE_AUDIO);
+        }
+      } catch {
+        // ignore — user might be logged out
+      }
+    }, 20_000);
+    return () => clearInterval(interval);
+  }, [currentUser.username]);
 
   // Best-effort logout broadcast — sent right before the tab closes so other
   // sessions get a "logged out" toast without waiting for the session-timeout

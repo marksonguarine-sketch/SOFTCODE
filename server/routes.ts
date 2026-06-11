@@ -97,6 +97,17 @@ function emitEvent(event: string, data?: any) {
   if (io) io.emit(event, data);
 }
 
+// In-memory store for login-attempt alerts so the polling fallback works
+// even when the socket event was missed (e.g. socket momentarily disconnected).
+// Map<username, timestampMs>  — entries expire after 2 minutes.
+const loginAttemptStore = new Map<string, number>();
+setInterval(() => {
+  const cutoff = Date.now() - 2 * 60 * 1000;
+  loginAttemptStore.forEach((ts, username) => {
+    if (ts < cutoff) loginAttemptStore.delete(username);
+  });
+}, 30_000);
+
 async function logAction(action: string, actor: string, target = "", metadata: Record<string, any> = {}) {
   await SystemLog.create({ action, actor, target, metadata });
 }
@@ -502,30 +513,28 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return fail(res, 401, "Invalid credentials");
 
-      // Find ALL active sessions (no time window — just check isActive + valid JWT).
+      // Find active sessions created within the past 24 h (matches JWT lifetime).
+      // We use createdAt instead of jwt.verify() so this works even if the
+      // stored token is null or was rotated — no crypto check needed here.
+      const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const activeSessions = await UserSession.find({
         userId: user._id,
         isActive: true,
+        $or: [
+          { createdAt: { $gt: since24h } },
+          { lastActivity: { $gt: since24h } },
+        ],
       }).lean();
 
-      // Filter to sessions whose JWT token has not yet expired.
-      const JWT_SECRET_KEY = process.env.SESSION_SECRET || "joap-hardware-secret-key";
-      const validSessions = activeSessions.filter((s: any) => {
-        try {
-          jwt.verify(s.token, JWT_SECRET_KEY);
-          return true;
-        } catch {
-          return false;
-        }
-      });
-
-      if (validSessions.length > 0) {
-        // Alert the active device and block the new login.
+      if (activeSessions.length > 0) {
+        // Alert the active device via socket AND store a server-side flag so
+        // the presence-toaster polling fallback can also pick it up.
         emitEvent("auth:login_attempt", { username: user.username });
+        loginAttemptStore.set(user.username, Date.now());
         return res.status(409).json({ success: false, error: "ALREADY_ACTIVE_SESSION" });
       }
 
-      // No valid active sessions — clean up stale ones before proceeding.
+      // No live active sessions — mark any lingering stale ones as inactive.
       await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
 
       const token = generateToken({ _id: user._id.toString(), username: user.username, role: user.role });
@@ -559,6 +568,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     } catch (err: any) {
       return fail(res, 500, err.message);
     }
+  });
+
+  // Polling fallback for security alerts — presence-toaster calls this every
+  // 20 s so the active device sees the banner even if the socket event was
+  // missed (e.g. brief disconnect). Returns the alert and clears it atomically.
+  app.get("/api/auth/security-alert", authMiddleware, (req: AuthRequest, res: Response) => {
+    const username = req.user!.username;
+    const ts = loginAttemptStore.get(username);
+    if (ts && Date.now() - ts < 2 * 60 * 1000) {
+      loginAttemptStore.delete(username);
+      return ok(res, { alert: true });
+    }
+    return ok(res, { alert: false });
   });
 
   /**
