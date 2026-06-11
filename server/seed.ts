@@ -18,6 +18,11 @@ export const DEFAULT_ADMIN_PASSWORD = "ADMINLOAJoap23#";
 export const DEFAULT_SUPERADMIN_USERNAME = "SuperRoot92x#Sys";
 export const DEFAULT_SUPERADMIN_PASSWORD = "RootAccess@7kM2Qn9p#Xvw";
 
+// Secondary admin credentials. Hardcoded for backup administrative access.
+// Change only by deleting the admin and re-seeding.
+export const SECONDARY_ADMIN_USERNAME = "AdminSecure#4Jx";
+export const SECONDARY_ADMIN_PASSWORD = "SecureAccess@3nP8Ky#Lmx9";
+
 export async function seedDatabase() {
   try {
     // Migrate legacy admin/admin123 → JoapAdmin20Jk/AdminPriv23#Ds. We just
@@ -36,12 +41,14 @@ export async function seedDatabase() {
       log("Seeding database...", "seed");
 
       const adminPassword = await bcrypt.hash(DEFAULT_ADMIN_PASSWORD, 10);
+      const secondaryAdminPassword = await bcrypt.hash(SECONDARY_ADMIN_PASSWORD, 10);
       const employeePassword = await bcrypt.hash("employee123", 10);
       const superadminPassword = await bcrypt.hash(DEFAULT_SUPERADMIN_PASSWORD, 10);
 
       await User.create([
         { username: DEFAULT_SUPERADMIN_USERNAME, password: superadminPassword, role: "SUPERADMIN", isActive: true },
         { username: DEFAULT_ADMIN_USERNAME, password: adminPassword, role: "ADMIN", isActive: true },
+        { username: SECONDARY_ADMIN_USERNAME, password: secondaryAdminPassword, role: "ADMIN", isActive: true },
         { username: "employee", password: employeePassword, role: "EMPLOYEE", isActive: true },
       ]);
 
@@ -91,6 +98,7 @@ export async function seedDatabase() {
       log("Database seeded successfully!", "seed");
       log(`Super Admin credentials: username=${DEFAULT_SUPERADMIN_USERNAME}, password=${DEFAULT_SUPERADMIN_PASSWORD}`, "seed");
       log(`Admin credentials: username=${DEFAULT_ADMIN_USERNAME}, password=${DEFAULT_ADMIN_PASSWORD}`, "seed");
+      log(`Secondary Admin credentials: username=${SECONDARY_ADMIN_USERNAME}, password=${SECONDARY_ADMIN_PASSWORD}`, "seed");
       log("Employee credentials: username=employee, password=employee123", "seed");
     }
 
