@@ -2,6 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { z } from "zod";
 import multer from "multer";
@@ -501,17 +502,31 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) return fail(res, 401, "Invalid credentials");
 
+      // Find ALL active sessions (no time window — just check isActive + valid JWT).
       const activeSessions = await UserSession.find({
         userId: user._id,
         isActive: true,
-        lastActivity: { $gte: new Date(Date.now() - 300000) },
+      }).lean();
+
+      // Filter to sessions whose JWT token has not yet expired.
+      const JWT_SECRET_KEY = process.env.SESSION_SECRET || "joap-hardware-secret-key";
+      const validSessions = activeSessions.filter((s: any) => {
+        try {
+          jwt.verify(s.token, JWT_SECRET_KEY);
+          return true;
+        } catch {
+          return false;
+        }
       });
 
-      if (activeSessions.length > 0) {
-        // Warn the active device that someone is trying to sign in with their credentials.
+      if (validSessions.length > 0) {
+        // Alert the active device and block the new login.
         emitEvent("auth:login_attempt", { username: user.username });
         return res.status(409).json({ success: false, error: "ALREADY_ACTIVE_SESSION" });
       }
+
+      // No valid active sessions — clean up stale ones before proceeding.
+      await UserSession.updateMany({ userId: user._id, isActive: true }, { isActive: false });
 
       const token = generateToken({ _id: user._id.toString(), username: user.username, role: user.role });
       await UserSession.create({ userId: user._id, token, isActive: true });
