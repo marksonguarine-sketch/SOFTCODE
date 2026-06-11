@@ -1,6 +1,7 @@
-class jsPDF {
+export class jsPDF {
   constructor() {
     this.internal = { pageSize: { getWidth: () => 210, getHeight: () => 297 } };
+    this.lastAutoTable = { finalY: 0 };
   }
   setFontSize() { return this; }
   setFont() { return this; }
@@ -14,15 +15,12 @@ class jsPDF {
   addImage() { return this; }
   addPage() { return this; }
   save(filename) {
-    console.warn("[jspdf shim] PDF export is not available in this environment. Would have saved:", filename);
+    console.warn("[jspdf shim] PDF export not available. Would have saved:", filename);
   }
   output() { return ""; }
   getNumberOfPages() { return 1; }
   setPage() { return this; }
   autoTable() { return this; }
-  lastAutoTable = { finalY: 0 };
 }
 
-module.exports = jsPDF;
-module.exports.default = jsPDF;
-module.exports.jsPDF = jsPDF;
+export default jsPDF;

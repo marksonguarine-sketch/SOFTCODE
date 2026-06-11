@@ -2,6 +2,7 @@
   "name": "jspdf-autotable",
   "version": "3.8.4",
   "description": "Local shim for jspdf-autotable",
+  "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js"
