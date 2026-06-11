@@ -1,0 +1,9 @@
+{
+  "name": "jspdf-autotable",
+  "version": "3.8.4",
+  "description": "Local shim for jspdf-autotable",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js"
+  }
+}
