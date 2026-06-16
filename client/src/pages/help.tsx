@@ -600,6 +600,7 @@ export default function HelpPage() {
   const messagesQuery = useQuery<any>({
     queryKey: ["/api/messages"],
     enabled: isAdmin,
+    refetchInterval: 15_000,
   });
 
   const markReadMutation = useMutation({
@@ -628,7 +629,7 @@ export default function HelpPage() {
     onError: (err: Error) => toast({ title: "Failed to send reply", description: err.message, variant: "destructive" }),
   });
 
-  const messages = messagesQuery.data?.data || [];
+  const messages = (messagesQuery.data?.data || []).filter((m: any) => m.direction === "EMPLOYEE_TO_ADMIN");
   const isEmployee = user?.role === "EMPLOYEE";
 
   const filteredFaqs = faqSearch.trim()
@@ -911,9 +912,9 @@ export default function HelpPage() {
                   <CardHeader>
                     <CardTitle className="text-base flex items-center gap-2">
                       <Mail className="h-4 w-4" /> Employee Messages
-                      {messages.filter((m: any) => !m.metadata?.read).length > 0 && (
+                      {messages.filter((m: any) => !m.isRead).length > 0 && (
                         <Badge className="bg-blue-500 text-white border-transparent text-xs">
-                          {messages.filter((m: any) => !m.metadata?.read).length} new
+                          {messages.filter((m: any) => !m.isRead).length} new
                         </Badge>
                       )}
                     </CardTitle>
@@ -929,19 +930,19 @@ export default function HelpPage() {
                     ) : (
                       <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
                         {messages.map((msg: any) => (
-                          <div key={msg._id} className={`border rounded-lg p-3.5 space-y-2 transition-colors ${!msg.metadata?.read ? "border-primary/30 bg-primary/5" : ""}`}>
+                          <div key={msg._id} className={`border rounded-lg p-3.5 space-y-2 transition-colors ${!msg.isRead ? "border-primary/30 bg-primary/5" : ""}`}>
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-semibold" data-testid={`text-msg-sender-${msg._id}`}>{msg.actor}</span>
-                                {msg.metadata?.subject && (
-                                  <Badge variant="outline" className="text-xs">{msg.metadata.subject}</Badge>
+                                <span className="text-sm font-semibold" data-testid={`text-msg-sender-${msg._id}`}>{msg.fromUsername}</span>
+                                {msg.subject && (
+                                  <Badge variant="outline" className="text-xs">{msg.subject}</Badge>
                                 )}
                               </div>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs text-muted-foreground">
                                   {new Date(msg.createdAt).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                                 </span>
-                                {!msg.metadata?.read && (
+                                {!msg.isRead && (
                                   <Button
                                     variant="outline"
                                     size="sm"
@@ -953,7 +954,7 @@ export default function HelpPage() {
                                     <Clock className="h-3 w-3 mr-1" /> Mark Read
                                   </Button>
                                 )}
-                                {msg.metadata?.read && (
+                                {msg.isRead && (
                                   <Badge variant="secondary" className="text-xs">
                                     <CheckCircle className="h-3 w-3 mr-1" /> Read
                                   </Badge>
@@ -963,7 +964,7 @@ export default function HelpPage() {
                                   size="sm"
                                   className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700"
                                   onClick={() => {
-                                    setReplyTo({ id: msg._id, username: msg.actor });
+                                    setReplyTo({ id: msg._id, username: msg.fromUsername });
                                     setReplyText("");
                                   }}
                                   data-testid={`button-reply-${msg._id}`}
@@ -973,7 +974,7 @@ export default function HelpPage() {
                               </div>
                             </div>
                             <p className="text-sm text-muted-foreground leading-relaxed" data-testid={`text-msg-body-${msg._id}`}>
-                              {msg.metadata?.message}
+                              {msg.body}
                             </p>
                             {replyTo?.id === msg._id && (
                               <div className="mt-2 pt-2 border-t space-y-2">

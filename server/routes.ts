@@ -5090,9 +5090,16 @@ ${JSON.stringify(fullData, null, 0)}`;
     try {
       const me = req.user!.username;
       const { direction } = req.query as Record<string, string>;
+      const isPrivileged = req.user!.role === "ADMIN" || req.user!.role === "SUPERADMIN";
       const filter: any = {};
-      if (direction === "sent") filter.fromUsername = me;
-      else filter.toUsername = me;
+      if (direction === "sent") {
+        filter.fromUsername = me;
+      } else if (isPrivileged) {
+        // Admins see all employee→admin messages in their inbox
+        filter.direction = "EMPLOYEE_TO_ADMIN";
+      } else {
+        filter.toUsername = me;
+      }
       const list = await Message.find(filter).sort({ createdAt: -1 }).lean();
       return ok(res, list);
     } catch (err: any) {
@@ -5114,14 +5121,56 @@ ${JSON.stringify(fullData, null, 0)}`;
   app.post("/api/messages", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const { toUsername, subject, body } = req.body;
-      if (!toUsername || !body) return fail(res, 400, "Recipient and body are required");
+      if (!body) return fail(res, 400, "Body is required");
       const me = req.user!.username;
-      const direction = req.user!.role === "ADMIN" ? "ADMIN_TO_EMPLOYEE" : "EMPLOYEE_TO_ADMIN";
+      const isPrivileged = req.user!.role === "ADMIN" || req.user!.role === "SUPERADMIN";
+      const direction = isPrivileged ? "ADMIN_TO_EMPLOYEE" : "EMPLOYEE_TO_ADMIN";
+
+      // Employees send to the admin group (sentinel "admin"); admins send to specific employee
+      const recipient = isPrivileged ? toUsername : "admin";
+      if (!recipient) return fail(res, 400, "Recipient is required");
+
       const msg = await Message.create({
-        direction, fromUsername: me, toUsername, subject: subject || "", body, isRead: false,
+        direction, fromUsername: me, toUsername: recipient, subject: subject || "", body, isRead: false,
       });
-      await logAction("MESSAGE_SENT", me, toUsername, { subject });
-      emitEvent("message:new", { messageId: msg._id.toString(), toUsername, fromUsername: me });
+      await logAction("MESSAGE_SENT", me, recipient, { subject });
+
+      // Create a Notification so the bell lights up for the recipient
+      if (isPrivileged) {
+        // Admin → specific employee
+        const notif = await Notification.create({
+          category: "SYSTEM",
+          title: `New message from Admin`,
+          body: subject || body.slice(0, 80),
+          link: "/help",
+          recipientUsername: recipient,
+          recipientRole: "",
+          readBy: [],
+          createdBy: me,
+        });
+        emitEvent("NOTIFICATION_NEW", {
+          _id: notif._id.toString(), category: "SYSTEM", title: notif.title,
+          recipientUsername: recipient, recipientRole: "",
+        });
+      } else {
+        // Employee → all admins/superadmins
+        const notif = await Notification.create({
+          category: "SYSTEM",
+          title: `New message from ${me}`,
+          body: subject || body.slice(0, 80),
+          link: "/help",
+          recipientUsername: "",
+          recipientRole: "ADMIN",
+          readBy: [],
+          createdBy: me,
+        });
+        emitEvent("NOTIFICATION_NEW", {
+          _id: notif._id.toString(), category: "SYSTEM", title: notif.title,
+          recipientUsername: "", recipientRole: "ADMIN",
+        });
+      }
+
+      emitEvent("message:new", { messageId: msg._id.toString(), toUsername: recipient, fromUsername: me, direction });
       return ok(res, msg);
     } catch (err: any) {
       return fail(res, 500, err.message);
@@ -5132,9 +5181,13 @@ ${JSON.stringify(fullData, null, 0)}`;
   app.patch("/api/messages/:id/read", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
       const me = req.user!.username;
+      const isPrivileged = req.user!.role === "ADMIN" || req.user!.role === "SUPERADMIN";
       const msg = await Message.findById(req.params.id);
       if (!msg) return fail(res, 404, "Message not found");
-      if (msg.toUsername !== me) return fail(res, 403, "Not your message");
+      // Admins can mark any EMPLOYEE_TO_ADMIN message as read; employees mark their own inbox
+      if (msg.toUsername !== me && !(isPrivileged && msg.direction === "EMPLOYEE_TO_ADMIN")) {
+        return fail(res, 403, "Not your message");
+      }
       msg.isRead = true;
       msg.readAt = new Date();
       await msg.save();

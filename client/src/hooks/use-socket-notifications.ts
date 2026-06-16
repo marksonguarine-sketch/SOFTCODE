@@ -162,6 +162,25 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
       queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
     });
 
+    // ── New internal message ───────────────────────────────────────────────────
+    socket.on("message:new", (data: { toUsername?: string; fromUsername?: string; direction?: string }) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+
+      const isAdminToEmployee = data.direction === "ADMIN_TO_EMPLOYEE";
+      const isEmployeeToAdmin = data.direction === "EMPLOYEE_TO_ADMIN";
+
+      if (isAdminToEmployee && data.toUsername === username) {
+        toast({
+          title: "New message from Admin",
+          description: "You have a new message. Go to Help → Support to read it.",
+        });
+      } else if (isEmployeeToAdmin && (username.toLowerCase() !== data.fromUsername?.toLowerCase())) {
+        // Only show toast to admins (non-sender) — this is a broad emit so we rely on
+        // the notification bell for role-based filtering; just refresh data here.
+      }
+    });
+
     return () => {
       socket.disconnect();
       socketRef.current = null;
