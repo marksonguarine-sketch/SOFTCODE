@@ -2,6 +2,14 @@
   "author": "Joap Developers",
   "logs": [
     {
+      "id": "l91",
+      "date": "2026-06-18T16:01:37+08:00",
+      "label": "FIX",
+      "title": "route staff<->admin messages + notifications to all admins/superadmins",
+      "body": "- Help reply now targets msg.fromUsername (was undefined msg.actor -> 400)\n- SUPERADMIN treated as superset of ADMIN: adminOnly middleware, client isAdmin,\n  and superadmins now receive ADMIN-targeted notifications (bell + Help inbox)\n- Any non-admin role (not just EMPLOYEE) can message admin from Help\n- Employees can reply to admin messages directly from their inbox\n- Admins/superadmins get a toast pop-up when staff message them\n- Message notifications deep-link to /help?tab=support\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>",
+      "commit": "f15b5762a"
+    },
+    {
       "id": "l90",
       "date": "2026-06-09T17:01:12+08:00",
       "label": "FEATURE",

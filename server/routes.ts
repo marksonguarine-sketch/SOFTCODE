@@ -4391,14 +4391,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   // ─── MESSAGES ──────────────────────────────────────────
-  app.get("/api/messages", authMiddleware, adminOnly, async (req: AuthRequest, res: Response) => {
-    try {
-      const messages = await SystemLog.find({ action: "EMPLOYEE_MESSAGE" }).sort({ createdAt: -1 }).limit(50).lean();
-      return ok(res, messages);
-    } catch (err: any) {
-      return fail(res, 500, err.message);
-    }
-  });
+  // [REMOVED] Legacy GET /api/messages handler. It was registered BEFORE the
+  // real inbox handler (further down, ~line 5089) and gated `adminOnly`, so
+  // Express always routed here first: admins received SystemLog EMPLOYEE_MESSAGE
+  // entries instead of their Message inbox, and non-admins got a 403 (which made
+  // the employee "Messages from Admin" inbox silently empty). Removed so the
+  // real role-aware inbox handler is the only GET /api/messages route.
 
   // [REMOVED] Legacy POST /api/messages handler. It expected `{subject,
   // message}` and was registered BEFORE the real /api/messages handler
