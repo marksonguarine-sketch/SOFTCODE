@@ -8,6 +8,8 @@ import { queryClient } from "@/lib/queryClient";
 interface UseSocketNotificationsOptions {
   username: string;
   enabled: boolean;
+  /** True for ADMIN / SUPERADMIN — they get a toast when any user messages the admin team. */
+  isAdmin?: boolean;
 }
 
 function isTtsEnabled(username: string): boolean {
@@ -22,7 +24,7 @@ function invalidateOrderQueries() {
   queryClient.invalidateQueries({ queryKey: ["/api/dashboard/stats"] });
 }
 
-export function useSocketNotifications({ username, enabled }: UseSocketNotificationsOptions) {
+export function useSocketNotifications({ username, enabled, isAdmin = false }: UseSocketNotificationsOptions) {
   const { toast } = useToast();
   const socketRef = useRef<Socket | null>(null);
 
@@ -175,9 +177,18 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
           title: "New message from Admin",
           description: "You have a new message. Go to Help → Support to read it.",
         });
-      } else if (isEmployeeToAdmin && (username.toLowerCase() !== data.fromUsername?.toLowerCase())) {
-        // Only show toast to admins (non-sender) — this is a broad emit so we rely on
-        // the notification bell for role-based filtering; just refresh data here.
+      } else if (
+        isEmployeeToAdmin &&
+        isAdmin &&
+        username.toLowerCase() !== data.fromUsername?.toLowerCase()
+      ) {
+        // Pop a toast for every admin / superadmin (except the sender) so an
+        // incoming staff message is impossible to miss. The bell handles the
+        // persistent role-based notification list.
+        toast({
+          title: `New message from ${data.fromUsername || "a staff member"}`,
+          description: "Open Help → Support to read and reply.",
+        });
       }
     });
 
@@ -185,7 +196,7 @@ export function useSocketNotifications({ username, enabled }: UseSocketNotificat
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [username, enabled]);
+  }, [username, enabled, isAdmin]);
 
   return socketRef;
 }

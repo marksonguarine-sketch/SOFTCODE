@@ -8,6 +8,7 @@ interface AuthContextType {
   user: IUser | null;
   token: string | null;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isInventoryManager: boolean;
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
@@ -22,7 +23,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const isAdmin = user?.role === "ADMIN";
+  // SUPERADMIN is a superset of ADMIN — it should see and do everything an
+  // admin can (sidebar, admin routes, Help inbox, …) plus superadmin-only bits.
+  const isSuperAdmin = user?.role === "SUPERADMIN";
+  const isAdmin = user?.role === "ADMIN" || isSuperAdmin;
   const isInventoryManager = user?.role === "INVENTORY_MANAGER";
 
   useEffect(() => {
@@ -108,7 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, isAdmin, isInventoryManager, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, token, isAdmin, isSuperAdmin, isInventoryManager, isLoading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );

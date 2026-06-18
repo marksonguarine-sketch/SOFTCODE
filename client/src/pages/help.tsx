@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useSearch } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -559,6 +560,17 @@ export default function HelpPage() {
   const [replyTo, setReplyTo] = useState<{ id: string; username: string } | null>(null);
   const [replyText, setReplyText] = useState("");
 
+  // Deep-link support: notifications about messages send the user to
+  // /help?tab=support so the relevant inbox is shown immediately.
+  const search = useSearch();
+  const [activeTab, setActiveTab] = useState(
+    () => new URLSearchParams(search).get("tab") || "modules",
+  );
+  useEffect(() => {
+    const t = new URLSearchParams(search).get("tab");
+    if (t) setActiveTab(t);
+  }, [search]);
+
   const form = useForm<FeedbackInput>({
     resolver: zodResolver(feedbackSchema),
     defaultValues: { subject: "", message: "", email: "" },
@@ -624,13 +636,17 @@ export default function HelpPage() {
     onSuccess: () => {
       setReplyTo(null);
       setReplyText("");
+      qc.invalidateQueries({ queryKey: ["/api/messages"] });
+      qc.invalidateQueries({ queryKey: ["/api/notifications"] });
       toast({ title: "Reply sent", description: "Your reply has been sent to the employee." });
     },
     onError: (err: Error) => toast({ title: "Failed to send reply", description: err.message, variant: "destructive" }),
   });
 
   const messages = (messagesQuery.data?.data || []).filter((m: any) => m.direction === "EMPLOYEE_TO_ADMIN");
-  const isEmployee = user?.role === "EMPLOYEE";
+  // Anyone who is NOT an admin/superadmin can message the admin team and see
+  // replies — employees, inventory managers, or any future non-admin role.
+  const canContactAdmin = !isAdmin;
 
   const filteredFaqs = faqSearch.trim()
     ? faqs.filter((f) =>
@@ -662,7 +678,7 @@ export default function HelpPage() {
       </div>
       <div className="flex-1 min-h-0 flex flex-col px-3 sm:px-6 pb-3">
       {/* ── TABS ──────────────────────────────────────────────────────── */}
-      <Tabs defaultValue="modules" className="flex-1 min-h-0 flex flex-col w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 min-h-0 flex flex-col w-full">
         <TabsList className="flex flex-wrap h-auto gap-1 mb-0 shrink-0 pb-3">
           <TabsTrigger value="modules" className="text-xs"><BookOpen className="h-3.5 w-3.5 mr-1.5" />Module Guide</TabsTrigger>
           <TabsTrigger value="shortcuts" className="text-xs"><Keyboard className="h-3.5 w-3.5 mr-1.5" />Shortcuts</TabsTrigger>
@@ -865,8 +881,8 @@ export default function HelpPage() {
                 </CardContent>
               </Card>
 
-              {/* Employee → Admin message */}
-              {isEmployee && (
+              {/* Any non-admin user → Admin message */}
+              {canContactAdmin && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base flex items-center gap-2">
@@ -903,8 +919,8 @@ export default function HelpPage() {
             </div>
 
             <div className="space-y-4">
-              {/* Inbox from Admin (employee only) */}
-              {isEmployee && <InboxFromAdmin />}
+              {/* Inbox from Admin (any non-admin user) */}
+              {canContactAdmin && <InboxFromAdmin />}
 
               {/* Admin — Employee messages inbox */}
               {isAdmin && (
@@ -979,7 +995,7 @@ export default function HelpPage() {
                             {replyTo?.id === msg._id && (
                               <div className="mt-2 pt-2 border-t space-y-2">
                                 <Textarea
-                                  placeholder={`Reply to ${msg.actor}…`}
+                                  placeholder={`Reply to ${msg.fromUsername}…`}
                                   className="min-h-[80px] text-sm"
                                   value={replyText}
                                   onChange={(e) => setReplyText(e.target.value)}
@@ -998,7 +1014,7 @@ export default function HelpPage() {
                                     size="sm"
                                     className="h-7 text-xs"
                                     disabled={!replyText.trim() || replyMutation.isPending}
-                                    onClick={() => replyMutation.mutate({ toUsername: msg.actor, body: replyText })}
+                                    onClick={() => replyMutation.mutate({ toUsername: msg.fromUsername, body: replyText })}
                                     data-testid={`button-send-reply-${msg._id}`}
                                   >
                                     {replyMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Send className="h-3 w-3 mr-1" />}
@@ -1051,6 +1067,8 @@ export default function HelpPage() {
 function InboxFromAdmin() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const [replyToId, setReplyToId] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
   const { data, isLoading } = useQuery<{ success: boolean; data: any[] }>({
     queryKey: ["/api/messages"],
   });
@@ -1063,6 +1081,23 @@ function InboxFromAdmin() {
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["/api/messages"] }); },
     onError: (err: Error) => toast({ title: "Failed", description: err.message, variant: "destructive" }),
+  });
+
+  const replyMutation = useMutation({
+    mutationFn: async ({ subject, body }: { subject: string; body: string }) => {
+      // Non-privileged users always route to the admin group (server forces the
+      // "admin" sentinel recipient), so the whole admin team sees the reply.
+      const res = await apiRequest("POST", "/api/messages", { toUsername: "admin", subject, body });
+      return res.json();
+    },
+    onSuccess: () => {
+      setReplyToId(null);
+      setReplyText("");
+      queryClient.invalidateQueries({ queryKey: ["/api/messages"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+      toast({ title: "Reply sent", description: "Your reply has been sent to the admin team." });
+    },
+    onError: (err: Error) => toast({ title: "Failed to send reply", description: err.message, variant: "destructive" }),
   });
 
   if (isLoading || messages.length === 0) return null;
@@ -1078,15 +1113,14 @@ function InboxFromAdmin() {
             </Badge>
           )}
         </CardTitle>
-        <CardDescription>Internal messages sent to you by the admin team.</CardDescription>
+        <CardDescription>Internal messages sent to you by the admin team. Click Reply to respond.</CardDescription>
       </CardHeader>
-      <CardContent className="space-y-2 max-h-[300px] overflow-y-auto">
+      <CardContent className="space-y-2 max-h-[360px] overflow-y-auto">
         {messages.map((msg: any) => (
           <div
             key={msg._id}
-            className={`border rounded-lg p-3.5 space-y-1.5 cursor-pointer transition-colors ${msg.isRead ? "opacity-60" : "border-primary/40 bg-primary/5"}`}
+            className={`border rounded-lg p-3.5 space-y-1.5 transition-colors ${msg.isRead ? "opacity-80" : "border-primary/40 bg-primary/5"}`}
             data-testid={`msg-from-admin-${msg._id}`}
-            onClick={() => !msg.isRead && markReadMutation.mutate(msg._id)}
           >
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
@@ -1096,7 +1130,69 @@ function InboxFromAdmin() {
               <span className="text-xs text-muted-foreground">{new Date(msg.createdAt).toLocaleString("en-PH")}</span>
             </div>
             <p className="text-sm">{msg.body}</p>
-            {!msg.isRead && <Badge className="text-[10px] bg-blue-500 text-white border-transparent">NEW</Badge>}
+            <div className="flex items-center gap-2 flex-wrap pt-0.5">
+              {!msg.isRead && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-6 text-xs px-2"
+                  onClick={() => markReadMutation.mutate(msg._id)}
+                  disabled={markReadMutation.isPending}
+                  data-testid={`button-mark-read-admin-${msg._id}`}
+                >
+                  <Clock className="h-3 w-3 mr-1" /> Mark Read
+                </Button>
+              )}
+              {msg.isRead && (
+                <Badge variant="secondary" className="text-xs">
+                  <CheckCircle className="h-3 w-3 mr-1" /> Read
+                </Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-xs px-2 text-blue-600 hover:text-blue-700"
+                onClick={() => {
+                  if (!msg.isRead) markReadMutation.mutate(msg._id);
+                  setReplyToId(msg._id);
+                  setReplyText("");
+                }}
+                data-testid={`button-reply-admin-${msg._id}`}
+              >
+                <Reply className="h-3 w-3 mr-1" /> Reply
+              </Button>
+            </div>
+            {replyToId === msg._id && (
+              <div className="mt-2 pt-2 border-t space-y-2">
+                <Textarea
+                  placeholder={`Reply to ${msg.fromUsername}…`}
+                  className="min-h-[80px] text-sm"
+                  value={replyText}
+                  onChange={(e) => setReplyText(e.target.value)}
+                  data-testid={`input-reply-admin-${msg._id}`}
+                />
+                <div className="flex gap-2 justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => { setReplyToId(null); setReplyText(""); }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={!replyText.trim() || replyMutation.isPending}
+                    onClick={() => replyMutation.mutate({ subject: `Re: ${msg.subject || "Admin message"}`, body: replyText })}
+                    data-testid={`button-send-reply-admin-${msg._id}`}
+                  >
+                    {replyMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Send className="h-3 w-3 mr-1" />}
+                    Send Reply
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </CardContent>

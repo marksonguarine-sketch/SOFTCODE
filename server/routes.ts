@@ -4069,10 +4069,12 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const username = req.user!.username;
       const role = req.user!.role;
+      // SUPERADMIN sees everything targeted at ADMINs too (superset of ADMIN).
+      const roleTargets = role === "SUPERADMIN" ? ["SUPERADMIN", "ADMIN"] : [role];
       const docs = await Notification.find({
         $or: [
           { recipientUsername: username },
-          { recipientRole: role },
+          { recipientRole: { $in: roleTargets } },
           { recipientUsername: "", recipientRole: "" },
         ],
       })
@@ -4103,11 +4105,13 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     try {
       const username = req.user!.username;
       const role = req.user!.role;
+      // SUPERADMIN sees everything targeted at ADMINs too (superset of ADMIN).
+      const roleTargets = role === "SUPERADMIN" ? ["SUPERADMIN", "ADMIN"] : [role];
       await Notification.updateMany(
         {
           $or: [
             { recipientUsername: username },
-            { recipientRole: role },
+            { recipientRole: { $in: roleTargets } },
             { recipientUsername: "", recipientRole: "" },
           ],
           readBy: { $ne: username },
@@ -5142,7 +5146,7 @@ ${JSON.stringify(fullData, null, 0)}`;
           category: "SYSTEM",
           title: `New message from Admin`,
           body: subject || body.slice(0, 80),
-          link: "/help",
+          link: "/help?tab=support",
           recipientUsername: recipient,
           recipientRole: "",
           readBy: [],
@@ -5158,7 +5162,7 @@ ${JSON.stringify(fullData, null, 0)}`;
           category: "SYSTEM",
           title: `New message from ${me}`,
           body: subject || body.slice(0, 80),
-          link: "/help",
+          link: "/help?tab=support",
           recipientUsername: "",
           recipientRole: "ADMIN",
           readBy: [],

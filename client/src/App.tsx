@@ -151,7 +151,7 @@ function AuthenticatedLayout() {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
 
   // Global Socket.io listeners — TTS + toast for assignment events
-  useSocketNotifications({ username: user?.username || "", enabled: !!user });
+  useSocketNotifications({ username: user?.username || "", enabled: !!user, isAdmin });
   const calcUsername = user?.username || "";
   const [showTutorialPrompt, setShowTutorialPrompt] = useState(false);
   const [dontShowAgain, setDontShowAgain] = useState(false);

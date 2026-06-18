@@ -9,7 +9,7 @@ export interface AuthRequest extends Request {
   user?: {
     _id: string;
     username: string;
-    role: "ADMIN" | "EMPLOYEE" | "INVENTORY_MANAGER";
+    role: "ADMIN" | "EMPLOYEE" | "INVENTORY_MANAGER" | "SUPERADMIN";
   };
 }
 
@@ -110,7 +110,8 @@ export async function authMiddleware(req: AuthRequest, res: Response, next: Next
 }
 
 export function adminOnly(req: AuthRequest, res: Response, next: NextFunction) {
-  if (req.user?.role !== "ADMIN") {
+  // SUPERADMIN is a superset of ADMIN — anything an admin can do, a superadmin can too.
+  if (req.user?.role !== "ADMIN" && req.user?.role !== "SUPERADMIN") {
     return res.status(403).json({ success: false, error: "Admin access required" });
   }
   next();
